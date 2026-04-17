@@ -1,0 +1,9 @@
+{
+  "name": "Capstone_DaydreamGroupProject",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "pnpm --recursive --parallel run dev",
+    "build": "pnpm --recursive run build"
+  },
+  "packageManager": "pnpm@10.33.0"
+}
