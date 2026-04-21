@@ -16,5 +16,13 @@
     "prisma": "^7.7.0",
     "ts-node": "^10.9.2",
     "typescript": "^6.0.3"
+  },
+  "dependencies": {
+    "@nestjs/passport": "^11.0.5",
+    "@supabase/supabase-js": "^2.104.0",
+    "jsonwebtoken": "^9.0.3",
+    "jwks-rsa": "^4.0.1",
+    "passport": "^0.7.0",
+    "passport-jwt": "^4.0.1"
   }
 }
