@@ -9,13 +9,13 @@ export class SupabaseStrategy extends PassportStrategy(Strategy) {
         super({
             jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
             ignoreExpiration: false,
-            _secretOrKeyProvider: passportJwtSecret({
+            secretOrKeyProvider: passportJwtSecret({
                 cache: true,
                 rateLimit: true,
                 jwksRequestsPerMinute: 5,
-                jwksUri: `https://YOUR_PROJECT_ID.supabase.co/auth/v1/.well-known/jwks.json`, // PUT THE ACTUAL PROJECT URL HERE
+                jwksUri: `https://${process.env.SUPABASE_PROJECT_ID}.supabase.co/auth/v1/.well-known/jwks.json`,
             }),
-            algorithms: ['RS256'], // Supabase uses RS256 for asymmetric keys
+            algorithms: ['RS256'],
         });
     }
 
