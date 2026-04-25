@@ -1,4 +1,6 @@
 node_modules/
+.env
 dist/
 .next/
-pnpm-state/v10/files/d8/b5179b2a28f6b788b177b13390b5cebd48525aca8923f0415f6eecb2bd6fbf9671de021908360da141953e6106c995c5e5dedac55bdbf43fdd50e7bcd82975
+pnpm-state/
+.pnpm-store/
