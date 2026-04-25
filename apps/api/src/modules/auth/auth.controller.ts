@@ -22,12 +22,14 @@ export class AuthController {
         supabaseId: supabaseId,
         google_access_token: google_access_token,
         google_refresh_token: google_refresh_token,
+        google_connected: true
       },
       create: {
         email: email,
         supabaseId: supabaseId,
         google_access_token: google_access_token,
         google_refresh_token: google_refresh_token,
+        google_connected: true
       },
     });
 
