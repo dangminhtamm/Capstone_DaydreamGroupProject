@@ -9,11 +9,12 @@ export class AuthController {
   @Post('sync')
   async syncSupabaseUser(
     @Req() req,
-    @Body() body: { google_access_token?: string, google_refresh_token?: string }
+    @Body() body: { google_access_token?: string, google_refresh_token?: string, display_name?: string }
   ) {
     const supabaseId = req.user.userId;
     const email = req.user.email;
-    const { google_access_token, google_refresh_token } = body;
+    const { google_access_token, google_refresh_token, display_name } = body;
+
     const user = await prisma.user.upsert({
       where: {
         email: email
@@ -22,14 +23,16 @@ export class AuthController {
         supabaseId: supabaseId,
         google_access_token: google_access_token,
         google_refresh_token: google_refresh_token,
-        google_connected: true
+        google_connected: true,
+        display_name: display_name,
       },
       create: {
         email: email,
         supabaseId: supabaseId,
         google_access_token: google_access_token,
         google_refresh_token: google_refresh_token,
-        google_connected: true
+        google_connected: true,
+        display_name: display_name,
       },
     });
 
