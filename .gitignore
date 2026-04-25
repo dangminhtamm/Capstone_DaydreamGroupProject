@@ -4,4 +4,3 @@ dist/
 .next/
 pnpm-state/
 .pnpm-store/
-packages/db/.env
