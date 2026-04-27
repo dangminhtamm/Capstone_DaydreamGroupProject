@@ -1,4 +1,22 @@
+# Dependencies
 node_modules/
+
+# Env (protect secrets)
 .env
+.env.*
+!.env.example
+
+# Build outputs
 dist/
 .next/
+out/
+build/
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+
+# Prisma
+prisma/generated/

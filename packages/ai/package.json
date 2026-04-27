@@ -1,6 +1,19 @@
 {
   "name": "@second-brain/ai",
   "version": "1.0.0",
+  "type": "module",
   "main": "src/index.ts",
-  "types": "src/index.ts"
+  "types": "src/index.ts",
+  "scripts": {
+    "test:chunker": "node --env-file=.env --experimental-strip-types scripts/test-chunker.ts",
+    "test": "node --env-file=.env --experimental-strip-types --test src/*.test.ts",
+    "test:embedding": "node --env-file=.env --experimental-strip-types scripts/test-embedding.ts",
+    "test:embedding:gemini": "node --env-file=.env --experimental-strip-types scripts/test-embedding-gemini.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1"
+  }
 }

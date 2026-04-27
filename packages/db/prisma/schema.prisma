@@ -1,0 +1,162 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider        = "prisma-client-js"
+  output          = "./generated/client"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  extensions = [vector] // Enables pgvector extension
+}
+
+// schema.prisma
+
+model CalendarEvent {
+  id          String   @id @default(uuid())
+  user_id     String
+  external_id String   @unique // Google Calendar Event ID
+  title       String
+  start_time  DateTime
+  end_time    DateTime
+
+  // Linking logic: Tie this event to a specific diary entry
+  diary_entry_id String?
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  // Relations
+  user        User        @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  diary_entry DiaryEntry? @relation(fields: [diary_entry_id], references: [id], onDelete: SetNull)
+
+  @@map("calendar_events")
+}
+
+model Summary {
+  id           String   @id @default(uuid())
+  user_id      String
+  summary_type String // 'daily', 'weekly', 'monthly', 'yearly'
+  period_start DateTime
+  period_end   DateTime
+  content      String   @db.Text
+
+  created_at DateTime @default(now())
+
+  // Relations
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("summaries")
+}
+
+model EntityMention {
+  id           String @id @default(uuid())
+  chunk_id     String
+  entity_type  String // e.g., 'person', 'project', 'goal', 'habit'
+  entity_value String
+
+  created_at DateTime @default(now())
+
+  // Relations
+  chunk MemoryChunk @relation(fields: [chunk_id], references: [id], onDelete: Cascade)
+
+  @@map("entity_mentions")
+}
+
+model GmailMessage {
+  id          String @id @default(uuid())
+  user_id     String
+  external_id String @unique // Gmail Message/Thread ID
+  sender      String
+  subject     String
+  body        String @db.Text
+
+  created_at DateTime @default(now())
+
+  // Relations
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("gmail_messages")
+}
+
+// Update your User model to include these relations
+model User {
+  id               String  @id @default(uuid())
+  supabaseId       String  @unique @db.Uuid // Links to auth.users in Supabase
+  email            String  @unique
+  display_name     String?
+  google_connected Boolean @default(false) // Tracks OAuth status
+
+  // OAuth Tokens (Needed for your calendar/gmail sync jobs)
+  google_access_token  String?
+  google_refresh_token String?
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  // Relations
+  diary_entries   DiaryEntry[]
+  memory_chunks   MemoryChunk[]
+  summaries       Summary[]
+  calendar_events CalendarEvent[]
+  gmail_messages  GmailMessage[]
+
+  @@map("users")
+}
+
+model DiaryEntry {
+  id         String   @id @default(uuid())
+  user_id    String
+  entry_date DateTime @default(now())
+  raw_text   String   @db.Text
+  status     String   @default("draft") // e.g., draft, published
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  // Relations
+  user            User            @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  attachments     Attachment[]
+  calendar_events CalendarEvent[] // Linked events from your matching logic
+
+  @@map("diary_entries")
+}
+
+model Attachment {
+  id             String  @id @default(uuid())
+  diary_entry_id String
+  storage_path   String
+  file_type      String
+  extracted_text String? @db.Text
+
+  created_at DateTime @default(now())
+
+  // Relations
+  diary_entry DiaryEntry @relation(fields: [diary_entry_id], references: [id], onDelete: Cascade)
+
+  @@map("attachments")
+}
+
+model MemoryChunk {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  sourceType String   @map("source_type") // e.g., 'diary', 'calendar', 'gmail', 'attachment'
+  sourceId   String   @map("source_id") // ID of the original record
+  chunkType  String   @default("general_note") @map("chunk_type")
+  text       String   @db.Text
+  metadata   Json?
+  embedding  Unsupported("vector(768)")?
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at")
+
+  // Relations
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  entity_mentions EntityMention[]
+
+  @@index([userId, sourceType, sourceId], map: "memory_chunks_user_source_idx")
+  @@map("memory_chunks")
+}
