@@ -1,0 +1,21 @@
+[33m471d9dc7[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mbackend-Thang[m[33m)[m HEAD@{0}: reset: moving to 471d9dc75183b8fa7efc2756ba4e8f84e99ac8b2
+[33m3af96e3b[m[33m ([m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m HEAD@{1}: pull origin main: Fast-forward
+[33m471d9dc7[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mbackend-Thang[m[33m)[m HEAD@{2}: reset: moving to HEAD
+[33m471d9dc7[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mbackend-Thang[m[33m)[m HEAD@{3}: commit: add display_name in auth.controller
+[33m693626cc[m HEAD@{4}: commit: fix google authentication jwt
+[33ma7a8e51c[m HEAD@{5}: commit: finish authentication supabase JWT
+[33mbf331ab0[m HEAD@{6}: commit: inititalizing the google supabase auth
+[33mdf4d0f14[m[33m ([m[1;32mbackend[m[33m)[m HEAD@{7}: checkout: moving from backend to backend-Thang
+[33mdf4d0f14[m[33m ([m[1;32mbackend[m[33m)[m HEAD@{8}: rebase (finish): returning to refs/heads/backend
+[33mdf4d0f14[m[33m ([m[1;32mbackend[m[33m)[m HEAD@{9}: rebase (start): checkout 1b2081a3dcf8b7d0cedeceb92276e5b868830c66^
+[33m1b2081a3[m HEAD@{10}: revert: Revert "fix database prisma"
+[33mdf4d0f14[m[33m ([m[1;32mbackend[m[33m)[m HEAD@{11}: reset: moving to HEAD
+[33mdf4d0f14[m[33m ([m[1;32mbackend[m[33m)[m HEAD@{12}: reset: moving to HEAD
+[33mdf4d0f14[m[33m ([m[1;32mbackend[m[33m)[m HEAD@{13}: reset: moving to df4d0f14e86202eaae69542c1aad9a118dbf3341
+[33mdf4d0f14[m[33m ([m[1;32mbackend[m[33m)[m HEAD@{14}: reset: moving to df4d0f14e86202eaae69542c1aad9a118dbf3341
+[33mdf4d0f14[m[33m ([m[1;32mbackend[m[33m)[m HEAD@{15}: reset: moving to HEAD
+[33mdf4d0f14[m[33m ([m[1;32mbackend[m[33m)[m HEAD@{16}: reset: moving to HEAD
+[33mdf4d0f14[m[33m ([m[1;32mbackend[m[33m)[m HEAD@{17}: reset: moving to HEAD
+[33mdf4d0f14[m[33m ([m[1;32mbackend[m[33m)[m HEAD@{18}: commit: fix database prisma
+[33md43a4f56[m HEAD@{19}: checkout: moving from main to backend
+[33m0f9a05ab[m[33m ([m[1;32mmain[m[33m)[m HEAD@{20}: clone: from https://github.com/dangminhtamm/Capstone_DaydreamGroupProject.git

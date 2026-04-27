@@ -23,6 +23,9 @@ model CalendarEvent {
   start_time  DateTime
   end_time    DateTime
 
+  description String?  @db.Text
+  html_link   String?
+
   // Linking logic: Tie this event to a specific diary entry
   diary_entry_id String?
 
