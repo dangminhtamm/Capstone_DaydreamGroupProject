@@ -1,0 +1,16 @@
+{
+  "name": "@second-brain/search",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "ts-node main.ts",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@second-brain/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "ts-node": "^10.9.2",
+    "typescript": "^5.0.0"
+  }
+}
