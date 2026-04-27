@@ -3,3 +3,5 @@ dist/
 .next/
 pnpm-state/
 .pnpm-store/
+pnpm-cache/
+.env
