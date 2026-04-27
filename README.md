@@ -78,3 +78,59 @@ npm install
 * Do not push directly to `main`
 * Use feature branches: `feature/<task-name>`
 * Keep shared data contracts in `packages/shared`
+
+---
+
+## Frontend Target Structure (Added)
+
+```text
+apps/
+├── search/
+│   └── main.ts                  # API nhận câu hỏi AI (placeholder)
+├── web/                         # Frontend chính (Next.js App Router)
+│   └── src/
+│       ├── app/                 # Dashboard, Diary, Timeline, Search
+│       ├── components/          # UI components
+│       └── lib/                 # API client + mock data
+└── worker/
+    └── src/
+        ├── jobs/
+        │   ├── sync-calendar/
+        │   └── summarize/
+        └── index.ts
+
+packages/
+├── db/
+│   ├── prisma/
+│   └── src/
+├── ai/
+│   └── src/
+│       ├── chunking/
+│       ├── embeddings/
+│       └── prompts/
+└── shared/
+    └── src/
+        ├── types/
+        └── utils/
+```
+
+## Week 1 Frontend Deliverables (Duc Anh)
+
+- Setup `apps/web` with `src/app`, `src/components`, `src/lib`
+- Build `Diary input UI`
+- Build `Timeline UI` with mock data
+- Provide smooth demo flow between dashboard, diary, timeline
+
+## Run Locally (Frontend-focused)
+
+```bash
+pnpm install
+pnpm --filter web dev
+```
+
+Optional:
+
+```bash
+pnpm --filter @second-brain/worker dev
+pnpm --filter @second-brain/search dev
+```
