@@ -10,10 +10,15 @@ export {
   createDefaultEmbeddingProvider,
   getEmbeddingProviderName,
 } from "./embedding.ts";
+export { processQuery } from "./query-processor.ts";
 export type {
   ChunkedMemoryChunk,
   ChunkingOptions,
   EmbeddingProvider,
   MemoryChunk,
   MemoryChunkMetadata,
+  QueryResult,
+  SearchFn,
+  SearchResult,
 } from "./types.ts";
+
