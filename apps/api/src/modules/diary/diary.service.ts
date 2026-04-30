@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service'; // Adjust path based on your setup
+import { PrismaService } from '../../prisma/prisma.service'; // Adjust path based on your setup
 import { CreateDiaryDto } from './dto/create-diary.dto';
 
 @Injectable()
