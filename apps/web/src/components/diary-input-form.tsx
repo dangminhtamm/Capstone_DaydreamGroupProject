@@ -1,26 +1,38 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { IDiaryDraft } from "@second-brain/shared";
+import { useAuth } from "@/contexts/AuthContext";
+import { createDiaryEntry, type CreateDiaryPayload } from "@/lib/api-client";
+
+type MoodType = "GREAT" | "GOOD" | "NEUTRAL" | "BAD" | "TERRIBLE";
+
+type DiaryDraft = {
+  title: string;
+  content: string;
+  mood: MoodType;
+};
 
 type SaveState = "idle" | "saving" | "success" | "error";
 
-const initialDraft: IDiaryDraft = {
+const initialDraft: DiaryDraft = {
   title: "",
   content: "",
-  mood: "good",
+  mood: "GOOD",
 };
 
 export function DiaryInputForm() {
-  const [draft, setDraft] = useState<IDiaryDraft>(initialDraft);
+  const { getAccessToken, isAuthenticated } = useAuth();
+  const [draft, setDraft] = useState<DiaryDraft>(initialDraft);
   const [state, setState] = useState<SaveState>("idle");
+  const [errorMessage, setErrorMessage] = useState<string>("");
 
   const canSubmit = useMemo(() => {
-    return draft.title.trim().length > 0 && draft.content.trim().length > 0;
-  }, [draft]);
+    return draft.title.trim().length > 0 && draft.content.trim().length > 0 && isAuthenticated;
+  }, [draft, isAuthenticated]);
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setErrorMessage("");
 
     if (!canSubmit) {
       return;
@@ -29,11 +41,19 @@ export function DiaryInputForm() {
     setState("saving");
 
     try {
-      await new Promise((resolve) => setTimeout(resolve, 700));
+      const accessToken = getAccessToken();
+      const payload: CreateDiaryPayload = {
+        title: draft.title.trim(),
+        content: draft.content.trim(),
+        mood: draft.mood,
+      };
+
+      await createDiaryEntry(payload, accessToken);
       setState("success");
       setDraft(initialDraft);
-    } catch {
+    } catch (error) {
       setState("error");
+      setErrorMessage(error instanceof Error ? error.message : "Failed to save diary entry");
     }
   }
 
@@ -61,13 +81,14 @@ export function DiaryInputForm() {
           className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
           value={draft.mood}
           onChange={(event) =>
-            setDraft((prev) => ({ ...prev, mood: event.target.value as IDiaryDraft["mood"] }))
+            setDraft((prev) => ({ ...prev, mood: event.target.value as MoodType }))
           }
         >
-          <option value="great">Great</option>
-          <option value="good">Good</option>
-          <option value="neutral">Neutral</option>
-          <option value="bad">Bad</option>
+          <option value="GREAT">Great</option>
+          <option value="GOOD">Good</option>
+          <option value="NEUTRAL">Neutral</option>
+          <option value="BAD">Bad</option>
+          <option value="TERRIBLE">Terrible</option>
         </select>
       </div>
 
@@ -94,8 +115,9 @@ export function DiaryInputForm() {
           {state === "saving" ? "Saving..." : "Save Diary"}
         </button>
 
-        {state === "success" && <p className="text-sm text-emerald-600">Saved (mock).</p>}
-        {state === "error" && <p className="text-sm text-rose-600">Save failed.</p>}
+        {state === "success" && <p className="text-sm text-emerald-600">Diary saved successfully!</p>}
+        {state === "error" && <p className="text-sm text-rose-600">{errorMessage || "Save failed."}</p>}
+        {!isAuthenticated && <p className="text-sm text-amber-600">Please login to save diary entries.</p>}
       </div>
     </form>
   );
