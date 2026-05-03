@@ -1,7 +1,18 @@
-import { formatDateTime, type IDiaryEntry } from "@second-brain/shared";
+import { formatDateTime } from "@second-brain/shared";
+
+type MoodType = "GREAT" | "GOOD" | "NEUTRAL" | "BAD" | "TERRIBLE" | "great" | "good" | "neutral" | "bad";
+
+type DiaryEntry = {
+  id: string;
+  title: string;
+  content: string;
+  mood: MoodType;
+  createdAt: Date | string;
+  updatedAt?: Date | string;
+};
 
 type TimelineListProps = {
-  entries: IDiaryEntry[];
+  entries: DiaryEntry[];
 };
 
 const moodConfig = {
@@ -47,6 +58,11 @@ const moodConfig = {
   },
 };
 
+function getMoodConfig(mood: MoodType) {
+  const upperMood = mood.toUpperCase() as keyof typeof moodConfig;
+  return moodConfig[upperMood] || moodConfig.NEUTRAL;
+}
+
 export function TimelineList({ entries }: TimelineListProps) {
   return (
     <div className="relative">
@@ -55,7 +71,7 @@ export function TimelineList({ entries }: TimelineListProps) {
       
       <ul className="space-y-6">
         {entries.map((entry, index) => {
-          const mood = moodConfig[entry.mood as keyof typeof moodConfig] || moodConfig.NEUTRAL;
+          const mood = getMoodConfig(entry.mood);
           
           return (
             <li key={entry.id} className="relative pl-14">
