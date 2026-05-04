@@ -1,11 +1,11 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
-// Types
+// Types - match backend DTO
 export type DiaryEntry = {
   id: string;
   title: string;
   content: string;
-  mood: 'GREAT' | 'GOOD' | 'NEUTRAL' | 'BAD' | 'TERRIBLE';
+  attachments?: string[];
   createdAt: string;
   updatedAt: string;
   userId: string;
@@ -14,7 +14,7 @@ export type DiaryEntry = {
 export type CreateDiaryPayload = {
   title: string;
   content: string;
-  mood: string;
+  attachments?: string[];
 };
 
 export type ApiError = {

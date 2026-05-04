@@ -1,23 +1,28 @@
 'use client';
 
 import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react';
+import { useRouter } from 'next/navigation';
 import { createClient, type Session, type User, type SupabaseClient } from '@supabase/supabase-js';
 
 // Initialize Supabase client
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const hasSupabaseConfig = Boolean(supabaseUrl && supabaseAnonKey);
 
-const supabase: SupabaseClient = createClient(supabaseUrl, supabaseAnonKey);
+const supabase: SupabaseClient | null = hasSupabaseConfig
+  ? createClient(supabaseUrl!, supabaseAnonKey!)
+  : null;
 
 type AuthContextType = {
   user: User | null;
   session: Session | null;
   isLoading: boolean;
   isAuthenticated: boolean;
+  configError: string | null;
   signInWithGoogle: () => Promise<void>;
   signOut: () => Promise<void>;
   getAccessToken: () => string | null;
-  supabase: SupabaseClient;
+  supabase: SupabaseClient | null;
 };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -26,8 +31,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [configError, setConfigError] = useState<string | null>(
+    hasSupabaseConfig ? null : "Missing Supabase environment variables"
+  );
+  const router = useRouter();
 
   useEffect(() => {
+    if (!supabase) {
+      setIsLoading(false);
+      return;
+    }
+
     // Get initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
@@ -42,9 +56,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(session?.user ?? null);
         setIsLoading(false);
 
-        // Sync with backend on sign in
+        // Sync with backend on sign in (non-blocking, skip if backend unavailable)
         if (event === 'SIGNED_IN' && session) {
-          await syncWithBackend(session);
+          syncWithBackend(session).catch(() => {
+            // Silently ignore - backend may not be running
+          });
         }
       }
     );
@@ -81,21 +97,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signInWithGoogle = useCallback(async () => {
+    if (!supabase) {
+      setConfigError('Cannot sign in: Supabase env vars missing');
+      return;
+    }
+
+    const redirectUrl = typeof window !== 'undefined' 
+      ? `${window.location.origin}/` 
+      : 'http://localhost:3000/';
+
     await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
+        redirectTo: redirectUrl,
         queryParams: {
           access_type: 'offline',
           prompt: 'consent',
         },
-        scopes: 'https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/calendar.readonly',
+        scopes: 'https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email',
       },
     });
   }, []);
 
   const signOut = useCallback(async () => {
+    if (!supabase) {
+      return;
+    }
     await supabase.auth.signOut();
-  }, []);
+    router.push('/');
+  }, [router]);
 
   const getAccessToken = useCallback(() => {
     return session?.access_token ?? null;
@@ -106,6 +136,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     session,
     isLoading,
     isAuthenticated: !!user,
+    configError,
     signInWithGoogle,
     signOut,
     getAccessToken,

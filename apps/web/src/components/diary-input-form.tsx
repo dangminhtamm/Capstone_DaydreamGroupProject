@@ -4,12 +4,9 @@ import { useMemo, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { createDiaryEntry, type CreateDiaryPayload } from "@/lib/api-client";
 
-type MoodType = "GREAT" | "GOOD" | "NEUTRAL" | "BAD" | "TERRIBLE";
-
 type DiaryDraft = {
   title: string;
   content: string;
-  mood: MoodType;
 };
 
 type SaveState = "idle" | "saving" | "success" | "error";
@@ -17,7 +14,6 @@ type SaveState = "idle" | "saving" | "success" | "error";
 const initialDraft: DiaryDraft = {
   title: "",
   content: "",
-  mood: "GOOD",
 };
 
 export function DiaryInputForm() {
@@ -45,7 +41,6 @@ export function DiaryInputForm() {
       const payload: CreateDiaryPayload = {
         title: draft.title.trim(),
         content: draft.content.trim(),
-        mood: draft.mood,
       };
 
       await createDiaryEntry(payload, accessToken);
@@ -70,26 +65,6 @@ export function DiaryInputForm() {
           value={draft.title}
           onChange={(event) => setDraft((prev) => ({ ...prev, title: event.target.value }))}
         />
-      </div>
-
-      <div>
-        <label htmlFor="mood" className="mb-2 block text-sm font-medium text-slate-700">
-          Mood
-        </label>
-        <select
-          id="mood"
-          className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
-          value={draft.mood}
-          onChange={(event) =>
-            setDraft((prev) => ({ ...prev, mood: event.target.value as MoodType }))
-          }
-        >
-          <option value="GREAT">Great</option>
-          <option value="GOOD">Good</option>
-          <option value="NEUTRAL">Neutral</option>
-          <option value="BAD">Bad</option>
-          <option value="TERRIBLE">Terrible</option>
-        </select>
       </div>
 
       <div>
