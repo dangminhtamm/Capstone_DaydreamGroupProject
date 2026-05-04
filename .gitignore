@@ -5,3 +5,10 @@ pnpm-state/
 .pnpm-store/
 pnpm-cache/
 .env
+
+**/node_modules/
+**/dist/
+**/.next/
+**/.DS_Store
+*.zip
+*.log
