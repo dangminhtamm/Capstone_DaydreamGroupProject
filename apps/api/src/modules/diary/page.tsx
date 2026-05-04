@@ -1,1 +1,1 @@
-export { default } from "../../src/app/diary/page";
+export { default } from "../../modules/diary/page";
