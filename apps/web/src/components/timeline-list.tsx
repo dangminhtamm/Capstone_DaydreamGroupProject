@@ -1,3 +1,6 @@
+"use client";
+
+import { useMemo, useState } from "react";
 import { formatDateTime } from "@second-brain/shared";
 
 type DiaryEntry = {
@@ -13,14 +16,27 @@ type TimelineListProps = {
   entries: DiaryEntry[];
 };
 
+const PAGE_SIZE = 5;
+
 export function TimelineList({ entries }: TimelineListProps) {
+  const [currentPage, setCurrentPage] = useState(1);
+  const totalPages = Math.max(1, Math.ceil(entries.length / PAGE_SIZE));
+  const paginatedEntries = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return entries.slice(start, start + PAGE_SIZE);
+  }, [currentPage, entries]);
+
+  const goToPage = (page: number) => {
+    setCurrentPage(Math.min(Math.max(page, 1), totalPages));
+  };
+
   return (
     <div className="relative">
       {/* Timeline vertical line */}
       <div className="absolute left-[19px] top-8 bottom-8 w-0.5 bg-gradient-to-b from-slate-200 via-slate-300 to-slate-200" />
       
       <ul className="space-y-6">
-        {entries.map((entry, index) => (
+        {paginatedEntries.map((entry, index) => (
           <li key={entry.id} className="relative pl-14">
             {/* Timeline dot */}
             <div className="absolute left-0 top-6 w-10 h-10 rounded-full bg-indigo-500 shadow-lg flex items-center justify-center text-white font-bold border-4 border-white z-10">
@@ -102,6 +118,36 @@ export function TimelineList({ entries }: TimelineListProps) {
           </div>
           <h3 className="text-lg font-semibold text-slate-900 mb-2">No entries yet</h3>
           <p className="text-slate-500">Start by creating your first diary entry</p>
+        </div>
+      )}
+
+      {entries.length > PAGE_SIZE && (
+        <div className="mt-8 flex flex-col items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row">
+          <p className="text-sm text-slate-500">
+            Showing {(currentPage - 1) * PAGE_SIZE + 1}-
+            {Math.min(currentPage * PAGE_SIZE, entries.length)} of {entries.length} entries
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => goToPage(currentPage - 1)}
+              disabled={currentPage === 1}
+              className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Previous
+            </button>
+            <span className="text-sm font-medium text-slate-700">
+              Page {currentPage} of {totalPages}
+            </span>
+            <button
+              type="button"
+              onClick={() => goToPage(currentPage + 1)}
+              disabled={currentPage === totalPages}
+              className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Next
+            </button>
+          </div>
         </div>
       )}
     </div>

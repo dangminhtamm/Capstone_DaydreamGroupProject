@@ -6,16 +6,20 @@ export class SearchService {
   constructor(private prisma: PrismaService) {}
 
   async searchEntries(userId: string, query: string, limit: number = 10) {
-    return this.prisma.entry.findMany({
+    const user = await this.prisma.user.findUnique({
+      where: { supabaseId: userId },
+      select: { id: true },
+    });
+
+    if (!user) return [];
+
+    return this.prisma.diaryEntry.findMany({
       where: {
-        userId: userId,
-        OR: [
-          { title: { contains: query, mode: 'insensitive' } },
-          { content: { contains: query, mode: 'insensitive' } },
-        ],
+        user_id: user.id,
+        raw_text: { contains: query, mode: 'insensitive' },
       },
       take: limit,
-      orderBy: { createdAt: 'desc' },
+      orderBy: { created_at: 'desc' },
     });
   }
 }
