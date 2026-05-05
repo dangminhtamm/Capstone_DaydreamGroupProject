@@ -11,6 +11,7 @@ generator client {
 datasource db {
   provider   = "postgresql"
   extensions = [vector] // Enables pgvector extension
+  url      = env("DATABASE_URL")
 }
 
 // schema.prisma
