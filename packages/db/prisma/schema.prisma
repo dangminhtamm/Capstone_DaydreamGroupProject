@@ -27,15 +27,13 @@ model CalendarEvent {
   description String?  @db.Text
   html_link   String?
 
-  // Linking logic: Tie this event to a specific diary entry
-  diary_entry_id String?
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
   // Relations
   user        User        @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  diary_entry DiaryEntry? @relation(fields: [diary_entry_id], references: [id], onDelete: SetNull)
+  diary_entry DiaryEntry[]
 
   @@map("calendar_events")
 }
