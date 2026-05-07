@@ -1,12 +1,7 @@
-// packages/ai/src/chunker.ts
-import { generateText, Output } from "ai";
-import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import { SchemaType, type ResponseSchema } from "@google/generative-ai";
 import { z } from "zod";
-import type { MemoryChunkMetadata } from "./chunk-types.ts";
-
-const google = createGoogleGenerativeAI({
-  apiKey: process.env.GEMINI_API_KEY,
-});
+import { generateGeminiJson } from "./gemini-json.ts";
+import type { MemoryChunkMetadata } from "./types.ts";
 
 const SemanticChunkSchema = z.object({
   chunks: z.array(
@@ -28,6 +23,44 @@ const SemanticChunkSchema = z.object({
     }),
   ),
 });
+
+const GeminiSemanticChunkResponseSchema: ResponseSchema = {
+  type: SchemaType.OBJECT,
+  properties: {
+    chunks: {
+      type: SchemaType.ARRAY,
+      items: {
+        type: SchemaType.OBJECT,
+        properties: {
+          chunkType: {
+            type: SchemaType.STRING,
+            description:
+              "One of feedback, decision, action_item, reflection, event, general.",
+          },
+          text: { type: SchemaType.STRING },
+          evidence: {
+            type: SchemaType.STRING,
+            description: "Exact or near-exact source snippet from the diary.",
+          },
+          people: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
+          projects: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
+          tags: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
+          importance: { type: SchemaType.INTEGER },
+        },
+        required: [
+          "chunkType",
+          "text",
+          "evidence",
+          "people",
+          "projects",
+          "tags",
+          "importance",
+        ],
+      },
+    },
+  },
+  required: ["chunks"],
+};
 
 export async function generateSemanticChunks(
   rawText: string,
@@ -68,14 +101,11 @@ ${rawText}
 </diary>
 `.trim();
 
-  const { output } = await generateText({
-    model: google(process.env.GEMINI_CHUNK_MODEL ?? "gemini-1.5-pro"),
+  const output = await generateGeminiJson({
+    model: process.env.GEMINI_CHUNK_MODEL ?? "gemini-2.5-flash",
     prompt,
-    output: Output.object({
-      schema: SemanticChunkSchema,
-      name: "semantic_memory_chunks",
-      description: "Semantic chunks extracted from a diary entry for grounded retrieval",
-    }),
+    responseSchema: GeminiSemanticChunkResponseSchema,
+    validator: SemanticChunkSchema,
   });
 
   return output.chunks.map((chunk, index) => ({

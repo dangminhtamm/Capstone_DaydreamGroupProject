@@ -1,9 +1,21 @@
-import type { ChunkType } from "./chunk-types.ts";
+// packages/ai/src/types.ts
+export type ChunkType = 'feedback' | 'decision' | 'action_item' | 'reflection' | 'event' | 'general';
 
 export interface MemoryChunkMetadata {
   date: string | null;
-  sourceType: string;
+  sourceType: 'diary' | 'calendar' | 'gmail' | string;
   sourceId: string;
+  chunkIndex: number;      
+  chunkType: ChunkType;
+  people?: string[];       
+  projects?: string[];    
+  tags?: string[];
+  importance?: number;    
+  sourceTitle?: string;
+  sourceUrl?: string;
+  startOffset?: number;    
+  endOffset?: number;
+  calendarEventId?: string; 
 }
 
 export interface MemoryChunk {
@@ -32,4 +44,13 @@ export interface ChunkingOptions {
 
 export interface EmbeddingProvider {
   embed(text: string): Promise<number[]>;
+}
+
+export interface SemanticChunk {
+  text: string;
+  metadata: Partial<MemoryChunkMetadata>;
+}
+
+export interface MemoryDbClient {
+  $transaction<T>(fn: (tx: any) => Promise<T>): Promise<T>;
 }

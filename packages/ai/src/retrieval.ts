@@ -1,5 +1,4 @@
 // packages/ai/src/retrieval.ts
-// 1. SỬA: Chỉ import Prisma namespace để dùng Prisma.sql, bỏ import prisma instance
 import { Prisma } from "@second-brain/db";
 import { createDefaultEmbeddingProvider } from "./embedding.ts";
 
@@ -9,7 +8,7 @@ export interface RetrievalFilters {
   startDate?: Date;
   endDate?: Date;
   limit?: number;
-  maxDistance?: number; // cosine distance, lower is better (0.0 to 2.0)
+  maxDistance?: number; 
 }
 
 export interface MemorySearchHit {
@@ -28,7 +27,7 @@ export interface MemorySearchHit {
 export async function retrieveMemory(
   query: string,
   userId: string,
-  dbClient: any, // 2. SỬA: Inject dbClient vào qua tham số
+  dbClient: any, 
   filters: RetrievalFilters = {},
 ): Promise<MemorySearchHit[]> {
   if (!query.trim()) return [];
@@ -65,7 +64,6 @@ export async function retrieveMemory(
   const whereClause = Prisma.sql`WHERE ${Prisma.join(conditions, " AND ")}`;
 
   try {
-    // 3. SỬA: Dùng dbClient được truyền vào để chạy transaction
     return await dbClient.$transaction(async (tx: any) => {
       await tx.$executeRawUnsafe("SET LOCAL hnsw.ef_search = 80");
       await tx.$executeRawUnsafe(
@@ -99,7 +97,7 @@ export async function retrieveMemory(
       `;
     });
   } catch (error) {
-    console.error("Lỗi khi retrieve memory:", error);
+    console.error("Error when retrieve memory:", error);
     throw error;
   }
 }

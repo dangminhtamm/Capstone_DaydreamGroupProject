@@ -1,13 +1,8 @@
-// packages/ai/src/answer-memory.ts
-import { generateText, Output } from "ai";
-import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import { SchemaType, type ResponseSchema } from "@google/generative-ai";
 import { z } from "zod";
-import { retrieveMemory, type MemorySearchHit, type RetrievalFilters } from "./retrieval.js";
-import type { MemoryDbClient } from "./db-types.js";
-
-const google = createGoogleGenerativeAI({
-  apiKey: process.env.GEMINI_API_KEY,
-});
+import { generateGeminiJson } from "./gemini-json.ts";
+import { retrieveMemory, type MemorySearchHit, type RetrievalFilters } from "./retrieval.ts";
+import type { MemoryDbClient } from './types.ts';
 
 const MIN_TOP_SIMILARITY = Number(process.env.MEMORY_MIN_TOP_SIMILARITY ?? 0.65);
 const DEFAULT_MAX_DISTANCE = Number(process.env.MEMORY_MAX_DISTANCE ?? 0.35);
@@ -22,6 +17,35 @@ const GroundedAnswerSchema = z.object({
     }),
   ),
 });
+
+const GeminiGroundedAnswerResponseSchema: ResponseSchema = {
+  type: SchemaType.OBJECT,
+  properties: {
+    answer: { type: SchemaType.STRING },
+    confidence: {
+      type: SchemaType.STRING,
+      description: "One of high, medium, low.",
+    },
+    citations: {
+      type: SchemaType.ARRAY,
+      items: {
+        type: SchemaType.OBJECT,
+        properties: {
+          marker: {
+            type: SchemaType.STRING,
+            description: "Citation marker matching S1, S2, S3, etc.",
+          },
+          claim: {
+            type: SchemaType.STRING,
+            description: "The specific claim supported by this source.",
+          },
+        },
+        required: ["marker", "claim"],
+      },
+    },
+  },
+  required: ["answer", "confidence", "citations"],
+};
 
 export interface MemoryCitation {
   marker: string;
@@ -132,15 +156,12 @@ Rules:
 `.trim();
 
   try {
-    const { output } = await generateText({
-      model: google(process.env.GEMINI_ANSWER_MODEL ?? "gemini-2.5-flash"),
+    const output = await generateGeminiJson({
+      model: process.env.GEMINI_ANSWER_MODEL ?? "gemini-2.5-flash",
       prompt,
-      output: Output.object({
-        schema: GroundedAnswerSchema,
-        name: "grounded_memory_answer",
-        description:
-          "A grounded answer using only retrieved memory sources and citation markers.",
-      }),
+      responseSchema: GeminiGroundedAnswerResponseSchema,
+      validator: GroundedAnswerSchema,
+      temperature: 0.1,
     });
 
     const allowedMarkers = new Set(sources.map((source) => source.marker));

@@ -1,9 +1,11 @@
+import { loadLocalEnv } from "./env.ts";
 import {
   DEFAULT_EMBEDDING_DIMENSION,
   GEMINI_EMBEDDING_MODEL,
   createEmbeddingProvider,
-} from "../src/index.ts";
-import "dotenv/config";
+} from "../src/embedding.ts";
+
+loadLocalEnv();
 
 async function run(): Promise<void> {
   if (!process.env.GEMINI_API_KEY) {
