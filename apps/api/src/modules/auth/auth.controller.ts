@@ -1,9 +1,10 @@
 import { Controller, Post, Body, UseGuards, Req } from '@nestjs/common';
 import { JwtAuthGuard } from './jwt-auth.guard';
-import { prisma } from '@second-brain/db';
+import { PrismaService } from '../../prisma/prisma.service';
 
 @Controller('auth')
 export class AuthController {
+    private prisma: PrismaService
 
   @UseGuards(JwtAuthGuard)
   @Post('sync')
@@ -15,7 +16,7 @@ export class AuthController {
     const email = req.user.email;
     const { google_access_token, google_refresh_token, display_name } = body;
 
-    const user = await prisma.user.upsert({
+    const user = await this.prisma.user.upsert({
       where: {
         email: email
       },

@@ -1,6 +1,6 @@
-const { PrismaClient } = require('@prisma/client');
+import { prisma } from '@second-brain/db';
 
-const prisma = new PrismaClient();
+const prisma = new prisma();
 
 async function main() {
     //change to reference a table in your schema

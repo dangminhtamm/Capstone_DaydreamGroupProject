@@ -34,8 +34,8 @@ import { SearchService } from './modules/search/search.service';
   ],
   providers: [
     AppService,
+      PrismaService,
     DiaryService,
-    PrismaService,
     JwtAuthGuard,
     StorageService,
     SummaryService,

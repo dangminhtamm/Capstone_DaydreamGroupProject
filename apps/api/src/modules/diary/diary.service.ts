@@ -1,10 +1,10 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { PrismaService } from '../../prisma/prisma.service'; // Adjust path based on your setup
+import { PrismaService } from '../../prisma/prisma.service';
 import { CreateDiaryDto } from './dto/create-diary.dto';
 
 @Injectable()
 export class DiaryService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async create(userId: string, dto: CreateDiaryDto) {
     return this.prisma.entry.create({

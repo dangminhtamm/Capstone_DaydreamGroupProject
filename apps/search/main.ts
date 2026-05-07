@@ -19,3 +19,5 @@ export async function askAI(payload: SearchRequest): Promise<SearchResponse> {
     sources: ["diary:mock-entry-1", "calendar:mock-event-1"],
   };
 }
+
+//
