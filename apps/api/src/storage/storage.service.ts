@@ -5,8 +5,8 @@ import { createClient } from '@supabase/supabase-js';
 @Injectable()
 export class StorageService {
   private supabase = createClient(
-    process.env.SUPABASE_URL ?? '',
-    process.env.SUPABASE_SERVICE_KEY ?? '',
+    process.env.SUPABASE_URL !! '',
+    process.env.SUPABASE_SERVICE_KEY !! '',
   );
 
   async uploadFile(file: Express.Multer.File, bucket: string) {
