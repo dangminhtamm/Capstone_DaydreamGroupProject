@@ -12,7 +12,7 @@ import { Pool } from 'pg';
 
 // 1. Create a native Postgres connection pool
 const pool = new Pool({
-    connectionString: process.env.DATABASE_URL
+    connectionString: process.env.SUPABASE_URL
 });
 
 // 2. Wrap the pool in the Prisma adapter
