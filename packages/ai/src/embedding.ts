@@ -1,7 +1,8 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import type { EmbeddingProvider } from "./types.ts";
 
-export type EmbeddingProviderName = "mock" | "gemini";
+export type EmbeddingProviderName = "gemini";
+export type EmbeddingTask = "RETRIEVAL_DOCUMENT" | "RETRIEVAL_QUERY";
 
 async function retry<T>(fn: () => Promise<T>, retries = 3): Promise<T> {
   try {
@@ -15,8 +16,8 @@ async function retry<T>(fn: () => Promise<T>, retries = 3): Promise<T> {
       "status" in err &&
       err.status === 503
     ) {
-      console.warn("Retrying Gemini...");
-      await new Promise((r) => setTimeout(r, 1000));
+      console.warn("Retrying Gemini embedding request...");
+      await new Promise((resolve) => setTimeout(resolve, 1000));
       return retry(fn, retries - 1);
     }
 
@@ -24,32 +25,25 @@ async function retry<T>(fn: () => Promise<T>, retries = 3): Promise<T> {
   }
 }
 
+// Hàm chuẩn hóa Vector (Bắt buộc cho cosine distance của Gemini embedding)
+function normalize(values: number[]): number[] {
+  const norm = Math.hypot(...values);
+  if (!norm) return values;
+  return values.map((v) => v / norm);
+}
+
 export const DEFAULT_EMBEDDING_DIMENSION = 768;
-export const DEFAULT_EMBEDDING_PROVIDER: EmbeddingProviderName = "mock";
+export const DEFAULT_EMBEDDING_PROVIDER: EmbeddingProviderName = "gemini";
+
 export const GEMINI_EMBEDDING_MODEL =
   process.env.GEMINI_EMBEDDING_MODEL ?? "gemini-embedding-001";
 
-export class MockEmbeddingProvider implements EmbeddingProvider {
-  readonly dimension: number;
-
-  constructor(dimension: number = DEFAULT_EMBEDDING_DIMENSION) {
-    this.dimension = dimension;
-  }
-
-  async embed(text: string): Promise<number[]> {
-    const seed = Array.from(text).reduce(
-      (total, character, index) => total + character.charCodeAt(0) * (index + 1),
-      0
-    );
-
-    return Array.from({ length: this.dimension }, (_, index) => {
-      const value = ((seed + (index + 1) * 31) % 1000) / 1000;
-      return Number(value.toFixed(6));
-    });
-  }
+export interface AdvancedEmbeddingProvider extends EmbeddingProvider {
+  embedDocument(text: string): Promise<number[]>;
+  embedQuery(text: string): Promise<number[]>;
 }
 
-export class GeminiEmbeddingProvider implements EmbeddingProvider {
+export class GeminiEmbeddingProvider implements AdvancedEmbeddingProvider {
   private ai: GoogleGenerativeAI;
   readonly dimension = DEFAULT_EMBEDDING_DIMENSION;
 
@@ -57,13 +51,27 @@ export class GeminiEmbeddingProvider implements EmbeddingProvider {
     const key = apiKey ?? process.env.GEMINI_API_KEY;
 
     if (!key) {
-      throw new Error("GEMINI_API_KEY is required.");
+      throw new Error(
+        "GEMINI_API_KEY is required. Embeddings cannot run without a real provider."
+      );
     }
 
     this.ai = new GoogleGenerativeAI(key);
   }
 
-  async embed(text: string): Promise<number[]> {
+  async embedDocument(text: string): Promise<number[]> {
+    return this.embed(text, "RETRIEVAL_DOCUMENT");
+  }
+
+  async embedQuery(text: string): Promise<number[]> {
+    return this.embed(text, "RETRIEVAL_QUERY");
+  }
+
+  async embed(text: string, taskType: EmbeddingTask = "RETRIEVAL_DOCUMENT"): Promise<number[]> {
+    if (!text.trim()) {
+      throw new Error("Cannot embed empty text.");
+    }
+
     const model = this.ai.getGenerativeModel({
       model: GEMINI_EMBEDDING_MODEL,
     });
@@ -74,45 +82,49 @@ export class GeminiEmbeddingProvider implements EmbeddingProvider {
           role: "user",
           parts: [{ text }],
         },
+        taskType, 
         outputDimensionality: DEFAULT_EMBEDDING_DIMENSION,
       } as never)
     );
 
-    if (!result.embedding?.values?.length) {
+    const values = result.embedding?.values;
+
+    if (!values?.length) {
       throw new Error(
         `Gemini embedding request succeeded but returned no values for model "${GEMINI_EMBEDDING_MODEL}".`
       );
     }
 
-    if (result.embedding.values.length !== DEFAULT_EMBEDDING_DIMENSION) {
+    if (values.length !== DEFAULT_EMBEDDING_DIMENSION) {
       throw new Error(
-        `Gemini embedding dimension mismatch: expected ${DEFAULT_EMBEDDING_DIMENSION}, got ${result.embedding.values.length}.`
+        `Gemini embedding dimension mismatch: expected ${DEFAULT_EMBEDDING_DIMENSION}, got ${values.length}.`
       );
     }
 
-    return result.embedding.values;
+    return normalize(values);
   }
 }
 
 export function getEmbeddingProviderName(
   providerName: string | undefined = process.env.AI_EMBEDDING_PROVIDER
 ): EmbeddingProviderName {
-  return providerName === "gemini" ? "gemini" : "mock";
+  if (!providerName || providerName === "gemini") {
+    return "gemini";
+  }
+
+  throw new Error(
+    `Unsupported embedding provider "${providerName}". Only "gemini" is supported.`
+  );
 }
 
 export function createEmbeddingProvider(
   providerName?: string,
   apiKey?: string
-): EmbeddingProvider {
-  const resolvedProvider = getEmbeddingProviderName(providerName);
-
-  if (resolvedProvider === "gemini") {
-    return new GeminiEmbeddingProvider(apiKey);
-  }
-
-  return new MockEmbeddingProvider();
+): AdvancedEmbeddingProvider {
+  getEmbeddingProviderName(providerName);
+  return new GeminiEmbeddingProvider(apiKey);
 }
 
-export function createDefaultEmbeddingProvider(): EmbeddingProvider {
+export function createDefaultEmbeddingProvider(): AdvancedEmbeddingProvider {
   return createEmbeddingProvider();
 }

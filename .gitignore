@@ -1,5 +1,6 @@
 # Dependencies
 node_modules/
+**/node_modules/
 
 # Env (protect secrets)
 .env
@@ -11,12 +12,21 @@ dist/
 .next/
 out/
 build/
+**/dist/
+**/.next/
+
+# PNPM
+pnpm-state/
+.pnpm-store/
+pnpm-cache/
 
 # Logs
 *.log
 
-# OS
+# OS / archives
 .DS_Store
+**/.DS_Store
+*.zip
 
 # Prisma
 prisma/generated/

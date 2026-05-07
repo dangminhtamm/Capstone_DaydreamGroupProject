@@ -1,24 +1,33 @@
-export { CHUNK_TYPES, type ChunkType } from "./chunk-types.ts";
-export { chunkDiaryEntry, inferChunkType, splitIntoSentences } from "./chunker.ts";
+// packages/ai/src/index.ts
+export { type ChunkType, type MemoryChunkMetadata, type SemanticChunk } from "./types.ts";
+export { generateSemanticChunks } from "./chunker.ts";
+export { retrieveMemory, type RetrievalFilters } from "./retrieval.ts";
+export {
+  answerFromChunks,
+  answerMemory,
+  type AnswerMemoryOptions,
+  type AnswerMemoryResult,
+  type MemoryCitation,
+} from "./answer-memory.ts";
+export {
+  indexMemoryFromDiary,
+  type IndexedMemoryChunk,
+  type IndexMemoryFromDiaryInput,
+  type IndexMemoryFromDiaryResult,
+  type PersistedMemoryChunkPayload,
+} from "./memory-indexer.ts";
 export {
   DEFAULT_EMBEDDING_DIMENSION,
   DEFAULT_EMBEDDING_PROVIDER,
   GEMINI_EMBEDDING_MODEL,
   GeminiEmbeddingProvider,
-  MockEmbeddingProvider,
   createEmbeddingProvider,
   createDefaultEmbeddingProvider,
   getEmbeddingProviderName,
 } from "./embedding.ts";
-export { processQuery } from "./query-processor.ts";
 export type {
   ChunkedMemoryChunk,
   ChunkingOptions,
   EmbeddingProvider,
   MemoryChunk,
-  MemoryChunkMetadata,
-  QueryResult,
-  SearchFn,
-  SearchResult,
 } from "./types.ts";
-

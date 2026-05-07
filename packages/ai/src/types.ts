@@ -1,9 +1,21 @@
-import type { ChunkType } from "./chunk-types.ts";
+// packages/ai/src/types.ts
+export type ChunkType = 'feedback' | 'decision' | 'action_item' | 'reflection' | 'event' | 'general';
 
 export interface MemoryChunkMetadata {
   date: string | null;
-  sourceType: string;
+  sourceType: 'diary' | 'calendar' | 'gmail' | string;
   sourceId: string;
+  chunkIndex: number;      
+  chunkType: ChunkType;
+  people?: string[];       
+  projects?: string[];    
+  tags?: string[];
+  importance?: number;    
+  sourceTitle?: string;
+  sourceUrl?: string;
+  startOffset?: number;    
+  endOffset?: number;
+  calendarEventId?: string; 
 }
 
 export interface MemoryChunk {
@@ -34,32 +46,11 @@ export interface EmbeddingProvider {
   embed(text: string): Promise<number[]>;
 }
 
-/**
- * A single retrieved memory chunk, as returned by the vector search layer.
- * Intentionally mirrors `VectorSearchResult` from `packages/db` so that
- * the query processor can remain fully decoupled from the DB package.
- */
-export interface SearchResult {
-  id: string;
-  userId: string;
-  sourceType: string;
-  sourceId: string;
-  chunkType: ChunkType;
+export interface SemanticChunk {
   text: string;
-  metadata: Record<string, unknown>;
-  createdAt: Date;
-  /** Cosine similarity score [0, 1]. Higher = more relevant. */
-  similarity: number;
+  metadata: Partial<MemoryChunkMetadata>;
 }
 
-/** The final output of `processQuery` — a grounded answer with traceable sources. */
-export interface QueryResult {
-  /** The AI-generated answer, grounded in the retrieved chunks. */
-  answer: string;
-  /**
-   * The chunks that were used as context to generate the answer.
-   * Use these to render citations in the UI.
-   */
-  sources: SearchResult[];
+export interface MemoryDbClient {
+  $transaction<T>(fn: (tx: any) => Promise<T>): Promise<T>;
 }
-

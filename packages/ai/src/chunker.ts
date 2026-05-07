@@ -1,134 +1,124 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
-import { CHUNK_TYPES, type ChunkType } from "./chunk-types.ts";
-import type {
-  ChunkedMemoryChunk,
-  ChunkingOptions,
-  MemoryChunkMetadata,
-} from "./types.ts";
+import { SchemaType, type ResponseSchema } from "@google/generative-ai";
+import { z } from "zod";
+import { generateGeminiJson } from "./gemini-json.ts";
+import type { MemoryChunkMetadata } from "./types.ts";
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
-const model = genAI.getGenerativeModel({
-  model: process.env.GEMINI_TEXT_MODEL ?? "gemini-2.5-flash",
+const SemanticChunkSchema = z.object({
+  chunks: z.array(
+    z.object({
+      chunkType: z.enum([
+        "feedback",
+        "decision",
+        "action_item",
+        "reflection",
+        "event",
+        "general",
+      ]),
+      text: z.string().min(1),
+      evidence: z.string().min(1).describe("Exact or near-exact source snippet from the diary"),
+      people: z.array(z.string()).default([]),
+      projects: z.array(z.string()).default([]),
+      tags: z.array(z.string()).default([]),
+      importance: z.number().int().min(1).max(5),
+    }),
+  ),
 });
 
-function inferChunkTypeLocally(sentence: string): ChunkType {
-  const lowered = sentence.toLowerCase();
+const GeminiSemanticChunkResponseSchema: ResponseSchema = {
+  type: SchemaType.OBJECT,
+  properties: {
+    chunks: {
+      type: SchemaType.ARRAY,
+      items: {
+        type: SchemaType.OBJECT,
+        properties: {
+          chunkType: {
+            type: SchemaType.STRING,
+            description:
+              "One of feedback, decision, action_item, reflection, event, general.",
+          },
+          text: { type: SchemaType.STRING },
+          evidence: {
+            type: SchemaType.STRING,
+            description: "Exact or near-exact source snippet from the diary.",
+          },
+          people: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
+          projects: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
+          tags: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
+          importance: { type: SchemaType.INTEGER },
+        },
+        required: [
+          "chunkType",
+          "text",
+          "evidence",
+          "people",
+          "projects",
+          "tags",
+          "importance",
+        ],
+      },
+    },
+  },
+  required: ["chunks"],
+};
 
-  if (/\b(decided|agreed|approved|settled|chốt|quyết định)\b/.test(lowered)) {
-    return "decision";
-  }
-
-  if (/\b(met with|meeting|sync|discussed|standup|team|họp)\b/.test(lowered)) {
-    return "meeting_outcome";
-  }
-
-  if (/\b(feedback|concern|confused|asked for|suggested|góp ý|phản hồi)\b/.test(lowered)) {
-    return "feedback";
-  }
-
-  if (/\b(todo|need to|follow up|next step|action item|will do|phải|cần)\b/.test(lowered)) {
-    return "action_item";
-  }
-
-  if (/\b(finished|completed|shipped|implemented|drafted|sent|xong|hoàn thành)\b/.test(lowered)) {
-    return "task_update";
-  }
-
-  if (/\b(felt|feeling|worried|excited|calm|stressed|relieved|thoải mái|áp lực)\b/.test(lowered)) {
-    return "emotional_reflection";
-  }
-
-  return "general_note";
-}
-
-function normalizeSentence(text: string): string {
-  return text.replace(/\s+/g, " ").trim();
-}
-
-export function splitIntoSentences(text: string): string[] {
-  return text
-    .split(/\n+/)
-    .flatMap((line) => line.split(/(?<=[.!?])\s+/))
-    .map(normalizeSentence)
-    .filter(Boolean);
-}
-
-export async function inferChunkType(sentence: string): Promise<ChunkType> {
-  if (process.env.AI_CLASSIFIER_MODE === "local" || !process.env.GEMINI_API_KEY) {
-    return inferChunkTypeLocally(sentence);
-  }
+export async function generateSemanticChunks(
+  rawText: string,
+  baseMetadata: Pick<
+    MemoryChunkMetadata,
+    "date" | "sourceType" | "sourceId" | "sourceTitle"
+  >,
+) {
+  if (!rawText.trim()) return [];
 
   const prompt = `
-You are an expert text classification assistant.
-Categorize the following sentence (which may be in Vietnamese) into EXACTLY ONE of these categories:
+You are the Memory Chunker for a personal Second Brain system.
 
-- decision
-- meeting_outcome
-- feedback
-- action_item
-- task_update
-- emotional_reflection
-- general_note
+Goal:
+Split the diary into semantic memory chunks, not arbitrary character chunks.
 
-Sentence: "${sentence}"
+Allowed chunk types:
+- feedback: feedback received or given
+- decision: a decision, commitment, or agreement
+- action_item: a task or follow-up
+- reflection: emotion, self-reflection, personal insight
+- event: meeting, class, activity, appointment
+- general: useful fact that does not fit above
 
-Respond ONLY with ONE word from the list above. No explanation.
-`;
+Rules:
+- Every chunk must be grounded in the source diary.
+- Do not invent people, projects, dates, or outcomes.
+- Keep chunk text self-contained.
+- evidence must be copied or tightly paraphrased from the source.
+- If the diary has no useful memory, return an empty chunks array.
 
-  try {
-    const result = await model.generateContent(prompt);
+Base metadata:
+${JSON.stringify(baseMetadata, null, 2)}
 
-    const rawText = result.response.text();
-    const cleaned = rawText
-      .replace(/[`"]/g, "")
-      .trim()
-      .toLowerCase();
+Diary:
+<diary>
+${rawText}
+</diary>
+`.trim();
 
-    if (CHUNK_TYPES.includes(cleaned as ChunkType)) {
-      return cleaned as ChunkType;
-    }
+  const output = await generateGeminiJson({
+    model: process.env.GEMINI_CHUNK_MODEL ?? "gemini-2.5-flash",
+    prompt,
+    responseSchema: GeminiSemanticChunkResponseSchema,
+    validator: SemanticChunkSchema,
+  });
 
-    console.warn(
-      `[AI Warning] Invalid category returned: "${rawText}" -> Cleaned: "${cleaned}"`
-    );
-
-    return "general_note";
-  } catch (error) {
-    console.warn("AI Classification failed, falling back to local classifier:", error);
-    return inferChunkTypeLocally(sentence);
-  }
-}
-
-async function buildChunk(
-  sentence: string, 
-  options: ChunkingOptions
-): Promise<ChunkedMemoryChunk> {
-  const chunkType = await inferChunkType(sentence);
-
-  const sourceType = options.sourceType ?? "diary_entry";
-  const sourceId = options.sourceId ?? "unknown-source";
-  const metadata: MemoryChunkMetadata = {
-    date: options.date ?? null,
-    sourceType,
-    sourceId,
-  };
-
-  return {
-    chunkType,
-    text: sentence,
-    sourceType,
-    sourceId,
-    metadata,
-  };
-}
-
-export async function chunkDiaryEntry(
-  text: string,
-  options: ChunkingOptions = {}
-): Promise<ChunkedMemoryChunk[]> {
-  const sentences = splitIntoSentences(text);
-  
-  // Process all sentences concurrently
-  const chunkPromises = sentences.map((sentence) => buildChunk(sentence, options));
-  return Promise.all(chunkPromises);
+  return output.chunks.map((chunk, index) => ({
+    text: chunk.text,
+    evidence: chunk.evidence,
+    metadata: {
+      ...baseMetadata,
+      chunkIndex: index,
+      chunkType: chunk.chunkType,
+      people: chunk.people,
+      projects: chunk.projects,
+      tags: chunk.tags,
+      importance: chunk.importance,
+    } satisfies MemoryChunkMetadata,
+  }));
 }
