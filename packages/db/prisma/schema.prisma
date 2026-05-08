@@ -5,6 +5,7 @@
 
 generator client {
   provider        = "prisma-client-js"
+  output          = "./generated/client"
   previewFeatures = ["postgresqlExtensions"]
 }
 
@@ -23,7 +24,7 @@ model CalendarEvent {
   start_time  DateTime
   end_time    DateTime
 
-  description String?  @db.Text
+  description String? @db.Text
   html_link   String?
 
   // Linking logic: Tie this event to a specific diary entry
@@ -144,24 +145,21 @@ model Attachment {
 }
 
 model MemoryChunk {
-  id          String   @id @default(uuid()) @db.Uuid
-  user_id     String   @db.Uuid
-  source_type String
-  source_id   String
-  chunk_index Int
-  chunk_type  String
-  text        String   @db.Text
-  evidence    String?  @db.Text
-  metadata    Json?
-  occurred_at DateTime
-  embedding   Unsupported("vector(768)")?
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  sourceType String   @map("source_type") // e.g., 'diary', 'calendar', 'gmail', 'attachment'
+  sourceId   String   @map("source_id") // ID of the original record
+  chunkType  String   @default("general_note") @map("chunk_type")
+  text       String   @db.Text
+  metadata   Json?
+  embedding  Unsupported("vector(768)")?
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at")
 
-  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  // Relations
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  entity_mentions EntityMention[]
 
-  @@unique([user_id, source_type, source_id, chunk_index])
-  @@index([user_id, occurred_at])
-  @@index([user_id, source_type, chunk_type])
+  @@index([userId, sourceType, sourceId], map: "memory_chunks_user_source_idx")
   @@map("memory_chunks")
 }

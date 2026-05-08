@@ -2,7 +2,7 @@
   "name": "@second-brain/ai",
   "version": "1.0.0",
   "type": "module",
-"main": "dist/index.js",
+  "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
@@ -14,9 +14,10 @@
   "scripts": {
     "ask:memory": "node --experimental-strip-types scripts/ask-memory.ts",
     "index:memory": "node --experimental-strip-types scripts/insert-memory-chunks.ts",
-    "test:chunker": "node --experimental-strip-types scripts/test-chunker.ts",
-    "test": "node --experimental-strip-types --test src/*.test.ts",
-    "test:embedding": "node --experimental-strip-types scripts/test-embedding.ts"
+    "test:chunker": "node --env-file=.env --experimental-strip-types scripts/test-chunker.ts",
+    "test": "node --env-file=.env --experimental-strip-types --test src/*.test.ts",
+    "test:embedding": "node --env-file=.env --experimental-strip-types scripts/test-embedding.ts",
+    "test:embedding:gemini": "node --env-file=.env --experimental-strip-types scripts/test-embedding-gemini.ts"
   },
   "devDependencies": {
     "@types/node": "^25.6.0"
