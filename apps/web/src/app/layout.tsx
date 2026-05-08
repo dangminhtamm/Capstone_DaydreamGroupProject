@@ -11,14 +11,14 @@ const beVietnamPro = Be_Vietnam_Pro({
 });
 
 export const metadata: Metadata = {
-  title: "DayDreamer Frontend",
-  description: "Diary and timeline UI for Second Brain project",
+  title: "DayDreamer — Your Second Brain",
+  description: "Capture your thoughts, track your mood, and build a searchable timeline of your life with AI-powered recall.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body className={beVietnamPro.className}>
+      <body className={beVietnamPro.className} suppressHydrationWarning>
         <AuthProvider>{children}</AuthProvider>
       </body>
     </html>

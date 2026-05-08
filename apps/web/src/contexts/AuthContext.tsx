@@ -36,6 +36,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
   const router = useRouter();
 
+  const syncWithBackend = useCallback(async (session: Session) => {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+    const jwt = session.access_token;
+
+    try {
+      const response = await fetch(`${apiUrl}/auth/sync`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${jwt}`,
+        },
+        body: JSON.stringify({
+          google_access_token: session.provider_token,
+          google_refresh_token: session.provider_refresh_token,
+          display_name: session.user.user_metadata?.full_name || session.user.user_metadata?.name,
+        }),
+      });
+
+      if (!response.ok) {
+        console.error('Backend sync failed:', response.status);
+      }
+    } catch (error) {
+      console.error('Error syncing with backend:', error);
+    }
+  }, []);
+
   useEffect(() => {
     if (!supabase) {
       setIsLoading(false);
@@ -68,33 +94,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       subscription.unsubscribe();
     };
-  }, []);
+  }, [syncWithBackend]);
 
-  const syncWithBackend = async (session: Session) => {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
-    const jwt = session.access_token;
 
-    try {
-      const response = await fetch(`${apiUrl}/auth/sync`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${jwt}`,
-        },
-        body: JSON.stringify({
-          google_access_token: session.provider_token,
-          google_refresh_token: session.provider_refresh_token,
-          display_name: session.user.user_metadata?.full_name || session.user.user_metadata?.name,
-        }),
-      });
-
-      if (!response.ok) {
-        console.error('Backend sync failed:', response.status);
-      }
-    } catch (error) {
-      console.error('Error syncing with backend:', error);
-    }
-  };
 
   const signInWithGoogle = useCallback(async () => {
     if (!supabase) {
