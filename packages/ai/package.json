@@ -1,6 +1,30 @@
 {
   "name": "@second-brain/ai",
   "version": "1.0.0",
-  "main": "src/index.ts",
-  "types": "src/index.ts"
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "ask:memory": "node --experimental-strip-types scripts/ask-memory.ts",
+    "index:memory": "node --experimental-strip-types scripts/insert-memory-chunks.ts",
+    "test:chunker": "node --env-file=.env --experimental-strip-types scripts/test-chunker.ts",
+    "test": "node --env-file=.env --experimental-strip-types --test src/*.test.ts",
+    "test:embedding": "node --env-file=.env --experimental-strip-types scripts/test-embedding.ts",
+    "test:embedding:gemini": "node --env-file=.env --experimental-strip-types scripts/test-embedding-gemini.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "@second-brain/db": "workspace:*",
+    "zod": "^4.4.2"
+  }
 }

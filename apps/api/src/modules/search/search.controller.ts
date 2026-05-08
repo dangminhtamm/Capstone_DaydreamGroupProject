@@ -13,7 +13,7 @@ export class SearchController {
     const limit = queryDto.limit ? parseInt(queryDto.limit, 10) : 10;
 
     const results = await this.searchService.searchEntries(
-      req.user.id,
+      req.user.userId,
       queryDto.q,
       limit,
     );
