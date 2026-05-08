@@ -1,4 +1,4 @@
-import { prisma } from '@second-brain/db';
+import { prisma } from '../../lib/prisma';
 
 export class LinkingJob {
 

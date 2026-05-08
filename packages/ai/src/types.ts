@@ -1,5 +1,7 @@
 // packages/ai/src/types.ts
-export type ChunkType = 'feedback' | 'decision' | 'action_item' | 'reflection' | 'event' | 'general';
+import type { ChunkType } from "./chunk-types.ts";
+
+export type { ChunkType };
 
 export interface MemoryChunkMetadata {
   date: string | null;
@@ -53,4 +55,23 @@ export interface SemanticChunk {
 
 export interface MemoryDbClient {
   $transaction<T>(fn: (tx: any) => Promise<T>): Promise<T>;
+}
+
+/** A single memory chunk returned by vector search, enriched with similarity score. */
+export interface SearchResult {
+  id: string;
+  userId: string;
+  sourceType: string;
+  sourceId: string;
+  chunkType: string;
+  text: string;
+  metadata: Record<string, unknown>;
+  createdAt: Date;
+  similarity: number;
+}
+
+/** The result of a full RAG query: an AI-generated answer plus the source chunks used. */
+export interface QueryResult {
+  answer: string;
+  sources: SearchResult[];
 }

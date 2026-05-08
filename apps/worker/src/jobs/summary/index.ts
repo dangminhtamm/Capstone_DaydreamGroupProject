@@ -1,4 +1,4 @@
-import { prisma } from '@second-brain/db';
+import { prisma } from '../../lib/prisma';
 import * as cron from 'node-cron';
 
 export class SummaryPipelineJob {
@@ -57,7 +57,7 @@ export class SummaryPipelineJob {
 
       if (events.length > 0) {
         combinedContext += "CALENDAR EVENTS:\n";
-        events.forEach(e => {
+        events.forEach((e: { title: string; start_time: Date; end_time: Date }) => {
           combinedContext += `- ${e.title} (from ${e.start_time.getHours()}:${e.start_time.getMinutes()} to ${e.end_time.getHours()}:${e.end_time.getMinutes()})\n`;
         });
         combinedContext += "\n";
@@ -65,7 +65,7 @@ export class SummaryPipelineJob {
 
       if (diaries.length > 0) {
         combinedContext += "DIARY ENTRIES:\n";
-        diaries.forEach(d => {
+        diaries.forEach((d: { raw_text: string }) => {
           combinedContext += `- ${d.raw_text}\n`;
         });
       }

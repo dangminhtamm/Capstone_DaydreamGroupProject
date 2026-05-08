@@ -6,6 +6,9 @@ export const CHUNK_TYPES = [
   "action_item",
   "emotional_reflection",
   "general_note",
+  "reflection",
+  "event",
+  "general",
 ] as const;
 
 export type ChunkType = (typeof CHUNK_TYPES)[number];

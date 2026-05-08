@@ -1,5 +1,7 @@
 // packages/ai/src/index.ts
-export { type ChunkType, type MemoryChunkMetadata, type SemanticChunk } from "./types.ts";
+export { CHUNK_TYPES, type ChunkType } from "./chunk-types.ts";
+export { type SemanticChunk } from "./types.ts";
+export { type MemoryChunkMetadata } from "./types.ts";
 export { generateSemanticChunks } from "./chunker.ts";
 export { retrieveMemory, type RetrievalFilters } from "./retrieval.ts";
 export {
@@ -30,4 +32,11 @@ export type {
   ChunkingOptions,
   EmbeddingProvider,
   MemoryChunk,
+  SearchResult,
+  QueryResult,
 } from "./types.ts";
+export {
+  processQuery,
+  type ProcessQueryOptions,
+  type SearchFn,
+} from "./query-processor.ts";

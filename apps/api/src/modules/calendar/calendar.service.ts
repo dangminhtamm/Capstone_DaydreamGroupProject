@@ -1,9 +1,11 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { google, calendar_v3 } from 'googleapis';
-import { prisma } from '@second-brain/db';
+import { PrismaService } from '../../prisma/prisma.service';
 
 @Injectable()
 export class CalendarService {
+
+    constructor(private readonly prisma: PrismaService) {}
 
     private normalizeEvent(googleEvent: calendar_v3.Schema$Event, userId: string) {
         const startTime = googleEvent.start?.dateTime || googleEvent.start?.date;
@@ -21,7 +23,7 @@ export class CalendarService {
     }
 
     async syncGoogleEvents(supabaseId: string) {
-        const user = await prisma.user.findUnique({
+        const user = await this.prisma.user.findUnique({
             where: { supabaseId },
         });
 
@@ -58,7 +60,7 @@ export class CalendarService {
             const upsertPromises = rawEvents.map((event) => {
                 const normalizedData = this.normalizeEvent(event, user.id);
 
-                return prisma.calendarEvent.upsert({
+                return this.prisma.calendarEvent.upsert({
                     where: { external_id: normalizedData.external_id },
                     update: {
                         title: normalizedData.title,
@@ -94,7 +96,7 @@ export class CalendarService {
 
 
     async getEventsFromDb(supabaseId: string) {
-        const user = await prisma.user.findUnique({
+        const user = await this.prisma.user.findUnique({
             where: { supabaseId },
         });
 
@@ -102,7 +104,7 @@ export class CalendarService {
             throw new Error('User not found');
         }
 
-        return await prisma.calendarEvent.findMany({
+        return await this.prisma.calendarEvent.findMany({
             where: {
                 user_id: user.id,
                 start_time: {

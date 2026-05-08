@@ -75,7 +75,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const jwt = session.access_token;
 
     try {
-      const response = await fetch(`${apiUrl}/auth/sync`, {
+      const response = await fetch(`${apiUrl}/api/auth/sync`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -89,10 +89,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
 
       if (!response.ok) {
-        console.error('Backend sync failed:', response.status);
+        console.warn('[Auth] Backend sync failed:', response.status);
       }
-    } catch (error) {
-      console.error('Error syncing with backend:', error);
+    } catch {
+      // Expected when API server is not running during development
+      console.warn('[Auth] Could not reach API server for sync — is the API running?');
     }
   };
 

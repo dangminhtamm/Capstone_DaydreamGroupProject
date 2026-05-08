@@ -47,7 +47,7 @@ export async function createDiaryEntry(
   payload: CreateDiaryPayload,
   accessToken: string | null
 ): Promise<DiaryEntry> {
-  const response = await authFetch('/diary', {
+  const response = await authFetch('/api/diary', {
     method: 'POST',
     body: JSON.stringify(payload),
   }, accessToken);
@@ -63,7 +63,7 @@ export async function createDiaryEntry(
 export async function getDiaryEntries(
   accessToken: string | null
 ): Promise<DiaryEntry[]> {
-  const response = await authFetch('/diary', {
+  const response = await authFetch('/api/diary', {
     method: 'GET',
   }, accessToken);
 
@@ -79,7 +79,7 @@ export async function getDiaryEntry(
   id: string,
   accessToken: string | null
 ): Promise<DiaryEntry> {
-  const response = await authFetch(`/diary/${id}`, {
+  const response = await authFetch(`/api/diary/${id}`, {
     method: 'GET',
   }, accessToken);
 
