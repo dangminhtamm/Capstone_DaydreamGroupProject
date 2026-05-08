@@ -91,28 +91,38 @@ export async function getDiaryEntry(
   return response.json();
 }
 
-// Search API (keep existing)
-type AskPayload = {
+// Search API — calls GET /search?q=... (authenticated)
+type SearchQueryPayload = {
   question: string;
 };
 
-type AskResponse = {
+type SearchResult = {
   answer: string;
   sources: string[];
 };
 
-export async function askSearch(payload: AskPayload): Promise<AskResponse> {
-  const response = await fetch(`${API_URL}/api/search`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
-  });
+export async function askSearch(
+  payload: SearchQueryPayload,
+  accessToken: string | null
+): Promise<SearchResult> {
+  const params = new URLSearchParams({ q: payload.question });
+  const response = await authFetch(`/search?${params.toString()}`, { method: 'GET' }, accessToken);
 
   if (!response.ok) {
-    throw new Error("Failed to fetch answer");
+    const error = await response.json().catch(() => ({ message: 'Search failed' }));
+    throw new Error(error.message || `HTTP ${response.status}`);
   }
 
-  return response.json() as Promise<AskResponse>;
+  const data = await response.json();
+  // Backend returns { count, results: DiaryEntry[] } — shape into answer/sources
+  const results: DiaryEntry[] = data.results ?? [];
+  const answer =
+    results.length > 0
+      ? `Found ${results.length} entr${results.length === 1 ? 'y' : 'ies'} matching your query.`
+      : 'No diary entries matched your query.';
+  const sources = results.map(
+    (e) => `${e.title} — ${new Date(e.createdAt).toLocaleDateString()}`
+  );
+
+  return { answer, sources };
 }

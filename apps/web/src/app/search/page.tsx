@@ -3,10 +3,12 @@
 import { useState } from "react";
 import { DashboardShell } from "@/components/dashboard-shell";
 import { askSearch } from "@/lib/api-client";
+import { useAuth } from "@/contexts/AuthContext";
 
 type SearchState = "idle" | "loading" | "success" | "error";
 
 export default function SearchPage() {
+  const { getAccessToken, isAuthenticated } = useAuth();
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
   const [sources, setSources] = useState<string[]>([]);
@@ -23,7 +25,8 @@ export default function SearchPage() {
     setErrorMessage("");
 
     try {
-      const result = await askSearch({ question: question.trim() });
+      const accessToken = getAccessToken();
+      const result = await askSearch({ question: question.trim() }, accessToken);
       setAnswer(result.answer);
       setSources(result.sources ?? []);
       setState("success");
