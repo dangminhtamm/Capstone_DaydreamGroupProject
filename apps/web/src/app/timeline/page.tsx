@@ -1,14 +1,13 @@
 import { DashboardShell } from "@/components/dashboard-shell";
-import { TimelineList } from "@/components/timeline-list";
-import { mockTimelineEntries } from "@/lib/mock-data";
+import { TimelineContainer } from "@/components/timeline-container";
 
 export default function TimelinePage() {
   return (
     <DashboardShell
       title="Timeline"
-      description="Week 1 timeline using mock data to demonstrate end-to-end interaction flow."
+      description="View your diary entries and track your journey."
     >
-      <TimelineList entries={mockTimelineEntries} />
+      <TimelineContainer />
     </DashboardShell>
   );
 }

@@ -1,12 +1,5 @@
-import { summarizeJob } from "./jobs/summarize";
-import { syncCalendarJob } from "./jobs/sync-calendar";
+import 'dotenv/config';
 
-async function bootstrap(): Promise<void> {
-  await syncCalendarJob();
-  await summarizeJob();
-}
+import { SummaryPipelineJob } from './jobs/sumary/index';
 
-bootstrap().catch((error) => {
-  console.error("[worker] bootstrap failed", error);
-  throw error;
-});
+SummaryPipelineJob.startCron();

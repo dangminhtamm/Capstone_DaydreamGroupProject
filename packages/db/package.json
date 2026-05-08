@@ -11,7 +11,7 @@
     "pg": "^8.20.0"
   },
   "scripts": {
-    "prisma:generate": "prisma generate --config prisma/prisma.config.ts",
+    "prisma:generate": "prisma generate --config prisma.config.ts",
     "prisma:validate": "prisma validate --schema prisma/schema.prisma",
     "memory:insert-sample": "node --experimental-strip-types scripts/insert-memory-chunks.ts",
     "memory:test-search": "node --env-file=.env --experimental-strip-types scripts/test-vector-search.ts",

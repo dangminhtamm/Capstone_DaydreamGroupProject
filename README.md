@@ -35,59 +35,96 @@
 
 ---
 
-# Local Setup
+# 🚀 Comprehensive Local Setup
 
-## 1. Clone the repository
+### Prerequisites
+
+*   **Node.js**: v20 or higher
+*   **pnpm**: v10 or higher
+*   **PostgreSQL**: With `pgvector` extension enabled
+
+### 1. Installation
 
 ```bash
 git clone https://github.com/dangminhtamm/second-brain.git
 cd second-brain
+pnpm install
 ```
 
-## 2. Install dependencies (monorepo)
+### 2. Environment Configuration
 
-```bash
-npm install
+Create a `.env` file in the root directory (or specific app directories) with the following essential keys:
+
+```env
+# Database
+DATABASE_URL="postgresql://user:pass@localhost:5432/second_brain?sslmode=disable"
+
+# Auth (Supabase)
+SUPABASE_URL="your-project-url"
+SUPABASE_ANON_KEY="your-anon-key"
+
+# Google Integration
+GOOGLE_CLIENT_ID="your-google-id"
+GOOGLE_CLIENT_SECRET="your-google-secret"
+GOOGLE_CALLBACK_URL="http://localhost:3000/api/auth/google/callback"
+
+# AI/ML
+AI_MODEL_API_KEY="your-api-key"
 ```
 
-## 3. Run backend
+### 3. Database Initialization
 
 ```bash
-cd apps/api
-npm run start:dev
-```
+# Generate Prisma Client
+pnpm --filter @second-brain/db prisma:generate
 
-## 4. Run frontend
-
-```bash
-cd apps/web
-npm run dev
-```
-
-## 5. (Optional) Run worker
-
-```bash
-cd apps/worker
-npm install
+# Sync database schema (or use migrations)
+npx prisma db push --schema=packages/db/prisma/schema.prisma
 ```
 
 ---
 
-# Development Rules
+# 🛠️ Development & Running
 
-* Do not push directly to `main`
-* Use feature branches: `feature/<task-name>`
-* Keep shared data contracts in `packages/shared`
+### Running the Full Stack
+Start all applications in parallel:
+```bash
+pnpm dev
+```
+
+### Running Specific Services
+```bash
+# Frontend only
+pnpm --filter web dev
+
+# Backend API only
+pnpm --filter @second-brain/api start:dev
+
+# Worker only
+pnpm --filter @second-brain/worker dev
+
+# Search service only
+pnpm --filter @second-brain/search dev
+```
 
 ---
 
-## Frontend Target Structure (Added)
+# 📜 Development Rules
+
+1.  **Branching Strategy:** Use `feature/<task-name>` for all new features.
+2.  **Pull Requests:** No direct pushes to `main`. All code must be reviewed.
+3.  **Shared Logic:** Keep shared data contracts and DTOs in `packages/shared`.
+4.  **Database Changes:** Always update the schema in `packages/db/prisma/schema.prisma` and run `prisma:generate`.
+
+---
+
+## Frontend Target Structure
 
 ```text
 apps/
 ├── search/
-│   └── main.ts                  # API nhận câu hỏi AI (placeholder)
-├── web/                         # Frontend chính (Next.js App Router)
+│   └── main.ts                  # AI Query API (placeholder)
+├── web/                         # Main Frontend (Next.js App Router)
 │   └── src/
 │       ├── app/                 # Dashboard, Diary, Timeline, Search
 │       ├── components/          # UI components
@@ -120,17 +157,3 @@ packages/
 - Build `Diary input UI`
 - Build `Timeline UI` with mock data
 - Provide smooth demo flow between dashboard, diary, timeline
-
-## Run Locally (Frontend-focused)
-
-```bash
-pnpm install
-pnpm --filter web dev
-```
-
-Optional:
-
-```bash
-pnpm --filter @second-brain/worker dev
-pnpm --filter @second-brain/search dev
-```

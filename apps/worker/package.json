@@ -3,13 +3,15 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "ts-node src/index.ts",
+    "dev": "ts-node -r dotenv/config src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js"
   },
   "dependencies": {
+    "@second-brain/db": "workspace:*",
     "@second-brain/shared": "workspace:*",
-    "@second-brain/db": "workspace:*"
+    "dotenv": "^17.4.2",
+    "node-cron": "^4.2.1"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
