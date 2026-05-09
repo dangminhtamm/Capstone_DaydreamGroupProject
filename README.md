@@ -1,5 +1,3 @@
-<![CDATA[<div align="center">
-
 # 🧠 Second Brain
 
 **A Personal Intelligence Platform — Not Just a Diary**
