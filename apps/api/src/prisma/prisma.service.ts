@@ -1,11 +1,19 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
-import { PrismaClient } from '@second-brain/db'; // Your generated client package
+import { PrismaClient } from '@prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
+import { Pool } from 'pg';
+
+const connectionString = process.env.DATABASE_URL;
+const pool = new Pool({ connectionString });
+const adapter = new PrismaPg(pool);
 
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit {
+  constructor() {
+    super({ adapter });
+  }
+
   async onModuleInit() {
-    // This ensures that when the Nest.js app starts,
-    // it immediately establishes a connection to Supabase.
     await this.$connect();
   }
 }

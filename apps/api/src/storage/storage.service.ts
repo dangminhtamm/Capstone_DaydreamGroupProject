@@ -1,16 +1,21 @@
 // apps/api/src/storage/storage.service.ts
 import { Injectable } from '@nestjs/common';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 @Injectable()
 export class StorageService {
-  private supabase = createClient(
-    process.env.DATABASE_URL, // e.g., https://your-id.supabase.co
-    process.env.SECRET_KEY, // Your whitelisted secret key
-  );
+  private supabase: SupabaseClient;
+
+  constructor() {
+    this.supabase = createClient(
+      process.env.SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_KEY!
+    );
+  }
 
   async uploadFile(file: Express.Multer.File, bucket: string) {
-    const filePath = `attachments/${Date.now()}-${file.originalname}`;
+    const safeName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const filePath = `attachments/${Date.now()}-${safeName}`;
 
     const { data, error } = await this.supabase.storage
       .from(bucket)
@@ -26,6 +31,9 @@ export class StorageService {
       .from(bucket)
       .getPublicUrl(filePath);
 
-    return urlData.publicUrl;
+    return {
+      path: data.path,
+      url: urlData.publicUrl,
+    };
   }
 }

@@ -20,17 +20,17 @@ export class DiaryController {
 
   @Post()
   create(@Request() req, @Body() createDiaryDto: CreateDiaryDto) {
-    return this.diaryService.create(req.user.id, createDiaryDto);
+    return this.diaryService.create(req.user.userId, createDiaryDto);
   }
 
   @Get()
   findAll(@Request() req) {
-    return this.diaryService.findAll(req.user.id);
+    return this.diaryService.findAll(req.user.userId);
   }
 
   @Get(':id')
   findOne(@Request() req, @Param('id') id: string) {
-    return this.diaryService.findOne(req.user.id, id);
+    return this.diaryService.findOne(req.user.userId, id);
   }
 
   @Patch(':id')
@@ -39,11 +39,11 @@ export class DiaryController {
     @Param('id') id: string,
     @Body() updateDto: Partial<CreateDiaryDto>,
   ) {
-    return this.diaryService.update(req.user.id, id, updateDto);
+    return this.diaryService.update(req.user.userId, id, updateDto);
   }
 
   @Delete(':id')
   remove(@Request() req, @Param('id') id: string) {
-    return this.diaryService.remove(req.user.id, id);
+    return this.diaryService.remove(req.user.userId, id);
   }
 }
