@@ -1,4 +1,5 @@
 import { prisma } from './client';
+import { toVectorLiteral } from '../index';
 
 export interface InsertChunkPayload {
   userId: string;
@@ -18,7 +19,8 @@ export async function insertMemoryChunks(chunks: InsertChunkPayload[]) {
 
   return await prisma.$transaction(
     chunks.map((chunk) => {
-      const vectorString = `[${chunk.embedding.join(',')}]`;
+      const vectorString = toVectorLiteral(chunk.embedding);
+      const metadataJson = JSON.stringify(chunk.metadata ?? {});
 
       return prisma.$executeRaw`
         INSERT INTO memory_chunks (
@@ -42,7 +44,7 @@ export async function insertMemoryChunks(chunks: InsertChunkPayload[]) {
           ${chunk.chunkType},
           ${chunk.text},
           ${chunk.evidence},
-          ${chunk.metadata}::jsonb,
+          ${metadataJson}::jsonb,
           ${chunk.occurredAt},
           ${vectorString}::vector,
           now()

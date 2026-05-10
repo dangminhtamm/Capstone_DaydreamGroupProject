@@ -57,6 +57,9 @@ export interface MemoryCitation {
   chunkType: string;
   quote: string;
   similarity: number;
+  vectorSimilarity?: number;
+  lexicalScore?: number;
+  retrievalMode?: string;
   claim?: string;
 }
 
@@ -131,6 +134,7 @@ export async function answerFromChunks(
         `sourceId: ${source.sourceId}`,
         `chunkType: ${source.chunkType}`,
         `similarity: ${source.similarity.toFixed(3)}`,
+        `retrievalMode: ${source.retrievalMode ?? "vector"}`,
         `evidence: ${source.quote}`,
       ].join("\n");
     })
@@ -225,6 +229,9 @@ function buildCitations(chunks: MemorySearchHit[]): MemoryCitation[] {
       chunkType: chunk.chunkType,
       quote: trimEvidence(chunk.evidence ?? chunk.text),
       similarity: Number(chunk.similarity),
+      vectorSimilarity: Number(chunk.vectorSimilarity ?? 0),
+      lexicalScore: Number(chunk.lexicalScore ?? 0),
+      retrievalMode: chunk.retrievalMode,
     };
   });
 }

@@ -5,19 +5,19 @@ export type { ChunkType };
 
 export interface MemoryChunkMetadata {
   date: string | null;
-  sourceType: 'diary' | 'calendar' | 'gmail' | string;
+  sourceType: "diary" | "calendar" | "gmail" | string;
   sourceId: string;
-  chunkIndex: number;      
+  chunkIndex: number;
   chunkType: ChunkType;
-  people?: string[];       
-  projects?: string[];    
+  people?: string[];
+  projects?: string[];
   tags?: string[];
-  importance?: number;    
+  importance?: number;
   sourceTitle?: string;
   sourceUrl?: string;
-  startOffset?: number;    
+  startOffset?: number;
   endOffset?: number;
-  calendarEventId?: string; 
+  calendarEventId?: string;
 }
 
 export interface MemoryChunk {
@@ -55,23 +55,4 @@ export interface SemanticChunk {
 
 export interface MemoryDbClient {
   $transaction<T>(fn: (tx: any) => Promise<T>): Promise<T>;
-}
-
-/** A single memory chunk returned by vector search, enriched with similarity score. */
-export interface SearchResult {
-  id: string;
-  userId: string;
-  sourceType: string;
-  sourceId: string;
-  chunkType: string;
-  text: string;
-  metadata: Record<string, unknown>;
-  createdAt: Date;
-  similarity: number;
-}
-
-/** The result of a full RAG query: an AI-generated answer plus the source chunks used. */
-export interface QueryResult {
-  answer: string;
-  sources: SearchResult[];
 }

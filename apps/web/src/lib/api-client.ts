@@ -91,24 +91,25 @@ export async function getDiaryEntry(
   return response.json();
 }
 
-// Search API (keep existing)
+// Search API
 type AskPayload = {
   question: string;
 };
 
 type AskResponse = {
   answer: string;
-  sources: string[];
+  confidence?: "high" | "medium" | "low";
+  sources: unknown[];
 };
 
-export async function askSearch(payload: AskPayload): Promise<AskResponse> {
-  const response = await fetch(`${API_URL}/api/search`, {
+export async function askSearch(
+  payload: AskPayload,
+  accessToken: string | null
+): Promise<AskResponse> {
+  const response = await authFetch('/api/search', {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
     body: JSON.stringify(payload),
-  });
+  }, accessToken);
 
   if (!response.ok) {
     throw new Error("Failed to fetch answer");

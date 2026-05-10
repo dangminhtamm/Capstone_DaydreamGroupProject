@@ -1,10 +1,9 @@
 /**
- * End-to-end test for processQuery() (Priority 2 — RAG pipeline).
+ * End-to-end test for answerMemory() (grounded AI memory pipeline).
  *
  * This script wires together:
- *   - GeminiEmbeddingProvider  (embed the question)
- *   - vectorSearch from @second-brain/db  (retrieve relevant chunks)
- *   - processQuery from @second-brain/ai  (generate grounded answer)
+ *   - answerMemory from @second-brain/ai  (embedding → hybrid retrieval → Gemini answer)
+ *   - Prisma from @second-brain/db        (memory_chunks access)
  *
  * Prerequisites:
  *   1. Run insert-memory-chunks.ts first to populate the DB
@@ -14,11 +13,11 @@
  *        SAMPLE_USER_ID=<existing users.id>
  *
  * Run with:
- *   node --env-file=.env --experimental-strip-types scripts/test-query-processor.ts
+ *   node --env-file=.env --experimental-strip-types scripts/test-answer-memory.ts
  */
 
-import { GeminiEmbeddingProvider, processQuery } from "../../ai/src/index.ts";
-import { createPrismaClient, vectorSearch } from "../index.ts";
+import { answerMemory } from "../../ai/src/index.ts";
+import { createPrismaClient } from "../index.ts";
 
 const DIVIDER = "─".repeat(60);
 
@@ -30,16 +29,6 @@ async function main(): Promise<void> {
   if (!apiKey) throw new Error("Set GEMINI_API_KEY in your .env file.");
 
   const prisma = createPrismaClient();
-  const embeddingProvider = new GeminiEmbeddingProvider(apiKey);
-
-  // Reusable searchFn that always scopes to this user, top 6 chunks
-  const searchFn = (embedding: number[]) =>
-    vectorSearch(prisma, embedding, {
-      userId,
-      topK: 6,
-      minSimilarity: 0.4,
-    });
-
   const questions = [
     "What did we decide about the sprint?",
     "What do I still need to follow up on?",
@@ -54,26 +43,18 @@ async function main(): Promise<void> {
     console.log(DIVIDER);
 
     try {
-      const { answer, sources } = await processQuery({
-        query: question,
-        embeddingProvider,
-        searchFn,
-        apiKey,
+      const { answer, citations } = await answerMemory(question, userId, prisma, {
+        limit: 6,
       });
 
       console.log(`\n🤖 Answer:\n${answer}`);
-      console.log(`\n📚 Sources used (${sources.length}):`);
+      console.log(`\n📚 Sources used (${citations.length}):`);
 
-      for (const [i, src] of sources.entries()) {
-        const date =
-          typeof src.metadata["date"] === "string"
-            ? src.metadata["date"]
-            : src.createdAt.toISOString().slice(0, 10);
-
+      for (const [i, src] of citations.entries()) {
         console.log(
-          `  [${i + 1}] [${src.chunkType}] (sim=${src.similarity.toFixed(3)}) ${date}`
+          `  [${i + 1}] [${src.chunkType}] (sim=${src.similarity.toFixed(3)}, mode=${src.retrievalMode ?? "unknown"}) ${src.occurredAt}`
         );
-        console.log(`       "${src.text.slice(0, 100)}${src.text.length > 100 ? "..." : ""}"`);
+        console.log(`       "${src.quote.slice(0, 100)}${src.quote.length > 100 ? "..." : ""}"`);
       }
     } catch (err) {
       console.error(`  ❌ Error processing question:`, err);

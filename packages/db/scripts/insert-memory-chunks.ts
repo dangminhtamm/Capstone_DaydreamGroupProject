@@ -1,12 +1,11 @@
 import {
-  chunkDiaryEntry,
   GeminiEmbeddingProvider,
-  type ChunkedMemoryChunk,
+  indexMemoryFromDiary,
 } from "../../ai/src/index.ts";
 import {
   createPrismaClient,
   insertMemoryChunks,
-  type PersistMemoryChunkInput,
+  pruneMemoryChunksForSource,
 } from "../index.ts";
 
 async function main(): Promise<void> {
@@ -32,40 +31,28 @@ Tomorrow I need to follow up with Minh about the analytics event naming.
 I felt calmer today because the plan is finally getting more concrete.
   `.trim();
 
-  // chunkDiaryEntry is now async after integrating Gemini for classification
-  const chunks = await chunkDiaryEntry(sampleDiaryText, {
-    sourceType: "diary_entry",
-    sourceId: "sample-diary-entry",
-    date: new Date().toISOString(),
+  const result = await indexMemoryFromDiary({
+    userId: sampleUserId,
+    diaryId: "sample-diary-entry",
+    rawText: sampleDiaryText,
+    entryDate: new Date(),
+    sourceTitle: "Sample diary entry",
+    embeddingProvider,
+    insertChunks: (chunks) =>
+      prisma.$transaction(async (tx) => {
+        await insertMemoryChunks(tx as any, chunks);
+        await pruneMemoryChunksForSource(tx as any, {
+          userId: sampleUserId,
+          sourceType: "diary",
+          sourceId: "sample-diary-entry",
+          keepChunkCount: chunks.length,
+        });
+      }),
   });
 
-  const records: PersistMemoryChunkInput[] = [];
-
-  for (const chunk of chunks) {
-    records.push(await buildPersistedChunk(chunk, sampleUserId, embeddingProvider));
-  }
-
-  await insertMemoryChunks(prisma, records);
-  console.log(`Inserted ${records.length} memory chunk(s).`);
+  console.log(`Inserted/Updated ${result.chunkCount} memory chunk(s).`);
+  console.log(JSON.stringify(result.chunks, null, 2));
   await prisma.$disconnect();
-}
-
-async function buildPersistedChunk(
-  chunk: ChunkedMemoryChunk,
-  userId: string,
-  embeddingProvider: { embed(text: string): Promise<number[]> }
-): Promise<PersistMemoryChunkInput> {
-  const embedding = await embeddingProvider.embed(chunk.text);
-
-  return {
-    userId,
-    sourceType: chunk.sourceType,
-    sourceId: chunk.sourceId,
-    chunkType: chunk.chunkType,
-    text: chunk.text,
-    metadata: chunk.metadata,
-    embedding,
-  };
 }
 
 main().catch((error: unknown) => {

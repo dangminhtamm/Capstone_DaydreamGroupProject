@@ -25,7 +25,6 @@ async function retry<T>(fn: () => Promise<T>, retries = 3): Promise<T> {
   }
 }
 
-// Hàm chuẩn hóa Vector (Bắt buộc cho cosine distance của Gemini embedding)
 function normalize(values: number[]): number[] {
   const norm = Math.hypot(...values);
   if (!norm) return values;
@@ -67,7 +66,10 @@ export class GeminiEmbeddingProvider implements AdvancedEmbeddingProvider {
     return this.embed(text, "RETRIEVAL_QUERY");
   }
 
-  async embed(text: string, taskType: EmbeddingTask = "RETRIEVAL_DOCUMENT"): Promise<number[]> {
+  async embed(
+    text: string,
+    taskType: EmbeddingTask = "RETRIEVAL_DOCUMENT",
+  ): Promise<number[]> {
     if (!text.trim()) {
       throw new Error("Cannot embed empty text.");
     }
@@ -82,9 +84,9 @@ export class GeminiEmbeddingProvider implements AdvancedEmbeddingProvider {
           role: "user",
           parts: [{ text }],
         },
-        taskType, 
+        taskType,
         outputDimensionality: DEFAULT_EMBEDDING_DIMENSION,
-      } as never)
+      } as never),
     );
 
     const values = result.embedding?.values;

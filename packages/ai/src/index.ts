@@ -32,11 +32,4 @@ export type {
   ChunkingOptions,
   EmbeddingProvider,
   MemoryChunk,
-  SearchResult,
-  QueryResult,
 } from "./types.ts";
-export {
-  processQuery,
-  type ProcessQueryOptions,
-  type SearchFn,
-} from "./query-processor.ts";

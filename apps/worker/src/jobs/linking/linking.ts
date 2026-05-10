@@ -29,7 +29,7 @@ export class SemanticLinkingJob {
       if (dailyEvents.length === 0) return;
 
       const diaryKeywords = this.extractKeywords(diary.raw_text);
-      const linkedEventIds = [];
+      const linkedEvents = [];
 
       for (const event of dailyEvents) {
         let matchScore = 0;
@@ -47,12 +47,20 @@ export class SemanticLinkingJob {
         }
 
         if (matchScore >= 40) {
-          linkedEventIds.push(event.id);
+          linkedEvents.push(event);
         }
       }
 
       // CONNECT TO DATABASE
-      if (linkedEventIds.length > 0) {
+      if (linkedEvents.length > 0) {
+        const linkedEventIds = linkedEvents.map((event) => event.id);
+        const memoryEventContext = linkedEvents.map((event) => ({
+          id: event.id,
+          title: event.title,
+          startTime: event.start_time.toISOString(),
+          endTime: event.end_time.toISOString(),
+        }));
+
         await prisma.diaryEntry.update({
           where: { id: diary.id },
           data: {
@@ -61,6 +69,26 @@ export class SemanticLinkingJob {
             },
           },
         });
+
+        await prisma.$executeRaw`
+          UPDATE memory_chunks
+          SET metadata = jsonb_set(
+            jsonb_set(
+              COALESCE(metadata, '{}'::jsonb),
+              '{calendarEventIds}',
+              ${JSON.stringify(linkedEventIds)}::jsonb,
+              true
+            ),
+            '{calendarEvents}',
+            ${JSON.stringify(memoryEventContext)}::jsonb,
+            true
+          ),
+          updated_at = now()
+          WHERE user_id = ${diary.user_id}
+            AND source_type = 'diary'
+            AND source_id = ${diary.id}
+        `;
+
         console.log(`[Worker - Semantic Link] Success! Linked ${linkedEventIds.length} events to Diary [${diary.id}].`);
       }
 

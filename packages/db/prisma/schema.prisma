@@ -5,7 +5,6 @@
 
 generator client {
   provider        = "prisma-client-js"
-  output          = "./generated/client"
   previewFeatures = ["postgresqlExtensions"]
 }
 
@@ -147,9 +146,12 @@ model MemoryChunk {
   userId     String   @map("user_id")
   sourceType String   @map("source_type") // e.g., 'diary', 'calendar', 'gmail', 'attachment'
   sourceId   String   @map("source_id") // ID of the original record
+  chunkIndex Int      @map("chunk_index")
   chunkType  String   @default("general_note") @map("chunk_type")
   text       String   @db.Text
+  evidence   String?  @db.Text
   metadata   Json?
+  occurredAt DateTime @default(now()) @map("occurred_at")
   embedding  Unsupported("vector(768)")?
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @default(now()) @updatedAt @map("updated_at")
@@ -159,5 +161,7 @@ model MemoryChunk {
   entity_mentions EntityMention[]
 
   @@index([userId, sourceType, sourceId], map: "memory_chunks_user_source_idx")
+  @@index([userId, occurredAt], map: "memory_chunks_user_occurred_at_idx")
+  @@unique([userId, sourceType, sourceId, chunkIndex], map: "memory_chunks_user_source_chunk_key")
   @@map("memory_chunks")
 }

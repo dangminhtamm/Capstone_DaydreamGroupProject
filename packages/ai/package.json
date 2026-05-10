@@ -12,12 +12,13 @@
     }
   },
   "scripts": {
+    "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "pnpm run clean && tsc -p tsconfig.build.json",
     "ask:memory": "node --experimental-strip-types scripts/ask-memory.ts",
     "index:memory": "node --experimental-strip-types scripts/insert-memory-chunks.ts",
     "test:chunker": "node --env-file=.env --experimental-strip-types scripts/test-chunker.ts",
     "test": "node --env-file=.env --experimental-strip-types --test src/*.test.ts",
-    "test:embedding": "node --env-file=.env --experimental-strip-types scripts/test-embedding.ts",
-    "test:embedding:gemini": "node --env-file=.env --experimental-strip-types scripts/test-embedding-gemini.ts"
+    "test:embedding": "node --env-file=.env --experimental-strip-types scripts/test-embedding.ts"
   },
   "devDependencies": {
     "@types/node": "^25.6.0"

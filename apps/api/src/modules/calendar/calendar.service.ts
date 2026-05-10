@@ -31,10 +31,22 @@ export class CalendarService {
             throw new UnauthorizedException('User has not connected Google Calendar.');
         }
 
-        const oauth2Client = new google.auth.OAuth2();
+        const oauth2Client = new google.auth.OAuth2(
+            process.env.GOOGLE_CLIENT_ID,
+            process.env.GOOGLE_CLIENT_SECRET,
+        );
         oauth2Client.setCredentials({
             access_token: user.google_access_token,
             refresh_token: user.google_refresh_token,
+        });
+        oauth2Client.on('tokens', async (tokens) => {
+            await this.prisma.user.update({
+                where: { id: user.id },
+                data: {
+                    ...(tokens.access_token && { google_access_token: tokens.access_token }),
+                    ...(tokens.refresh_token && { google_refresh_token: tokens.refresh_token }),
+                },
+            });
         });
 
         const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
@@ -104,12 +116,15 @@ export class CalendarService {
             throw new Error('User not found');
         }
 
+        const timeMin = new Date();
+        timeMin.setDate(timeMin.getDate() - 30);
+        const timeMax = new Date();
+        timeMax.setDate(timeMax.getDate() + 60);
+
         return await this.prisma.calendarEvent.findMany({
             where: {
                 user_id: user.id,
-                start_time: {
-                    gte: new Date(),
-                },
+                start_time: { gte: timeMin, lte: timeMax },
             },
             orderBy: {
                 start_time: 'asc',

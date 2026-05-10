@@ -16,6 +16,7 @@ export class AuthController {
     const supabaseId = req.user.userId;
     const email = req.user.email;
     const { google_access_token, google_refresh_token, display_name } = body;
+    const hasGoogleToken = Boolean(google_access_token || google_refresh_token);
 
     const user = await this.prisma.user.upsert({
       where: {
@@ -23,9 +24,9 @@ export class AuthController {
       },
       update: {
         supabaseId: supabaseId,
-        google_access_token: google_access_token,
-        google_refresh_token: google_refresh_token,
-        google_connected: true,
+        ...(google_access_token && { google_access_token }),
+        ...(google_refresh_token && { google_refresh_token }),
+        ...(hasGoogleToken && { google_connected: true }),
         display_name: display_name,
       },
       create: {
@@ -33,7 +34,7 @@ export class AuthController {
         supabaseId: supabaseId,
         google_access_token: google_access_token,
         google_refresh_token: google_refresh_token,
-        google_connected: true,
+        google_connected: hasGoogleToken,
         display_name: display_name,
       },
     });
