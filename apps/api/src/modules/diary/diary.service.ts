@@ -180,7 +180,7 @@ export class DiaryService {
     });
 
     if (indexingResult.chunkCount === 0) {
-      await deleteMemoryChunksForSource(this.prisma, {
+      await deleteMemoryChunksForSource(this.prisma as any, {
         userId,
         sourceType: 'diary',
         sourceId: entry.id,
