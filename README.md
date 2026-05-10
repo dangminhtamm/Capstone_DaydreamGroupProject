@@ -96,10 +96,9 @@ Capstone_DaydreamGroupProject/
 │   │   └── src/
 │   │       ├── embedding.ts          # Gemini embedding provider (768-dim vectors)
 │   │       ├── chunker.ts            # Semantic text chunker
-│   │       ├── retrieval.ts          # Vector similarity retrieval
+│   │       ├── retrieval.ts          # Hybrid vector + lexical retrieval
 │   │       ├── answer-memory.ts      # Grounded answer generation with citations
 │   │       ├── memory-indexer.ts     # Diary → MemoryChunk indexing pipeline
-│   │       ├── query-processor.ts    # Query understanding & routing
 │   │       └── gemini-json.ts        # Structured JSON output from Gemini
 │   │
 │   ├── db/                           # Database layer (Prisma ORM)
@@ -229,7 +228,7 @@ pnpm --filter @second-brain/search dev
 
 ```bash
 # AI package — test embedding pipeline
-pnpm --filter @second-brain/ai test:embedding:gemini
+pnpm --filter @second-brain/ai test:embedding
 
 # AI package — test semantic chunker
 pnpm --filter @second-brain/ai test:chunker

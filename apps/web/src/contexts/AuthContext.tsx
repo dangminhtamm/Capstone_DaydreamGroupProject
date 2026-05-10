@@ -115,7 +115,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           access_type: 'offline',
           prompt: 'consent',
         },
-        scopes: 'https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email',
+        scopes: [
+          'https://www.googleapis.com/auth/userinfo.profile',
+          'https://www.googleapis.com/auth/userinfo.email',
+          'https://www.googleapis.com/auth/calendar.readonly',
+        ].join(' '),
       },
     });
   }, []);

@@ -1,39 +1,27 @@
 import { prisma } from '../../lib/prisma';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import * as cron from 'node-cron';
 
 export class SummaryPipelineJob {
 
 
   private static async callAI(context: string): Promise<string> {
-    console.log(`[Mock AI] Receiving context of ${context.length} characters. Starting analysis...`);
-
-    await new Promise(resolve => setTimeout(resolve, 3000));
-
-    const activityCount = (context.match(/-/g) || []).length;
-
-    let mood = "Normal";
-    if (activityCount > 5) mood = "Extremely busy and productive";
-    else if (activityCount > 2) mood = "Focused and efficient";
-
-    const mockSummary = `[MOCK SUMMARY FOR DEV]
-    Today was a ${mood.toLowerCase()} day. The system has recorded a total of ${activityCount} activities and notes.
-
-    Key highlights:
-    - You closely followed your scheduled events for the day.
-    - Your diary entries indicate you are staying on track with your tasks.
-
-    (Note: This is mock data from the Workflow Team to test the Pipeline. Ready for Tam to plug in the Gemini API!)`;
-
-    console.log(`[Mock AI] Analysis complete!`);
-    return mockSummary;
+    return generateReflectionSummary({
+      context,
+      period: 'daily',
+      instruction:
+        'Create a concise daily log. Include key events, diary reflections, calendar context, and concrete follow-ups if present.',
+    });
   }
 
   static async generateDailySummaryForUser(userId: string) {
     console.log(`[Worker - Summary] Starting daily summary generation for User ID: ${userId}`);
 
     const today = new Date();
-    const startOfDay = new Date(today.setHours(0, 0, 0, 0));
-    const endOfDay = new Date(today.setHours(23, 59, 59, 999));
+    const startOfDay = new Date(today);
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date(today);
+    endOfDay.setHours(23, 59, 59, 999);
 
     try {
       const diaries = await prisma.diaryEntry.findMany({
@@ -69,15 +57,40 @@ export class SummaryPipelineJob {
       console.log(`[Worker - Summary] Sending context to AI...`);
       const aiSummaryText = await this.callAI(combinedContext);
 
-      await prisma.summary.create({
-        data: {
-          user_id: userId,
-          summary_type: 'daily',
-          period_start: startOfDay,
-          period_end: endOfDay,
-          content: aiSummaryText
-        }
-      });
+      await prisma.$transaction([
+        prisma.summary.deleteMany({
+          where: {
+            user_id: userId,
+            summary_type: 'daily',
+            period_start: startOfDay,
+            period_end: endOfDay,
+          },
+        }),
+        prisma.summary.create({
+          data: {
+            user_id: userId,
+            summary_type: 'daily',
+            period_start: startOfDay,
+            period_end: endOfDay,
+            content: aiSummaryText
+          }
+        }),
+      ]);
+
+      await prisma.$executeRaw`
+        UPDATE memory_chunks
+        SET metadata = jsonb_set(
+          COALESCE(metadata, '{}'::jsonb),
+          '{dailySummaryPeriod}',
+          ${JSON.stringify({ start: startOfDay.toISOString(), end: endOfDay.toISOString() })}::jsonb,
+          true
+        ),
+        updated_at = now()
+        WHERE user_id = ${userId}
+          AND source_type = 'diary'
+          AND occurred_at >= ${startOfDay}
+          AND occurred_at <= ${endOfDay}
+      `;
 
       console.log(`[Worker - Summary] Successfully generated Daily Summary for User ID: ${userId}`);
 
@@ -105,20 +118,12 @@ export class SummaryPipelineJob {
 export class WeeklySummaryPipelineJob {
 
   private static async callAIForWeekly(context: string): Promise<string> {
-    console.log(`[Mock AI - Weekly] Receiving context of ${context.length} characters. Starting weekly analysis...`);
-    await new Promise(resolve => setTimeout(resolve, 3000));
-
-    const mockWeeklySummary = `[WEEKLY MOCK SUMMARY FOR DEV]
-    This week has been productive. You have maintained a consistent streak of daily reflections.
-    
-    Key Weekly Insights:
-    - You successfully completed most of your planned calendar events.
-    - Your daily mood has been generally positive and focused.
-    
-    (Note: Awaiting AI Lead to integrate the actual Gemini reasoning engine for deeper weekly insights.)`;
-
-    console.log(`[Mock AI - Weekly] Analysis complete!`);
-    return mockWeeklySummary;
+    return generateReflectionSummary({
+      context,
+      period: 'weekly',
+      instruction:
+        'Create a weekly review from the daily logs. Summarize major themes, progress, blockers, notable events, and next-week follow-ups.',
+    });
   }
 
   static async generateWeeklySummaryForUser(userId: string) {
@@ -154,15 +159,25 @@ export class WeeklySummaryPipelineJob {
       console.log(`[Worker - Weekly Summary] Sending weekly context to AI...`);
       const aiWeeklySummaryText = await this.callAIForWeekly(weeklyContext);
 
-      await prisma.summary.create({
-        data: {
-          user_id: userId,
-          summary_type: 'weekly',
-          period_start: sevenDaysAgo,
-          period_end: endOfWeek,
-          content: aiWeeklySummaryText
-        }
-      });
+      await prisma.$transaction([
+        prisma.summary.deleteMany({
+          where: {
+            user_id: userId,
+            summary_type: 'weekly',
+            period_start: sevenDaysAgo,
+            period_end: endOfWeek,
+          },
+        }),
+        prisma.summary.create({
+          data: {
+            user_id: userId,
+            summary_type: 'weekly',
+            period_start: sevenDaysAgo,
+            period_end: endOfWeek,
+            content: aiWeeklySummaryText
+          }
+        }),
+      ]);
 
       console.log(`[Worker - Weekly Summary] Successfully generated Weekly Summary for User ID: ${userId}`);
 
@@ -172,7 +187,7 @@ export class WeeklySummaryPipelineJob {
   }
 
   static startCron() {
-    cron.schedule('55 23 * * *', async () => {
+    cron.schedule('55 23 * * 0', async () => {
       console.log('[Cron] Triggering Weekly Summary pipeline (Sunday 23:55)');
 
       const users = await prisma.user.findMany({ select: { id: true } });
@@ -184,4 +199,50 @@ export class WeeklySummaryPipelineJob {
 
     console.log('Background Worker for Weekly Summary Pipeline started.');
   }
+}
+
+async function generateReflectionSummary(input: {
+  context: string;
+  period: 'daily' | 'weekly';
+  instruction: string;
+}): Promise<string> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error('GEMINI_API_KEY is required for summary generation.');
+  }
+
+  const modelName = process.env.GEMINI_SUMMARY_MODEL ?? 'gemini-2.5-flash';
+  const ai = new GoogleGenerativeAI(apiKey);
+  const model = ai.getGenerativeModel({
+    model: modelName,
+    generationConfig: {
+      temperature: 0.2,
+    },
+  });
+
+  const prompt = `
+You are the reflection writer for a personal Second Brain diary system.
+
+Task:
+${input.instruction}
+
+Rules:
+- Use only the provided context.
+- Do not invent people, events, dates, or outcomes.
+- If the context is thin, say so briefly.
+- Keep the response in clear Markdown.
+- Write in the same language as the source context when possible.
+
+Context:
+${input.context}
+`.trim();
+
+  const result = await model.generateContent(prompt);
+  const text = result.response.text().trim();
+
+  if (!text) {
+    throw new Error(`Gemini returned an empty ${input.period} summary.`);
+  }
+
+  return text;
 }

@@ -7,6 +7,7 @@
     "strict": true,
     "types": ["node"],
     "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
     "skipLibCheck": true,
     "noEmit": true
   }

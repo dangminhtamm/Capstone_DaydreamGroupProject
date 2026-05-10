@@ -38,6 +38,15 @@ export class SyncCalendarJob {
       access_token: user.google_access_token,
       refresh_token: user.google_refresh_token,
     });
+    oauth2Client.on('tokens', async (tokens) => {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          ...(tokens.access_token && { google_access_token: tokens.access_token }),
+          ...(tokens.refresh_token && { google_refresh_token: tokens.refresh_token }),
+        },
+      });
+    });
 
     const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
 

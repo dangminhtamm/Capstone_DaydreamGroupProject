@@ -1,52 +1,49 @@
-import { createRequire } from "node:module";
+import { PrismaPg } from "@prisma/adapter-pg";
+import {
+  Prisma,
+  PrismaClient,
+  type PrismaClient as PrismaClientPackage,
+} from "@prisma/client";
+import { Pool } from "pg";
 
-import type { Prisma, PrismaClient as PrismaClientPackage } from "@prisma/client";
+export type PrismaClientLike = Pick<
+  PrismaClientPackage,
+  "$disconnect" | "$executeRawUnsafe" | "$queryRawUnsafe" | "$queryRaw" | "$transaction"
+>;
 
-import type { ChunkType, MemoryChunk } from "../ai/src/index.ts";
-
-const require = createRequire(import.meta.url);
-
-type PrismaClientLike = Pick<PrismaClientPackage, "$disconnect" | "$executeRawUnsafe" | "$queryRawUnsafe">;
-
-interface PrismaClientConstructor {
-  new (): PrismaClientLike;
-}
-
-interface PrismaRuntimeModule {
-  PrismaClient: PrismaClientConstructor;
-}
-
-export interface PersistMemoryChunkInput
-  extends Omit<MemoryChunk, "id" | "createdAt" | "updatedAt"> {
+export interface PersistMemoryChunkInput {
   userId: string;
-  chunkType: ChunkType;
-  metadata: Prisma.JsonValue;
+  sourceType: string;
+  sourceId: string;
+  chunkIndex?: number;
+  chunkType: string;
+  text: string;
+  evidence?: string | null;
+  metadata?: unknown;
+  occurredAt?: Date | string | null;
   embedding?: number[] | null;
 }
 
-function loadPrismaModule(): PrismaRuntimeModule {
-  try {
-    return require("./prisma/generated/client") as PrismaRuntimeModule;
-  } catch {
-    try {
-      return require("@prisma/client") as PrismaRuntimeModule;
-    } catch (error) {
-      const packageError = error as Error;
+export { Prisma, PrismaClient };
 
-      packageError.message =
-        "Unable to load Prisma client. Run `pnpm --dir packages/db prisma:generate` first.\n" +
-        packageError.message;
-      throw packageError;
-    }
-  }
-}
-
-const prismaModule = loadPrismaModule();
-
-export const PrismaClient = prismaModule.PrismaClient;
+let defaultPrismaClient: PrismaClientLike | null = null;
 
 export function createPrismaClient(): PrismaClientLike {
-  return new PrismaClient();
+  const connectionString = process.env.DATABASE_URL;
+
+  if (!connectionString) {
+    return new PrismaClient();
+  }
+
+  const pool = new Pool({ connectionString });
+  const adapter = new PrismaPg(pool);
+
+  return new PrismaClient({ adapter });
+}
+
+function getDefaultPrismaClient(): PrismaClientLike {
+  defaultPrismaClient ??= createPrismaClient();
+  return defaultPrismaClient;
 }
 
 export function toVectorLiteral(embedding: number[]): string {
@@ -66,10 +63,23 @@ export function toVectorLiteral(embedding: number[]): string {
 }
 
 export async function insertMemoryChunk(
-  prisma: PrismaClientLike,
-  input: PersistMemoryChunkInput
+  prismaOrInput: PrismaClientLike | PersistMemoryChunkInput,
+  maybeInput?: PersistMemoryChunkInput
 ): Promise<void> {
-  const metadataJson = JSON.stringify(input.metadata);
+  const prisma = maybeInput
+    ? (prismaOrInput as PrismaClientLike)
+    : getDefaultPrismaClient();
+  const input = maybeInput ?? (prismaOrInput as PersistMemoryChunkInput);
+  const metadataJson = JSON.stringify(input.metadata ?? {});
+  const metadataRecord =
+    input.metadata && typeof input.metadata === "object" && !Array.isArray(input.metadata)
+      ? (input.metadata as Record<string, unknown>)
+      : {};
+  const chunkIndex =
+    input.chunkIndex ??
+    (typeof metadataRecord.chunkIndex === "number" ? metadataRecord.chunkIndex : 0);
+  const occurredAt =
+    input.occurredAt == null ? new Date() : new Date(input.occurredAt);
   const embeddingLiteral = input.embedding == null ? null : toVectorLiteral(input.embedding);
 
   await prisma.$executeRawUnsafe(
@@ -78,9 +88,12 @@ export async function insertMemoryChunk(
         "user_id",
         "source_type",
         "source_id",
+        "chunk_index",
         "chunk_type",
         "text",
+        "evidence",
         "metadata",
+        "occurred_at",
         "embedding"
       )
       VALUES (
@@ -89,30 +102,106 @@ export async function insertMemoryChunk(
         $3,
         $4,
         $5,
-        $6::jsonb,
+        $6,
+        $7,
+        $8::jsonb,
+        $9,
         CASE
-          WHEN $7::text IS NULL THEN NULL
-          ELSE $7::vector
+          WHEN $10::text IS NULL THEN NULL
+          ELSE $10::vector
         END
       )
+      ON CONFLICT ("user_id", "source_type", "source_id", "chunk_index")
+      DO UPDATE SET
+        "chunk_type" = EXCLUDED."chunk_type",
+        "text" = EXCLUDED."text",
+        "evidence" = EXCLUDED."evidence",
+        "metadata" = EXCLUDED."metadata",
+        "occurred_at" = EXCLUDED."occurred_at",
+        "embedding" = EXCLUDED."embedding",
+        "updated_at" = now()
     `,
     input.userId,
     input.sourceType,
     input.sourceId,
+    chunkIndex,
     input.chunkType,
     input.text,
+    input.evidence ?? null,
     metadataJson,
+    occurredAt,
     embeddingLiteral
   );
 }
 
 export async function insertMemoryChunks(
-  prisma: PrismaClientLike,
-  inputs: PersistMemoryChunkInput[]
+  prismaOrInputs: PrismaClientLike | PersistMemoryChunkInput[],
+  maybeInputs?: PersistMemoryChunkInput[]
 ): Promise<void> {
+  const prisma = maybeInputs
+    ? (prismaOrInputs as PrismaClientLike)
+    : getDefaultPrismaClient();
+  const inputs = maybeInputs ?? (prismaOrInputs as PersistMemoryChunkInput[]);
+
   for (const input of inputs) {
     await insertMemoryChunk(prisma, input);
   }
+}
+
+export interface MemorySourceRef {
+  userId: string;
+  sourceType: string;
+  sourceId: string;
+}
+
+export interface PruneMemoryChunksInput extends MemorySourceRef {
+  keepChunkCount: number;
+}
+
+export async function deleteMemoryChunksForSource(
+  prismaOrRef: PrismaClientLike | MemorySourceRef,
+  maybeRef?: MemorySourceRef
+): Promise<void> {
+  const prisma = maybeRef
+    ? (prismaOrRef as PrismaClientLike)
+    : getDefaultPrismaClient();
+  const ref = maybeRef ?? (prismaOrRef as MemorySourceRef);
+
+  await prisma.$executeRawUnsafe(
+    `
+      DELETE FROM "memory_chunks"
+      WHERE "user_id" = $1
+        AND "source_type" = $2
+        AND "source_id" = $3
+    `,
+    ref.userId,
+    ref.sourceType,
+    ref.sourceId
+  );
+}
+
+export async function pruneMemoryChunksForSource(
+  prismaOrInput: PrismaClientLike | PruneMemoryChunksInput,
+  maybeInput?: PruneMemoryChunksInput
+): Promise<void> {
+  const prisma = maybeInput
+    ? (prismaOrInput as PrismaClientLike)
+    : getDefaultPrismaClient();
+  const input = maybeInput ?? (prismaOrInput as PruneMemoryChunksInput);
+
+  await prisma.$executeRawUnsafe(
+    `
+      DELETE FROM "memory_chunks"
+      WHERE "user_id" = $1
+        AND "source_type" = $2
+        AND "source_id" = $3
+        AND "chunk_index" >= $4
+    `,
+    input.userId,
+    input.sourceType,
+    input.sourceId,
+    Math.max(0, input.keepChunkCount)
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -130,7 +219,7 @@ export interface VectorSearchOptions {
   userId: string;
 
   /** Restrict results to a single chunk type, e.g. "action_item" or "decision". */
-  chunkType?: ChunkType;
+  chunkType?: string;
 
   /** Restrict results to a specific source, e.g. "diary_entry" or "calendar". */
   sourceType?: string;
@@ -167,10 +256,13 @@ export interface VectorSearchResult {
   userId: string;
   sourceType: string;
   sourceId: string;
-  chunkType: ChunkType;
+  chunkIndex: number;
+  chunkType: string;
   text: string;
+  evidence: string | null;
   /** Parsed JSON metadata object (date, sourceType, sourceId). */
   metadata: Record<string, unknown>;
+  occurredAt: Date;
   createdAt: Date;
   /** Cosine similarity in the range [0, 1]. Higher = more relevant. */
   similarity: number;
@@ -182,9 +274,12 @@ interface RawChunkRow {
   user_id: string;
   source_type: string;
   source_id: string;
+  chunk_index: number;
   chunk_type: string;
   text: string;
+  evidence: string | null;
   metadata: string | Record<string, unknown> | null;
+  occurred_at: Date | string;
   created_at: Date | string;
   similarity: number | string;
 }
@@ -246,12 +341,12 @@ export async function vectorSearch(
 
   if (dateFrom !== undefined) {
     params.push(dateFrom);
-    conditions.push(`("metadata"->>'date') >= $${params.length}`);
+    conditions.push(`"occurred_at" >= $${params.length}`);
   }
 
   if (dateTo !== undefined) {
     params.push(dateTo);
-    conditions.push(`("metadata"->>'date') <= $${params.length}`);
+    conditions.push(`"occurred_at" <= $${params.length}`);
   }
 
   if (minSimilarity > 0) {
@@ -271,9 +366,12 @@ export async function vectorSearch(
       "user_id",
       "source_type",
       "source_id",
+      "chunk_index",
       "chunk_type",
       "text",
+      "evidence",
       "metadata",
+      "occurred_at",
       "created_at",
       1 - ("embedding" <=> $1::vector) AS similarity
     FROM "memory_chunks"
@@ -292,12 +390,15 @@ export async function vectorSearch(
     userId: row.user_id,
     sourceType: row.source_type,
     sourceId: row.source_id,
-    chunkType: row.chunk_type as ChunkType,
+    chunkIndex: Number(row.chunk_index),
+    chunkType: row.chunk_type,
     text: row.text,
+    evidence: row.evidence,
     metadata:
       typeof row.metadata === "string"
         ? (JSON.parse(row.metadata) as Record<string, unknown>)
         : (row.metadata ?? {}),
+    occurredAt: row.occurred_at instanceof Date ? row.occurred_at : new Date(row.occurred_at),
     createdAt: row.created_at instanceof Date ? row.created_at : new Date(row.created_at),
     similarity: Number(row.similarity),
   }));

@@ -14,7 +14,8 @@ export class StorageService {
   }
 
   async uploadFile(file: Express.Multer.File, bucket: string) {
-    const filePath = `attachments/${Date.now()}-${file.originalname}`;
+    const safeName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const filePath = `attachments/${Date.now()}-${safeName}`;
 
     const { data, error } = await this.supabase.storage
       .from(bucket)
@@ -30,6 +31,9 @@ export class StorageService {
       .from(bucket)
       .getPublicUrl(filePath);
 
-    return urlData.publicUrl;
+    return {
+      path: data.path,
+      url: urlData.publicUrl,
+    };
   }
 }
