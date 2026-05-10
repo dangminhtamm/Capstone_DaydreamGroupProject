@@ -13,7 +13,7 @@
   "scripts": {
     "prisma:generate": "prisma generate --config prisma.config.ts",
     "prisma:validate": "prisma validate --schema prisma/schema.prisma",
-    "memory:insert-sample": "node --experimental-strip-types scripts/insert-memory-chunks.ts",
+    "memory:insert-sample": "node --env-file=.env --experimental-strip-types scripts/insert-memory-chunks.ts",
     "memory:test-search": "node --env-file=.env --experimental-strip-types scripts/test-vector-search.ts",
     "memory:test-query": "node --env-file=.env --experimental-strip-types scripts/test-answer-memory.ts"
   },

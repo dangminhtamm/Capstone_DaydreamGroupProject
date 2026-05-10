@@ -85,6 +85,7 @@ export async function insertMemoryChunk(
   await prisma.$executeRawUnsafe(
     `
       INSERT INTO "memory_chunks" (
+        "id",
         "user_id",
         "source_type",
         "source_id",
@@ -97,6 +98,7 @@ export async function insertMemoryChunk(
         "embedding"
       )
       VALUES (
+        gen_random_uuid(),
         $1,
         $2,
         $3,
