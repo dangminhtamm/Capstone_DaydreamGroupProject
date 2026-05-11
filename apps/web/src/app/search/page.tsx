@@ -100,10 +100,10 @@ export default function SearchPage() {
       description="Ask a question and get an answer grounded in your saved memories."
     >
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(340px,0.9fr)]">
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <section className="rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white via-white to-indigo-50/40 p-6 shadow-sm shadow-slate-200/60">
           <div className="mb-5">
-            <p className="text-xs font-semibold uppercase tracking-wide text-indigo-600">Week 3 Search UI</p>
-            <h3 className="mt-2 text-xl font-semibold text-slate-900">Ask your Second Brain</h3>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Week 3 Search UI</p>
+            <h3 className="mt-2 text-2xl font-bold tracking-tight text-slate-950">Ask your Second Brain</h3>
             <p className="mt-1 text-sm text-slate-600">
               Type a natural-language question. The backend will return an answer with citations.
             </p>
@@ -115,7 +115,7 @@ export default function SearchPage() {
               <p className="mt-1 text-sm text-amber-700">Search uses your Supabase JWT to access private memories.</p>
               <button
                 onClick={signInWithGoogle}
-                className="mt-4 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800"
+                className="mt-4 cursor-pointer rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800"
               >
                 Sign in with Google
               </button>
@@ -128,7 +128,7 @@ export default function SearchPage() {
                   value={question}
                   onChange={(event) => setQuestion(event.target.value)}
                   placeholder="Example: What did I write about my capstone progress?"
-                  className="mt-2 min-h-36 w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-100"
+                  className="mt-2 min-h-36 w-full resize-none rounded-2xl border border-slate-200 bg-white/80 px-4 py-3 text-sm text-slate-900 shadow-inner outline-none transition placeholder:text-slate-400 focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-100"
                 />
               </label>
 
@@ -138,7 +138,7 @@ export default function SearchPage() {
                     key={suggestion}
                     type="button"
                     onClick={() => setQuestion(suggestion)}
-                    className="rounded-full border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"
+                    className="cursor-pointer rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm transition hover:-translate-y-0.5 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"
                   >
                     {suggestion}
                   </button>
@@ -154,7 +154,7 @@ export default function SearchPage() {
               <button
                 type="submit"
                 disabled={!canSubmit}
-                className="inline-flex items-center justify-center rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-100 transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none"
+                className="inline-flex cursor-pointer items-center justify-center rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-200 transition hover:-translate-y-0.5 hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none disabled:hover:translate-y-0"
               >
                 {isSearching ? "Searching memories..." : "Ask question"}
               </button>
@@ -162,11 +162,11 @@ export default function SearchPage() {
           )}
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <section className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm shadow-slate-200/60">
           <div className="mb-5 flex items-start justify-between gap-3">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Answer</p>
-              <h3 className="mt-2 text-xl font-semibold text-slate-900">Grounded response</h3>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Answer</p>
+              <h3 className="mt-2 text-2xl font-bold tracking-tight text-slate-950">Grounded response</h3>
             </div>
             {result ? (
               <span className={`rounded-full px-3 py-1 text-xs font-semibold ring-1 ${confidenceStyles[result.confidence]}`}>
@@ -182,7 +182,7 @@ export default function SearchPage() {
               <div className="h-4 w-10/12 animate-pulse rounded bg-slate-200" />
             </div>
           ) : result ? (
-            <div className="prose prose-slate max-w-none">
+            <div className="rounded-2xl border border-indigo-100 bg-indigo-50/40 p-4">
               <p className="whitespace-pre-wrap text-sm leading-7 text-slate-700">{result.answer}</p>
             </div>
           ) : (
@@ -199,11 +199,11 @@ export default function SearchPage() {
         </section>
       </div>
 
-      <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+      <section className="mt-6 rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm shadow-slate-200/60">
         <div className="mb-4 flex items-center justify-between">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Citations</p>
-            <h3 className="mt-2 text-xl font-semibold text-slate-900">Sources used for the answer</h3>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Citations</p>
+            <h3 className="mt-2 text-2xl font-bold tracking-tight text-slate-950">Sources used for the answer</h3>
           </div>
           <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
             {result?.sources.length ?? 0} sources
@@ -213,9 +213,9 @@ export default function SearchPage() {
         {result?.sources.length ? (
           <div className="grid gap-4 md:grid-cols-2">
             {result.sources.map((source) => (
-              <article key={`${source.marker}-${source.chunkId}`} className="rounded-xl border border-slate-200 p-4">
+              <article key={`${source.marker}-${source.chunkId}`} className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-indigo-200 hover:shadow-md">
                 <div className="mb-3 flex items-center justify-between gap-3">
-                  <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-bold text-indigo-700">
+                  <span className="rounded-full bg-indigo-100 px-3 py-1 text-xs font-bold text-indigo-700 ring-1 ring-indigo-200">
                     [{source.marker}]
                   </span>
                   <span className="text-xs text-slate-500">
@@ -227,7 +227,7 @@ export default function SearchPage() {
                   {source.sourceTitle || `${source.sourceType} • ${source.chunkType}`}
                 </p>
                 {source.claim ? <p className="mt-2 text-sm text-slate-700">{source.claim}</p> : null}
-                <blockquote className="mt-3 border-l-4 border-indigo-100 pl-3 text-sm italic text-slate-600">
+                <blockquote className="mt-3 rounded-r-xl border-l-4 border-indigo-200 bg-white px-3 py-2 text-sm italic text-slate-600">
                   “{source.quote}”
                 </blockquote>
                 <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-500">

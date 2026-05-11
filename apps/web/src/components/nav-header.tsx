@@ -69,7 +69,7 @@ export function NavHeader() {
           ) : (
             <button
               onClick={signInWithGoogle}
-              className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 transition-colors"
+              className="flex cursor-pointer items-center gap-2 px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 transition-colors"
             >
               <svg className="w-4 h-4" viewBox="0 0 24 24">
                 <path
