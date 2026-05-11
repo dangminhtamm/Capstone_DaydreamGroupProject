@@ -49,7 +49,7 @@ export async function retrieveMemory(
   const lexicalWeight = clampWeight(filters.lexicalWeight ?? 0.3);
 
   const conditions: Prisma.Sql[] = [
-    Prisma.sql`user_id = ${userId}::uuid`,
+    Prisma.sql`user_id = ${userId}`,
   ];
 
   if (filters.chunkType) {
