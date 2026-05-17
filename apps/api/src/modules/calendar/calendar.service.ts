@@ -1,5 +1,11 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { google, calendar_v3 } from 'googleapis';
+import { indexMemoryFromCalendar, type CalendarEventInput } from '@second-brain/ai';
+import {
+  deleteMemoryChunksForSource,
+  insertMemoryChunks,
+  pruneMemoryChunksForSource,
+} from '@second-brain/db';
 import { PrismaService } from '../../prisma/prisma.service';
 
 @Injectable()
@@ -69,10 +75,20 @@ export class CalendarService {
 
             const rawEvents = response.data.items || [];
 
-            const upsertPromises = rawEvents.map((event) => {
-                const normalizedData = this.normalizeEvent(event, user.id);
+            // Step 1: Upsert calendar events into DB
+            const upsertedEvents: Array<{
+                id: string;
+                external_id: string;
+                title: string;
+                description: string | null;
+                start_time: Date;
+                end_time: Date;
+                html_link: string | null;
+            }> = [];
 
-                return this.prisma.calendarEvent.upsert({
+            for (const event of rawEvents) {
+                const normalizedData = this.normalizeEvent(event, user.id);
+                const upserted = await this.prisma.calendarEvent.upsert({
                     where: { external_id: normalizedData.external_id },
                     update: {
                         title: normalizedData.title,
@@ -91,13 +107,20 @@ export class CalendarService {
                         html_link: normalizedData.html_link,
                     },
                 });
-            });
+                upsertedEvents.push(upserted);
+            }
 
-            await Promise.all(upsertPromises);
+            // Step 2: Index events into AI memory
+            const memoryResult = await this.indexCalendarEventsToMemory(
+                user.id,
+                upsertedEvents,
+            );
 
             return {
                 message: 'Sync completed successfully',
                 syncedCount: rawEvents.length,
+                memoryIndexed: memoryResult.indexedEventCount,
+                memoryErrors: memoryResult.errors.length,
             };
 
         } catch (error) {
@@ -105,7 +128,6 @@ export class CalendarService {
             throw new Error('Could not sync calendar events to database');
         }
     }
-
 
     async getEventsFromDb(supabaseId: string) {
         const user = await this.prisma.user.findUnique({
@@ -131,5 +153,57 @@ export class CalendarService {
             },
             take: 20,
         });
+    }
+
+    // -----------------------------------------------------------------------
+    // AI Memory Indexing for Calendar Events
+    // -----------------------------------------------------------------------
+
+    /**
+     * Index calendar events into memory_chunks for AI retrieval.
+     * Each event produces 1–2 chunks (summary + optional description).
+     * Calendar events are already structured, so no LLM chunking needed.
+     */
+    private async indexCalendarEventsToMemory(
+        userId: string,
+        events: Array<{
+            id: string;
+            external_id: string;
+            title: string;
+            description: string | null;
+            start_time: Date;
+            end_time: Date;
+            html_link: string | null;
+        }>,
+    ) {
+        const calendarInputs: CalendarEventInput[] = events.map((event) => ({
+            eventId: event.id,
+            externalId: event.external_id,
+            title: event.title,
+            description: event.description,
+            startTime: event.start_time,
+            endTime: event.end_time,
+            htmlLink: event.html_link,
+        }));
+
+        try {
+            return await indexMemoryFromCalendar({
+                userId,
+                events: calendarInputs,
+                insertChunks: async (chunks) => {
+                    await this.prisma.$transaction(async (tx) => {
+                        await insertMemoryChunks(tx as any, chunks);
+                    });
+                },
+            });
+        } catch (error) {
+            console.error('[CalendarService] Memory indexing failed (non-fatal):', error);
+            return {
+                sourceType: 'calendar' as const,
+                indexedEventCount: 0,
+                totalChunkCount: 0,
+                errors: [{ eventId: 'batch', error: String(error) }],
+            };
+        }
     }
 }

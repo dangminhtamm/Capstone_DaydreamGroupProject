@@ -66,9 +66,9 @@ export default function SearchPage() {
     setError(null);
 
     try {
-      // Backend search endpoint returns a grounded answer and citation sources.
+      // Use the new streaming SSE endpoint
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
-      const response = await fetch(`${apiUrl}/api/search`, {
+      const response = await fetch(`${apiUrl}/api/search/stream`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -84,11 +84,72 @@ export default function SearchPage() {
         throw new Error(`Search failed with status ${response.status}`);
       }
 
-      const data = (await response.json()) as SearchResponse;
-      setResult(data);
+      if (!response.body) {
+        throw new Error("No response body returned from stream.");
+      }
+
+      // Initialize result state to show stream progressively
+      setResult({ answer: "", confidence: "low", sources: [] });
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let done = false;
+      let buffer = "";
+
+      while (!done) {
+        const { value, done: readerDone } = await reader.read();
+        done = readerDone;
+
+        if (value) {
+          buffer += decoder.decode(value, { stream: true });
+
+          // Parse SSE format
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || ""; // Keep the incomplete line in the buffer
+
+          let currentEvent = "message";
+
+          for (const line of lines) {
+            if (line.startsWith("event: ")) {
+              currentEvent = line.substring(7).trim();
+            } else if (line.startsWith("data: ")) {
+              const data = line.substring(6).trim();
+              
+              if (currentEvent === "token") {
+                try {
+                  const tokenText = JSON.parse(data);
+                  setResult((prev) => prev ? { ...prev, answer: prev.answer + tokenText } : null);
+                } catch (e) {
+                  console.error("Failed to parse token:", data);
+                }
+              } else if (currentEvent === "metadata") {
+                try {
+                  const metadata = JSON.parse(data);
+                  setResult((prev) => prev ? { 
+                    ...prev, 
+                    confidence: metadata.confidence, 
+                    sources: metadata.sources 
+                  } : null);
+                } catch (e) {
+                  console.error("Failed to parse metadata:", data);
+                }
+              } else if (currentEvent === "done") {
+                done = true;
+              } else if (currentEvent === "error") {
+                try {
+                  const errData = JSON.parse(data);
+                  setError(errData.message || "Stream error occurred");
+                } catch (e) {
+                  setError("Stream error occurred");
+                }
+                done = true;
+              }
+            }
+          }
+        }
+      }
     } catch (searchError) {
       setError(searchError instanceof Error ? searchError.message : "Search failed. Please try again.");
-      setResult(null);
     } finally {
       setIsSearching(false);
     }
@@ -175,7 +236,7 @@ export default function SearchPage() {
             ) : null}
           </div>
 
-          {isSearching ? (
+          {isSearching && !result?.answer ? (
             <div className="space-y-3">
               <div className="h-4 w-11/12 animate-pulse rounded bg-slate-200" />
               <div className="h-4 w-9/12 animate-pulse rounded bg-slate-200" />

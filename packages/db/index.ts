@@ -405,3 +405,115 @@ export async function vectorSearch(
     similarity: Number(row.similarity),
   }));
 }
+
+// ---------------------------------------------------------------------------
+// Entity Mentions (Knowledge Graph)
+// ---------------------------------------------------------------------------
+
+export interface EntityMentionInput {
+  chunkId: string;
+  entityType: string; // 'person', 'project', 'tag'
+  entityValue: string;
+}
+
+/**
+ * Insert entity mentions for memory chunks.
+ * Expects actual chunk IDs (UUIDs). Skips duplicates via ON CONFLICT.
+ */
+export async function insertEntityMentions(
+  prismaOrInputs: PrismaClientLike | EntityMentionInput[],
+  maybeInputs?: EntityMentionInput[],
+): Promise<void> {
+  const prisma = maybeInputs
+    ? (prismaOrInputs as PrismaClientLike)
+    : getDefaultPrismaClient();
+  const inputs = maybeInputs ?? (prismaOrInputs as EntityMentionInput[]);
+
+  if (!inputs.length) return;
+
+  // Deduplicate within the batch
+  const seen = new Set<string>();
+  const unique = inputs.filter((m) => {
+    const key = `${m.chunkId}:${m.entityType}:${m.entityValue}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  for (const mention of unique) {
+    await prisma.$executeRawUnsafe(
+      `
+        INSERT INTO "entity_mentions" ("id", "chunk_id", "entity_type", "entity_value")
+        VALUES (gen_random_uuid(), $1, $2, $3)
+        ON CONFLICT DO NOTHING
+      `,
+      mention.chunkId,
+      mention.entityType,
+      mention.entityValue,
+    );
+  }
+}
+
+/**
+ * Delete all entity mentions associated with chunks from a given source.
+ * Used before re-indexing to clear stale entity data.
+ */
+export async function deleteEntityMentionsForSource(
+  prismaOrRef: PrismaClientLike | MemorySourceRef,
+  maybeRef?: MemorySourceRef,
+): Promise<void> {
+  const prisma = maybeRef
+    ? (prismaOrRef as PrismaClientLike)
+    : getDefaultPrismaClient();
+  const ref = maybeRef ?? (prismaOrRef as MemorySourceRef);
+
+  await prisma.$executeRawUnsafe(
+    `
+      DELETE FROM "entity_mentions"
+      WHERE "chunk_id" IN (
+        SELECT "id" FROM "memory_chunks"
+        WHERE "user_id" = $1
+          AND "source_type" = $2
+          AND "source_id" = $3
+      )
+    `,
+    ref.userId,
+    ref.sourceType,
+    ref.sourceId,
+  );
+}
+
+/**
+ * Resolve memory chunk IDs from source keys (userId + sourceType + sourceId + chunkIndex).
+ * Returns a map of chunkIndex → chunkId (UUID).
+ */
+export async function resolveMemoryChunkIds(
+  prismaOrArgs: PrismaClientLike | { userId: string; sourceType: string; sourceId: string },
+  maybeArgs?: { userId: string; sourceType: string; sourceId: string },
+): Promise<Map<number, string>> {
+  const prisma = maybeArgs
+    ? (prismaOrArgs as PrismaClientLike)
+    : getDefaultPrismaClient();
+  const args = maybeArgs ?? (prismaOrArgs as { userId: string; sourceType: string; sourceId: string });
+
+  const rows = await (prisma.$queryRawUnsafe as (...a: unknown[]) => Promise<{ id: string; chunk_index: number }[]>)(
+    `
+      SELECT "id", "chunk_index"
+      FROM "memory_chunks"
+      WHERE "user_id" = $1
+        AND "source_type" = $2
+        AND "source_id" = $3
+      ORDER BY "chunk_index"
+    `,
+    args.userId,
+    args.sourceType,
+    args.sourceId,
+  );
+
+  const map = new Map<number, string>();
+  for (const row of rows) {
+    map.set(Number(row.chunk_index), row.id);
+  }
+  return map;
+}
+

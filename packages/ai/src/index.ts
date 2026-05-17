@@ -1,7 +1,5 @@
 // packages/ai/src/index.ts
-export { CHUNK_TYPES, type ChunkType } from "./chunk-types.ts";
-export { type SemanticChunk } from "./types.ts";
-export { type MemoryChunkMetadata } from "./types.ts";
+export { CHUNK_TYPES, type ChunkType, type SemanticChunk, type MemoryChunkMetadata } from "./types.ts";
 export { generateSemanticChunks } from "./chunker.ts";
 export { retrieveMemory, type RetrievalFilters } from "./retrieval.ts";
 export {
@@ -9,15 +7,27 @@ export {
   answerMemory,
   type AnswerMemoryOptions,
   type AnswerMemoryResult,
-  type MemoryCitation,
 } from "./answer-memory.ts";
+export { type MemoryCitation } from "./answer-utils.ts";
+export {
+  answerMemoryStream,
+  type AnswerMemoryStreamOptions,
+  type AnswerMemoryStreamResult,
+} from "./answer-memory-stream.ts";
 export {
   indexMemoryFromDiary,
+  type ExtractedEntityMention,
   type IndexedMemoryChunk,
   type IndexMemoryFromDiaryInput,
   type IndexMemoryFromDiaryResult,
   type PersistedMemoryChunkPayload,
 } from "./memory-indexer.ts";
+export {
+  indexMemoryFromCalendar,
+  type CalendarEventInput,
+  type IndexMemoryFromCalendarInput,
+  type IndexMemoryFromCalendarResult,
+} from "./calendar-indexer.ts";
 export {
   DEFAULT_EMBEDDING_DIMENSION,
   DEFAULT_EMBEDDING_PROVIDER,

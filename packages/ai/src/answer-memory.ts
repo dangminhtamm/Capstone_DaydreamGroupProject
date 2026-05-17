@@ -47,21 +47,11 @@ const GeminiGroundedAnswerResponseSchema: ResponseSchema = {
   required: ["answer", "confidence", "citations"],
 };
 
-export interface MemoryCitation {
-  marker: string;
-  chunkId: string;
-  sourceType: string;
-  sourceId: string;
-  sourceTitle?: string;
-  occurredAt: string;
-  chunkType: string;
-  quote: string;
-  similarity: number;
-  vectorSimilarity?: number;
-  lexicalScore?: number;
-  retrievalMode?: string;
-  claim?: string;
-}
+import {
+  type MemoryCitation,
+  buildCitations,
+  classifyRetrievalConfidence,
+} from "./answer-utils.ts";
 
 export interface AnswerMemoryResult {
   answer: string;
@@ -125,16 +115,14 @@ export async function answerFromChunks(
   }
 
   const sources = buildCitations(sortedChunks);
-  const sourceContext = sources
+  // Only send the top 5 most relevant sources to the prompt to reduce input tokens
+  const promptSources = sources.slice(0, 5);
+  const sourceContext = promptSources
     .map((source) => {
       return [
         `[${source.marker}]`,
         `date: ${source.occurredAt}`,
-        `sourceType: ${source.sourceType}`,
-        `sourceId: ${source.sourceId}`,
-        `chunkType: ${source.chunkType}`,
-        `similarity: ${source.similarity.toFixed(3)}`,
-        `retrievalMode: ${source.retrievalMode ?? "vector"}`,
+        `type: ${source.sourceType}/${source.chunkType}`,
         `evidence: ${source.quote}`,
       ].join("\n");
     })
@@ -152,8 +140,8 @@ ${sourceContext}
 Rules:
 - Answer ONLY using the retrieved memory sources.
 - Do not invent dates, people, events, decisions, emotions, or outcomes.
-- Every concrete claim must be supported by a citation marker like [S1].
-- Use only citation markers that appear in the retrieved memory sources.
+- Answer naturally without adding any citation markers (like [S1]) in your text.
+- However, you MUST still provide the citations in the JSON output with their respective claims.
 - If the sources do not answer the question, say that the memory is insufficient and set confidence to "low".
 - Prefer a concise answer over a fluent but unsupported answer.
 - Keep the answer in the same language as the user question.
@@ -166,6 +154,7 @@ Rules:
       responseSchema: GeminiGroundedAnswerResponseSchema,
       validator: GroundedAnswerSchema,
       temperature: 0.1,
+      maxOutputTokens: Number(process.env.MEMORY_MAX_ANSWER_TOKENS ?? 1024),
     });
 
     const allowedMarkers = new Set(sources.map((source) => source.marker));
@@ -197,7 +186,7 @@ Rules:
     const finalConfidence = minConfidence(output.confidence, retrievalConfidence);
 
     return {
-      answer: ensureAnswerHasCitationMarkers(output.answer, citations),
+      answer: output.answer,
       confidence: finalConfidence,
       citations,
     };
@@ -213,53 +202,7 @@ Rules:
   }
 }
 
-function buildCitations(chunks: MemorySearchHit[]): MemoryCitation[] {
-  return chunks.map((chunk, index) => {
-    const metadata = safeMetadata(chunk.metadata);
 
-    return {
-      marker: `S${index + 1}`,
-      chunkId: chunk.id,
-      sourceType: chunk.sourceType,
-      sourceId: chunk.sourceId,
-      sourceTitle: metadata.sourceTitle,
-      occurredAt: chunk.occurredAt instanceof Date
-        ? chunk.occurredAt.toISOString()
-        : new Date(chunk.occurredAt).toISOString(),
-      chunkType: chunk.chunkType,
-      quote: trimEvidence(chunk.evidence ?? chunk.text),
-      similarity: Number(chunk.similarity),
-      vectorSimilarity: Number(chunk.vectorSimilarity ?? 0),
-      lexicalScore: Number(chunk.lexicalScore ?? 0),
-      retrievalMode: chunk.retrievalMode,
-    };
-  });
-}
-
-function safeMetadata(metadata: unknown): { sourceTitle?: string } {
-  if (!metadata || typeof metadata !== "object") return {};
-  const value = metadata as Record<string, unknown>;
-
-  return {
-    sourceTitle:
-      typeof value.sourceTitle === "string" ? value.sourceTitle : undefined,
-  };
-}
-
-function trimEvidence(text: string, maxLength = 600): string {
-  const normalized = text.replace(/\s+/g, " ").trim();
-  if (normalized.length <= maxLength) return normalized;
-  return `${normalized.slice(0, maxLength - 1)}…`;
-}
-
-function classifyRetrievalConfidence(
-  topSimilarity: number,
-  citationCount: number,
-): "high" | "medium" | "low" {
-  if (topSimilarity >= 0.8 && citationCount >= 2) return "high";
-  if (topSimilarity >= 0.65 && citationCount >= 1) return "medium";
-  return "low";
-}
 
 function minConfidence(
   modelConfidence: "high" | "medium" | "low",
@@ -271,16 +214,6 @@ function minConfidence(
     : retrievalConfidence;
 }
 
-function ensureAnswerHasCitationMarkers(
-  answer: string,
-  citations: MemoryCitation[],
-): string {
-  const hasMarker = /\[S\d+\]/.test(answer);
-  if (hasMarker || citations.length === 0) return answer;
-
-  const fallbackMarker = `[${citations[0].marker}]`;
-  return `${answer.trim()} ${fallbackMarker}`;
-}
 
 function lowConfidenceNoAnswer(message: string): AnswerMemoryResult {
   return {

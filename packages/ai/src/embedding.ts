@@ -127,6 +127,11 @@ export function createEmbeddingProvider(
   return new GeminiEmbeddingProvider(apiKey);
 }
 
+let _cachedDefaultProvider: AdvancedEmbeddingProvider | null = null;
+
 export function createDefaultEmbeddingProvider(): AdvancedEmbeddingProvider {
-  return createEmbeddingProvider();
+  if (!_cachedDefaultProvider) {
+    _cachedDefaultProvider = createEmbeddingProvider();
+  }
+  return _cachedDefaultProvider;
 }

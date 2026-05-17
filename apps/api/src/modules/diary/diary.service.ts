@@ -2,19 +2,28 @@ import {
   Injectable,
   InternalServerErrorException,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { indexMemoryFromDiary } from '@second-brain/ai';
 import {
   deleteMemoryChunksForSource,
+  deleteEntityMentionsForSource,
+  insertEntityMentions,
   insertMemoryChunks,
   pruneMemoryChunksForSource,
+  resolveMemoryChunkIds,
 } from '@second-brain/db';
-import { PrismaService } from '../../prisma/prisma.service'; // Adjust path based on your setup
+import { PrismaService } from '../../prisma/prisma.service';
+import { MemoryQueueProducer } from '../memory-queue/memory-queue.producer';
 import { CreateDiaryDto } from './dto/create-diary.dto';
 
 @Injectable()
 export class DiaryService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    /** Optional — if Redis is unavailable, queue won't be injected and we fall back to inline. */
+    @Optional() private readonly memoryQueue?: MemoryQueueProducer,
+  ) {}
 
   async create(userId: string, dto: CreateDiaryDto) {
     const user = await this.prisma.user.findUnique({
@@ -32,24 +41,19 @@ export class DiaryService {
       },
     });
 
-    try {
-      const indexingResult = await this.indexDiaryEntry(
-        user.id,
-        entry,
-        dto.title,
-      );
+    // Dispatch to background queue if available, otherwise index inline
+    const indexingResult = await this.dispatchOrIndexDiary(
+      user.id,
+      entry,
+      dto.title,
+    );
 
-      return {
-        ...this.toClientEntry(entry),
-        memoryIndexed: true,
-        memoryChunkCount: indexingResult.chunkCount,
-      };
-    } catch (error) {
-      console.error('Failed to index diary entry into memory chunks:', error);
-      throw new InternalServerErrorException(
-        'Diary entry was saved, but memory indexing failed.',
-      );
-    }
+    return {
+      ...this.toClientEntry(entry),
+      memoryIndexed: indexingResult.indexed,
+      memoryChunkCount: indexingResult.chunkCount,
+      memoryQueued: indexingResult.queued,
+    };
   }
 
   async findAll(userId: string) {
@@ -100,29 +104,19 @@ export class DiaryService {
       },
     });
 
-    try {
-      const indexingResult = await this.indexDiaryEntry(user.id, entry, title);
+    // Dispatch to background queue if available, otherwise index inline
+    const indexingResult = await this.dispatchOrIndexDiary(
+      user.id,
+      entry,
+      title,
+    );
 
-      return {
-        ...this.toClientEntry(entry),
-        memoryIndexed: true,
-        memoryChunkCount: indexingResult.chunkCount,
-      };
-    } catch (error) {
-      await this.prisma.diaryEntry
-        .update({
-          where: { id },
-          data: { raw_text: existingEntry.raw_text },
-        })
-        .catch((rollbackError) => {
-          console.error('Failed to rollback diary update:', rollbackError);
-        });
-
-      console.error('Failed to re-index updated diary entry:', error);
-      throw new InternalServerErrorException(
-        'Diary update was rolled back because memory re-indexing failed.',
-      );
-    }
+    return {
+      ...this.toClientEntry(entry),
+      memoryIndexed: indexingResult.indexed,
+      memoryChunkCount: indexingResult.chunkCount,
+      memoryQueued: indexingResult.queued,
+    };
   }
 
   async remove(userId: string, id: string) {
@@ -139,24 +133,58 @@ export class DiaryService {
     });
   }
 
-  private async findOwnedEntry(userId: string, id: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { supabaseId: userId },
-      select: { id: true },
-    });
+  // -----------------------------------------------------------------------
+  // Dispatch: Queue vs Inline
+  // -----------------------------------------------------------------------
 
-    if (!user) throw new NotFoundException('Diary entry not found');
+  /**
+   * Try to enqueue the indexing job to BullMQ.
+   * If the queue is unavailable (no Redis), fall back to synchronous inline indexing.
+   */
+  private async dispatchOrIndexDiary(
+    userId: string,
+    entry: { id: string; raw_text: string; entry_date: Date },
+    sourceTitle: string,
+  ): Promise<{ indexed: boolean; chunkCount: number; queued: boolean }> {
+    // Try queue-based approach first
+    if (this.memoryQueue) {
+      try {
+        await this.memoryQueue.enqueueDiaryIndex({
+          userId,
+          diaryId: entry.id,
+          rawText: entry.raw_text,
+          entryDate: entry.entry_date.toISOString(),
+          sourceTitle,
+        });
 
-    const entry = await this.prisma.diaryEntry.findFirst({
-      where: { id, user_id: user.id },
-    });
+        console.log(`[DiaryService] Diary ${entry.id} enqueued for background indexing`);
+        return { indexed: false, chunkCount: 0, queued: true };
+      } catch (queueError) {
+        console.warn(
+          '[DiaryService] Failed to enqueue job, falling back to inline:',
+          queueError instanceof Error ? queueError.message : queueError,
+        );
+        // Fall through to inline indexing
+      }
+    }
 
-    if (!entry) throw new NotFoundException('Diary entry not found');
-
-    return { user, entry };
+    // Inline fallback (original behavior)
+    try {
+      const result = await this.indexDiaryEntryInline(userId, entry, sourceTitle);
+      return { indexed: true, chunkCount: result.chunkCount, queued: false };
+    } catch (error) {
+      console.error('Failed to index diary entry into memory chunks:', error);
+      throw new InternalServerErrorException(
+        'Diary entry was saved, but memory indexing failed.',
+      );
+    }
   }
 
-  private async indexDiaryEntry(
+  // -----------------------------------------------------------------------
+  // Inline indexing (fallback when Redis is unavailable)
+  // -----------------------------------------------------------------------
+
+  private async indexDiaryEntryInline(
     userId: string,
     entry: { id: string; raw_text: string; entry_date: Date },
     sourceTitle: string,
@@ -185,9 +213,81 @@ export class DiaryService {
         sourceType: 'diary',
         sourceId: entry.id,
       });
+      await deleteEntityMentionsForSource(this.prisma as any, {
+        userId,
+        sourceType: 'diary',
+        sourceId: entry.id,
+      });
+    } else {
+      await this.persistEntityMentions(userId, entry.id, indexingResult);
     }
 
     return indexingResult;
+  }
+
+  // -----------------------------------------------------------------------
+  // Helpers
+  // -----------------------------------------------------------------------
+
+  private async findOwnedEntry(userId: string, id: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { supabaseId: userId },
+      select: { id: true },
+    });
+
+    if (!user) throw new NotFoundException('Diary entry not found');
+
+    const entry = await this.prisma.diaryEntry.findFirst({
+      where: { id, user_id: user.id },
+    });
+
+    if (!entry) throw new NotFoundException('Diary entry not found');
+
+    return { user, entry };
+  }
+
+  private async persistEntityMentions(
+    userId: string,
+    diaryId: string,
+    indexingResult: { chunks: Array<{ chunkIndex: number; entityMentions?: Array<{ entityType: string; entityValue: string }> }> },
+  ) {
+    try {
+      await deleteEntityMentionsForSource(this.prisma as any, {
+        userId,
+        sourceType: 'diary',
+        sourceId: diaryId,
+      });
+
+      const chunkIdMap = await resolveMemoryChunkIds(this.prisma as any, {
+        userId,
+        sourceType: 'diary',
+        sourceId: diaryId,
+      });
+
+      const mentionPayloads: Array<{ chunkId: string; entityType: string; entityValue: string }> = [];
+
+      for (const chunk of indexingResult.chunks) {
+        const chunkId = chunkIdMap.get(chunk.chunkIndex);
+        if (!chunkId || !chunk.entityMentions?.length) continue;
+
+        for (const mention of chunk.entityMentions) {
+          mentionPayloads.push({
+            chunkId,
+            entityType: mention.entityType,
+            entityValue: mention.entityValue,
+          });
+        }
+      }
+
+      if (mentionPayloads.length > 0) {
+        await insertEntityMentions(this.prisma as any, mentionPayloads);
+        console.log(
+          `[DiaryService] Persisted ${mentionPayloads.length} entity mentions for diary ${diaryId}`,
+        );
+      }
+    } catch (error) {
+      console.error('Failed to persist entity mentions (non-fatal):', error);
+    }
   }
 
   private buildRawText(title: string, content: string) {

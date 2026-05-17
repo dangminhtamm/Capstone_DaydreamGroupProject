@@ -76,8 +76,9 @@ export async function retrieveMemory(
     )
   `;
 
+  let rawResults: MemorySearchHit[] = [];
   try {
-    return await dbClient.$transaction(async (tx: any) => {
+    rawResults = await dbClient.$transaction(async (tx: any) => {
       await tx.$executeRawUnsafe("SET LOCAL hnsw.ef_search = 80");
       await tx.$executeRawUnsafe(
         "SET LOCAL hnsw.iterative_scan = strict_order",
@@ -171,6 +172,26 @@ export async function retrieveMemory(
     console.error("Error when retrieve memory:", error);
     throw error;
   }
+
+  // Post-filter: remove lexical-only hits with low scores that are likely noise.
+  // These occur when a keyword happens to match but the semantic meaning is unrelated.
+  const MIN_LEXICAL_ONLY_SIMILARITY = 0.68;
+  const MIN_OVERALL_SIMILARITY = 0.45;
+
+  return rawResults.filter((hit) => {
+    // Always filter out very low similarity hits regardless of mode
+    if (hit.similarity < MIN_OVERALL_SIMILARITY) return false;
+
+    // Lexical-only hits with low scores are usually false positives
+    if (
+      hit.retrievalMode === "lexical" &&
+      hit.similarity < MIN_LEXICAL_ONLY_SIMILARITY
+    ) {
+      return false;
+    }
+
+    return true;
+  });
 }
 
 function clampWeight(value: number): number {
@@ -192,24 +213,58 @@ function extractLexicalTerms(query: string): string[] {
     "and",
     "are",
     "about",
+    "been",
+    "but",
+    "can",
     "cua",
     "của",
     "cho",
     "co",
     "có",
+    "cung",
+    "cũng",
+    "da",
+    "đã",
+    "dang",
+    "đang",
+    "day",
+    "đây",
+    "de",
+    "để",
+    "do",
     "duoc",
     "được",
     "gi",
     "gì",
+    "hay",
     "i",
     "in",
     "is",
+    "khong",
+    "không",
     "la",
     "là",
+    "lam",
+    "làm",
+    "ma",
+    "mà",
+    "mot",
+    "một",
     "my",
+    "nay",
+    "này",
+    "nhu",
+    "như",
+    "nhung",
+    "nhưng",
     "of",
     "on",
+    "se",
+    "sẽ",
+    "thi",
+    "thì",
     "the",
+    "then",
     "to",
     "toi",
     "tôi",
@@ -218,6 +273,8 @@ function extractLexicalTerms(query: string): string[] {
     "và",
     "ve",
     "về",
+    "voi",
+    "với",
     "was",
     "were",
     "what",
