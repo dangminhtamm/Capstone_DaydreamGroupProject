@@ -21,7 +21,6 @@
     "test:e2e": "jest --config ./test/jest-e2e.json"
   },
   "dependencies": {
-    "@nestjs/bullmq": "^11.0.4",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.4",
     "@nestjs/core": "^11.0.1",
@@ -32,11 +31,9 @@
     "@second-brain/ai": "workspace:*",
     "@second-brain/db": "workspace:*",
     "@second-brain/shared": "workspace:*",
-    "bullmq": "^5.76.8",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
     "googleapis": "^171.4.0",
-    "ioredis": "^5.10.1",
     "jwks-rsa": "^4.0.1",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
