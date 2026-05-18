@@ -1,5 +1,5 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { answerMemory, answerMemoryStream } from '@second-brain/ai';
+import { answerMemory, answerMemoryStream, type AnswerMemoryResult, type AnswerMemoryStreamResult } from '@second-brain/ai';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SearchQueryDto } from './dto/search-query.dto';
 
@@ -71,7 +71,7 @@ export class SearchService {
         ),
         SEARCH_TIMEOUT_MS,
         'Memory search timed out',
-      );
+      ) as AnswerMemoryResult;
 
       if (dateRange && result.citations.length === 0) {
         const diaryFallback = await this.answerFromDiaryEntries(
@@ -159,7 +159,7 @@ export class SearchService {
         ),
         SEARCH_TIMEOUT_MS,
         'Streaming memory search timed out',
-      );
+      ) as AnswerMemoryStreamResult;
 
       if (dateRange && result.citations.length === 0) {
         const diaryFallback = await this.answerFromDiaryEntries(
@@ -209,8 +209,8 @@ export class SearchService {
   private async hasSearchableMemory(userId: string, sourceType?: string) {
     const count = await this.prisma.memoryChunk.count({
       where: {
-        userId,
-        ...(sourceType && { sourceType }),
+        user_id: userId,
+        ...(sourceType && { source_type: sourceType }),
       },
     });
 

@@ -3,6 +3,7 @@ import { Response } from 'express';
 import { SearchService } from './search.service';
 import { SearchQueryDto } from './dto/search-query.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import type { AnswerMemoryStreamResult } from '@second-brain/ai';
 
 @Controller('search')
 @UseGuards(JwtAuthGuard)
@@ -50,7 +51,7 @@ export class SearchController {
       const result = await this.searchService.answerQuestionStream(
         req.user.userId,
         queryDto,
-      );
+      ) as AnswerMemoryStreamResult;
 
       // Stream answer tokens
       const reader = result.stream.getReader();

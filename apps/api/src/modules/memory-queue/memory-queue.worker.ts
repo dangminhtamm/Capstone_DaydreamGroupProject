@@ -9,12 +9,9 @@ import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
 import { indexMemoryFromDiary, indexMemoryFromCalendar } from '@second-brain/ai';
 import {
-  deleteEntityMentionsForSource,
   deleteMemoryChunksForSource,
-  insertEntityMentions,
   insertMemoryChunks,
   pruneMemoryChunksForSource,
-  resolveMemoryChunkIds,
 } from '@second-brain/db';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MEMORY_INDEX_QUEUE, MemoryJobType } from './memory-queue.constants';
@@ -77,25 +74,16 @@ export class MemoryQueueWorker extends WorkerHost {
         sourceType: 'diary',
         sourceId: data.diaryId,
       });
-      await deleteEntityMentionsForSource(this.prisma as any, {
-        userId: data.userId,
-        sourceType: 'diary',
-        sourceId: data.diaryId,
-      });
-    } else {
-      // Persist entity mentions into the Knowledge Graph
-      await this.persistEntityMentions(data.userId, data.diaryId, indexingResult);
     }
 
     const duration = Date.now() - startTime;
     this.logger.log(
-      `Diary ${data.diaryId} indexed: ${indexingResult.chunkCount} chunks, ${indexingResult.entityMentionCount} entities in ${duration}ms`,
+      `Diary ${data.diaryId} indexed: ${indexingResult.chunkCount} chunks in ${duration}ms`,
     );
 
     await job.updateProgress(100);
     return {
       chunkCount: indexingResult.chunkCount,
-      entityMentionCount: indexingResult.entityMentionCount,
       durationMs: duration,
     };
   }
@@ -141,61 +129,4 @@ export class MemoryQueueWorker extends WorkerHost {
     };
   }
 
-  // -----------------------------------------------------------------------
-  // Entity Mention Persistence (shared helper)
-  // -----------------------------------------------------------------------
-
-  private async persistEntityMentions(
-    userId: string,
-    sourceId: string,
-    indexingResult: {
-      chunks: Array<{
-        chunkIndex: number;
-        entityMentions?: Array<{ entityType: string; entityValue: string }>;
-      }>;
-    },
-  ) {
-    try {
-      await deleteEntityMentionsForSource(this.prisma as any, {
-        userId,
-        sourceType: 'diary',
-        sourceId,
-      });
-
-      const chunkIdMap = await resolveMemoryChunkIds(this.prisma as any, {
-        userId,
-        sourceType: 'diary',
-        sourceId,
-      });
-
-      const mentionPayloads: Array<{
-        chunkId: string;
-        entityType: string;
-        entityValue: string;
-      }> = [];
-
-      for (const chunk of indexingResult.chunks) {
-        const chunkId = chunkIdMap.get(chunk.chunkIndex);
-        if (!chunkId || !chunk.entityMentions?.length) continue;
-
-        for (const mention of chunk.entityMentions) {
-          mentionPayloads.push({
-            chunkId,
-            entityType: mention.entityType,
-            entityValue: mention.entityValue,
-          });
-        }
-      }
-
-      if (mentionPayloads.length > 0) {
-        await insertEntityMentions(this.prisma as any, mentionPayloads);
-        this.logger.log(
-          `Persisted ${mentionPayloads.length} entity mentions for source ${sourceId}`,
-        );
-      }
-    } catch (error) {
-      // Best-effort — don't fail the whole job
-      this.logger.error('Failed to persist entity mentions:', error);
-    }
-  }
 }
