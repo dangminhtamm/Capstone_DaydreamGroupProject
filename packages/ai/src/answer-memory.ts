@@ -1,11 +1,17 @@
 import { SchemaType, type ResponseSchema } from "@google/generative-ai";
 import { z } from "zod";
 import { generateGeminiJson } from "./gemini-json.ts";
-import { retrieveMemory, type MemorySearchHit, type RetrievalFilters } from "./retrieval.ts";
-import type { MemoryDbClient } from './types.ts';
+import {
+  retrieveMemory,
+  type MemorySearchHit,
+  type RetrievalFilters,
+} from "./retrieval.ts";
+import type { MemoryDbClient } from "./types.ts";
 
-const MIN_TOP_SIMILARITY = Number(process.env.MEMORY_MIN_TOP_SIMILARITY ?? 0.65);
-const DEFAULT_MAX_DISTANCE = Number(process.env.MEMORY_MAX_DISTANCE ?? 0.35);
+const MIN_TOP_SIMILARITY = Number(
+  process.env.MEMORY_MIN_TOP_SIMILARITY ?? 0.55,
+);
+const DEFAULT_MAX_DISTANCE = Number(process.env.MEMORY_MAX_DISTANCE ?? 0.5);
 
 const GroundedAnswerSchema = z.object({
   answer: z.string().min(1),
@@ -13,7 +19,10 @@ const GroundedAnswerSchema = z.object({
   citations: z.array(
     z.object({
       marker: z.string().regex(/^S\d+$/),
-      claim: z.string().min(1).describe("The specific claim supported by this source"),
+      claim: z
+        .string()
+        .min(1)
+        .describe("The specific claim supported by this source"),
     }),
   ),
 });
@@ -47,26 +56,21 @@ const GeminiGroundedAnswerResponseSchema: ResponseSchema = {
   required: ["answer", "confidence", "citations"],
 };
 
-export interface MemoryCitation {
-  marker: string;
-  chunkId: string;
-  sourceType: string;
-  sourceId: string;
-  sourceTitle?: string;
-  occurredAt: string;
-  chunkType: string;
-  quote: string;
-  similarity: number;
-  vectorSimilarity?: number;
-  lexicalScore?: number;
-  retrievalMode?: string;
-  claim?: string;
-}
+import {
+  type MemoryCitation,
+  buildCitations,
+  classifyRetrievalConfidence,
+} from "./answer-utils.ts";
 
 export interface AnswerMemoryResult {
   answer: string;
   confidence: "high" | "medium" | "low";
   citations: MemoryCitation[];
+  modelError?: {
+    status?: number;
+    kind: "quota" | "service_unavailable" | "validation" | "transient" | "unknown";
+    message: string;
+  };
 }
 
 export interface AnswerMemoryOptions {
@@ -88,7 +92,9 @@ export async function answerMemory(
     return lowConfidenceNoAnswer("Bạn chưa nhập câu hỏi.");
   }
 
+  const inferredFilters = inferRetrievalFilters(normalizedQuestion);
   const chunks = await retrieveMemory(normalizedQuestion, userId, dbClient, {
+    ...inferredFilters,
     ...options.filters,
     limit: options.limit ?? 8,
     maxDistance: options.maxDistance ?? DEFAULT_MAX_DISTANCE,
@@ -120,22 +126,20 @@ export async function answerFromChunks(
       answer:
         "Mình tìm thấy một vài ký ức gần nghĩa, nhưng độ liên quan chưa đủ cao để trả lời chắc chắn.",
       confidence: "low",
-      citations: buildCitations(sortedChunks.slice(0, 3)),
+      citations: [],
     };
   }
 
   const sources = buildCitations(sortedChunks);
-  const sourceContext = sources
+  // Only send the top 5 most relevant sources to the prompt to reduce input tokens
+  const promptSources = sources.slice(0, 5);
+  const sourceContext = promptSources
     .map((source) => {
       return [
         `[${source.marker}]`,
         `date: ${source.occurredAt}`,
-        `sourceType: ${source.sourceType}`,
-        `sourceId: ${source.sourceId}`,
-        `chunkType: ${source.chunkType}`,
-        `similarity: ${source.similarity.toFixed(3)}`,
-        `retrievalMode: ${source.retrievalMode ?? "vector"}`,
-        `evidence: ${source.quote}`,
+        `type: ${source.sourceType}/${source.chunkType}`,
+        `memory: ${source.quote}`,
       ].join("\n");
     })
     .join("\n\n");
@@ -152,8 +156,8 @@ ${sourceContext}
 Rules:
 - Answer ONLY using the retrieved memory sources.
 - Do not invent dates, people, events, decisions, emotions, or outcomes.
-- Every concrete claim must be supported by a citation marker like [S1].
-- Use only citation markers that appear in the retrieved memory sources.
+- Answer naturally without adding any citation markers (like [S1]) in your text.
+- However, you MUST still provide the citations in the JSON output with their respective claims.
 - If the sources do not answer the question, say that the memory is insufficient and set confidence to "low".
 - Prefer a concise answer over a fluent but unsupported answer.
 - Keep the answer in the same language as the user question.
@@ -166,6 +170,7 @@ Rules:
       responseSchema: GeminiGroundedAnswerResponseSchema,
       validator: GroundedAnswerSchema,
       temperature: 0.1,
+      maxOutputTokens: Number(process.env.MEMORY_MAX_ANSWER_TOKENS ?? 1024),
     });
 
     const allowedMarkers = new Set(sources.map((source) => source.marker));
@@ -178,7 +183,7 @@ Rules:
         answer:
           "Mình tìm thấy một số ký ức liên quan, nhưng câu trả lời sinh ra không có citation hợp lệ nên mình không thể xác nhận chắc chắn.",
         confidence: "low",
-        citations: sources.slice(0, 3),
+        citations: [],
       };
     }
 
@@ -193,93 +198,183 @@ Rules:
         claim: citedMarkerToClaim.get(source.marker),
       }));
 
-    const retrievalConfidence = classifyRetrievalConfidence(topSimilarity, citations.length);
-    const finalConfidence = minConfidence(output.confidence, retrievalConfidence);
+    const retrievalConfidence = classifyRetrievalConfidence(
+      topSimilarity,
+      citations.length,
+    );
+    const finalConfidence = reconcileConfidence(
+      output.confidence,
+      retrievalConfidence,
+      output.answer,
+    );
 
     return {
-      answer: ensureAnswerHasCitationMarkers(output.answer, citations),
+      answer: output.answer,
       confidence: finalConfidence,
       citations,
     };
   } catch (error) {
-    console.error("Failed to generate grounded memory answer:", error);
+    const modelError = classifyModelError(error);
+    console.warn(
+      `[AnswerMemory] Failed to generate grounded answer (${modelError.kind}${modelError.status ? ` ${modelError.status}` : ""}): ${modelError.message}`,
+    );
 
     return {
       answer:
         "Mình đã tìm thấy ký ức liên quan, nhưng không thể tạo câu trả lời có cấu trúc đáng tin cậy ở lần này.",
       confidence: "low",
-      citations: sources.slice(0, 3),
+      citations: [],
+      modelError,
     };
   }
 }
 
-function buildCitations(chunks: MemorySearchHit[]): MemoryCitation[] {
-  return chunks.map((chunk, index) => {
-    const metadata = safeMetadata(chunk.metadata);
-
-    return {
-      marker: `S${index + 1}`,
-      chunkId: chunk.id,
-      sourceType: chunk.sourceType,
-      sourceId: chunk.sourceId,
-      sourceTitle: metadata.sourceTitle,
-      occurredAt: chunk.occurredAt instanceof Date
-        ? chunk.occurredAt.toISOString()
-        : new Date(chunk.occurredAt).toISOString(),
-      chunkType: chunk.chunkType,
-      quote: trimEvidence(chunk.evidence ?? chunk.text),
-      similarity: Number(chunk.similarity),
-      vectorSimilarity: Number(chunk.vectorSimilarity ?? 0),
-      lexicalScore: Number(chunk.lexicalScore ?? 0),
-      retrievalMode: chunk.retrievalMode,
-    };
-  });
-}
-
-function safeMetadata(metadata: unknown): { sourceTitle?: string } {
-  if (!metadata || typeof metadata !== "object") return {};
-  const value = metadata as Record<string, unknown>;
-
-  return {
-    sourceTitle:
-      typeof value.sourceTitle === "string" ? value.sourceTitle : undefined,
-  };
-}
-
-function trimEvidence(text: string, maxLength = 600): string {
-  const normalized = text.replace(/\s+/g, " ").trim();
-  if (normalized.length <= maxLength) return normalized;
-  return `${normalized.slice(0, maxLength - 1)}…`;
-}
-
-function classifyRetrievalConfidence(
-  topSimilarity: number,
-  citationCount: number,
-): "high" | "medium" | "low" {
-  if (topSimilarity >= 0.8 && citationCount >= 2) return "high";
-  if (topSimilarity >= 0.65 && citationCount >= 1) return "medium";
-  return "low";
-}
-
-function minConfidence(
+function reconcileConfidence(
   modelConfidence: "high" | "medium" | "low",
   retrievalConfidence: "high" | "medium" | "low",
+  answer: string,
 ): "high" | "medium" | "low" {
+  if (
+    modelConfidence === "low" &&
+    retrievalConfidence !== "low" &&
+    !isInsufficientAnswer(answer)
+  ) {
+    return "medium";
+  }
+
   const rank = { low: 0, medium: 1, high: 2 } as const;
   return rank[modelConfidence] <= rank[retrievalConfidence]
     ? modelConfidence
     : retrievalConfidence;
 }
 
-function ensureAnswerHasCitationMarkers(
-  answer: string,
-  citations: MemoryCitation[],
-): string {
-  const hasMarker = /\[S\d+\]/.test(answer);
-  if (hasMarker || citations.length === 0) return answer;
+export function inferRetrievalFilters(question: string): RetrievalFilters {
+  const normalized = normalizeForIntent(question);
 
-  const fallbackMarker = `[${citations[0].marker}]`;
-  return `${answer.trim()} ${fallbackMarker}`;
+  if (
+    includesAny(normalized, [
+      "calendar",
+      "google calendar",
+      "scheduled",
+      "appointment",
+      "meeting",
+      "event",
+      "lịch",
+      "lich",
+      "sự kiện",
+      "su kien",
+    ])
+  ) {
+    return {
+      preferredSourceTypes: ["calendar"],
+      preferredChunkTypes: ["event", "general"],
+      vectorWeight: 0.6,
+      lexicalWeight: 0.4,
+    };
+  }
+
+  if (includesAny(normalized, ["feedback", "nhận xét", "nhan xet", "góp ý", "gop y"])) {
+    return {
+      preferredSourceTypes: ["diary"],
+      preferredChunkTypes: ["feedback", "general", "general_note"],
+      vectorWeight: 0.65,
+      lexicalWeight: 0.35,
+    };
+  }
+
+  if (
+    includesAny(normalized, [
+      "task",
+      "action item",
+      "follow up",
+      "remaining",
+      "pending",
+      "việc cần",
+      "viec can",
+      "cần làm",
+      "can lam",
+    ])
+  ) {
+    return {
+      preferredSourceTypes: ["diary"],
+      preferredChunkTypes: ["action_item", "task_update", "general", "general_note"],
+      vectorWeight: 0.65,
+      lexicalWeight: 0.35,
+    };
+  }
+
+  if (includesAny(normalized, ["decide", "decision", "agreed", "quyết định", "quyet dinh", "thống nhất", "thong nhat"])) {
+    return {
+      preferredSourceTypes: ["diary"],
+      preferredChunkTypes: ["decision", "general", "general_note"],
+      vectorWeight: 0.65,
+      lexicalWeight: 0.35,
+    };
+  }
+
+  return {};
+}
+
+function normalizeForIntent(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "");
+}
+
+function includesAny(value: string, needles: string[]): boolean {
+  return needles.some((needle) => value.includes(normalizeForIntent(needle)));
+}
+
+function isInsufficientAnswer(answer: string): boolean {
+  const normalized = normalizeForIntent(answer);
+  return includesAny(normalized, [
+    "insufficient",
+    "not enough",
+    "not found",
+    "khong du",
+    "chua tim thay",
+    "khong tim thay",
+  ]);
+}
+
+function classifyModelError(
+  error: unknown,
+): NonNullable<AnswerMemoryResult["modelError"]> {
+  const status = typeof (error as { status?: unknown })?.status === "number"
+    ? (error as { status: number }).status
+    : undefined;
+  const message = error instanceof Error ? error.message : String(error);
+
+  if (status === 429 || message.includes("429")) {
+    return { status: status ?? 429, kind: "quota", message: summarizeError(message) };
+  }
+
+  if (status === 503 || message.includes("503")) {
+    return {
+      status: status ?? 503,
+      kind: "service_unavailable",
+      message: summarizeError(message),
+    };
+  }
+
+  if (error && typeof error === "object" && error.constructor?.name === "ZodError") {
+    return { kind: "validation", message: summarizeError(message) };
+  }
+
+  if (
+    message.includes("500") ||
+    message.includes("ECONNRESET") ||
+    message.includes("fetch failed")
+  ) {
+    return { status, kind: "transient", message: summarizeError(message) };
+  }
+
+  return { status, kind: "unknown", message: summarizeError(message) };
+}
+
+function summarizeError(message: string): string {
+  return message.replace(/\s+/g, " ").slice(0, 240);
 }
 
 function lowConfidenceNoAnswer(message: string): AnswerMemoryResult {

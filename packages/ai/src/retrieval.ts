@@ -4,7 +4,11 @@ import { createDefaultEmbeddingProvider } from "./embedding.ts";
 
 export interface RetrievalFilters {
   chunkType?: string;
+  chunkTypes?: string[];
   sourceType?: string;
+  sourceTypes?: string[];
+  preferredChunkTypes?: string[];
+  preferredSourceTypes?: string[];
   startDate?: Date;
   endDate?: Date;
   limit?: number;
@@ -32,32 +36,60 @@ export interface MemorySearchHit {
 export async function retrieveMemory(
   query: string,
   userId: string,
-  dbClient: any, 
+  dbClient: any,
   filters: RetrievalFilters = {},
 ): Promise<MemorySearchHit[]> {
   if (!query.trim()) return [];
 
   const embedder = createDefaultEmbeddingProvider();
   const embedding = await embedder.embedQuery(query);
+
+  return retrieveMemoryWithEmbedding(
+    query,
+    userId,
+    dbClient,
+    embedding,
+    filters,
+  );
+}
+
+export async function retrieveMemoryWithEmbedding(
+  query: string,
+  userId: string,
+  dbClient: any,
+  embedding: number[],
+  filters: RetrievalFilters = {},
+): Promise<MemorySearchHit[]> {
+  if (!query.trim()) return [];
+
   const vectorString = `[${embedding.join(",")}]`;
   const lexicalQuery = buildLexicalTsQuery(query);
 
   const limit = Math.min(filters.limit ?? 8, 20);
   const candidateLimit = Math.max(limit * 5, 50);
-  const maxDistance = filters.maxDistance ?? 0.35;
+  const maxDistance = filters.maxDistance ?? 0.5;
   const vectorWeight = clampWeight(filters.vectorWeight ?? 0.7);
   const lexicalWeight = clampWeight(filters.lexicalWeight ?? 0.3);
+  const lexicalOnlyWeight = 0.75;
+  const preferredSourceTypes = normalizeStringList(filters.preferredSourceTypes);
+  const preferredChunkTypes = normalizeStringList(filters.preferredChunkTypes);
 
-  const conditions: Prisma.Sql[] = [
-    Prisma.sql`user_id = ${userId}`,
-  ];
+  const conditions: Prisma.Sql[] = [Prisma.sql`user_id = ${userId}`];
 
   if (filters.chunkType) {
     conditions.push(Prisma.sql`chunk_type = ${filters.chunkType}`);
   }
 
+  if (filters.chunkTypes?.length) {
+    conditions.push(Prisma.sql`chunk_type IN (${Prisma.join(filters.chunkTypes)})`);
+  }
+
   if (filters.sourceType) {
     conditions.push(Prisma.sql`source_type = ${filters.sourceType}`);
+  }
+
+  if (filters.sourceTypes?.length) {
+    conditions.push(Prisma.sql`source_type IN (${Prisma.join(filters.sourceTypes)})`);
   }
 
   if (filters.startDate) {
@@ -69,6 +101,18 @@ export async function retrieveMemory(
   }
 
   const whereClause = Prisma.sql`WHERE ${Prisma.join(conditions, " AND ")}`;
+  const sourceTypeBoost = preferredSourceTypes.length
+    ? Prisma.sql`
+      CASE WHEN memory_chunks.source_type IN (${Prisma.join(preferredSourceTypes)})
+        THEN 0.08 ELSE 0 END
+    `
+    : Prisma.sql`0`;
+  const chunkTypeBoost = preferredChunkTypes.length
+    ? Prisma.sql`
+      CASE WHEN memory_chunks.chunk_type IN (${Prisma.join(preferredChunkTypes)})
+        THEN 0.06 ELSE 0 END
+    `
+    : Prisma.sql`0`;
   const searchDocument = Prisma.sql`
     to_tsvector(
       'simple',
@@ -76,8 +120,9 @@ export async function retrieveMemory(
     )
   `;
 
+  let rawResults: MemorySearchHit[] = [];
   try {
-    return await dbClient.$transaction(async (tx: any) => {
+    rawResults = await dbClient.$transaction(async (tx: any) => {
       await tx.$executeRawUnsafe("SET LOCAL hnsw.ef_search = 80");
       await tx.$executeRawUnsafe(
         "SET LOCAL hnsw.iterative_scan = strict_order",
@@ -103,7 +148,7 @@ export async function retrieveMemory(
             memory_chunks.id,
             LEAST(
               1.0,
-              0.65 + ts_rank_cd(${searchDocument}, query_input.ts_query) * 6.0
+              ts_rank_cd(${searchDocument}, query_input.ts_query) * 8.0
             ) AS lexical_score
           FROM memory_chunks
           CROSS JOIN query_input
@@ -135,12 +180,28 @@ export async function retrieveMemory(
               WHEN lexical_ranked.id IS NOT NULL THEN 'lexical'
               ELSE 'vector'
             END AS "retrievalMode",
-            GREATEST(
-              COALESCE(vector_ranked.vector_similarity, 0),
-              COALESCE(lexical_ranked.lexical_score, 0),
-              (${vectorWeight} * COALESCE(vector_ranked.vector_similarity, 0))
-                + (${lexicalWeight} * COALESCE(lexical_ranked.lexical_score, 0))
-            ) AS similarity
+            CASE
+              WHEN vector_ranked.id IS NOT NULL AND lexical_ranked.id IS NOT NULL THEN
+                LEAST(
+                  1.0,
+                  (${vectorWeight} * COALESCE(vector_ranked.vector_similarity, 0))
+                    + (${lexicalWeight} * COALESCE(lexical_ranked.lexical_score, 0))
+                    + ${sourceTypeBoost}
+                    + ${chunkTypeBoost}
+                )
+              WHEN vector_ranked.id IS NOT NULL THEN LEAST(
+                1.0,
+                COALESCE(vector_ranked.vector_similarity, 0)
+                  + ${sourceTypeBoost}
+                  + ${chunkTypeBoost}
+              )
+              ELSE LEAST(
+                1.0,
+                (${lexicalOnlyWeight} * COALESCE(lexical_ranked.lexical_score, 0))
+                  + ${sourceTypeBoost}
+                  + ${chunkTypeBoost}
+              )
+            END AS similarity
           FROM memory_chunks
           INNER JOIN candidate_ids ON candidate_ids.id = memory_chunks.id
           LEFT JOIN vector_ranked ON vector_ranked.id = memory_chunks.id
@@ -162,7 +223,7 @@ export async function retrieveMemory(
           similarity
         FROM scored
         WHERE distance <= ${maxDistance}
-          OR "lexicalScore" > 0
+          OR "lexicalScore" >= 0.15
         ORDER BY similarity DESC, "occurredAt" DESC
         LIMIT ${limit};
       `;
@@ -171,11 +232,44 @@ export async function retrieveMemory(
     console.error("Error when retrieve memory:", error);
     throw error;
   }
+
+  // Post-filter: remove lexical-only hits with low scores that are likely noise.
+  // These occur when a keyword happens to match but the semantic meaning is unrelated.
+  const MIN_LEXICAL_ONLY_SIMILARITY = 0.35;
+  const MIN_OVERALL_SIMILARITY = 0.3;
+  const MIN_VECTOR_ONLY_SIMILARITY = 0.45;
+
+  return rawResults.filter((hit) => {
+    // Always filter out very low similarity hits regardless of mode
+    if (hit.similarity < MIN_OVERALL_SIMILARITY) return false;
+
+    if (
+      hit.retrievalMode === "vector" &&
+      hit.vectorSimilarity < MIN_VECTOR_ONLY_SIMILARITY
+    ) {
+      return false;
+    }
+
+    // Lexical-only hits with low scores are usually false positives
+    if (
+      hit.retrievalMode === "lexical" &&
+      hit.similarity < MIN_LEXICAL_ONLY_SIMILARITY
+    ) {
+      return false;
+    }
+
+    return true;
+  });
 }
 
 function clampWeight(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.min(1, Math.max(0, value));
+}
+
+function normalizeStringList(values: string[] | undefined): string[] {
+  if (!values?.length) return [];
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 }
 
 function buildLexicalTsQuery(query: string): string {
@@ -192,24 +286,62 @@ function extractLexicalTerms(query: string): string[] {
     "and",
     "are",
     "about",
+    "been",
+    "but",
+    "can",
     "cua",
     "của",
     "cho",
     "co",
     "có",
+    "cung",
+    "cũng",
+    "da",
+    "đã",
+    "dang",
+    "đang",
+    "day",
+    "đây",
+    "decide",
+    "decided",
+    "de",
+    "để",
+    "did",
+    "do",
     "duoc",
     "được",
     "gi",
     "gì",
+    "hay",
     "i",
     "in",
     "is",
+    "khong",
+    "không",
     "la",
     "là",
+    "lam",
+    "làm",
+    "ma",
+    "mà",
+    "mot",
+    "một",
     "my",
+    "nay",
+    "này",
+    "nhu",
+    "như",
+    "nhung",
+    "nhưng",
     "of",
     "on",
+    "se",
+    "sẽ",
+    "thi",
+    "thì",
     "the",
+    "then",
+    "this",
     "to",
     "toi",
     "tôi",
@@ -218,6 +350,8 @@ function extractLexicalTerms(query: string): string[] {
     "và",
     "ve",
     "về",
+    "voi",
+    "với",
     "was",
     "were",
     "what",
@@ -225,6 +359,9 @@ function extractLexicalTerms(query: string): string[] {
     "where",
     "who",
     "with",
+    "team",
+    "user",
+    "users",
   ]);
 
   const matches = query.toLowerCase().match(/[\p{L}\p{N}_]+/gu) ?? [];

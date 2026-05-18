@@ -4,6 +4,7 @@
 import {
     SummaryPipelineJob,
     WeeklySummaryPipelineJob,
+    MonthlySummaryPipelineJob,
     SyncCalendarJob,
     SemanticLinkingJob
 } from './jobs';
@@ -23,6 +24,7 @@ try {
     // Data Summarization Pipeline
     SummaryPipelineJob.startCron();
     WeeklySummaryPipelineJob.startCron();
+    MonthlySummaryPipelineJob.startCron();
 
     console.log('===================================================');
     console.log('All background jobs have been scheduled successfully!');
