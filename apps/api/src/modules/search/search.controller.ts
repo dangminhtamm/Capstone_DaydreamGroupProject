@@ -18,3 +18,4 @@ export class SearchController {
     return this.searchService.answerQuestion(req.user.userId, queryDto);
   }
 }
+
