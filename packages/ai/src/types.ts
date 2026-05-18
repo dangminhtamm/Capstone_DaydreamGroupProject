@@ -1,7 +1,18 @@
 // packages/ai/src/types.ts
-import type { ChunkType } from "./chunk-types.ts";
+export const CHUNK_TYPES = [
+  "meeting_outcome",
+  "feedback",
+  "task_update",
+  "decision",
+  "action_item",
+  "emotional_reflection",
+  "general_note",
+  "reflection",
+  "event",
+  "general",
+] as const;
 
-export type { ChunkType };
+export type ChunkType = (typeof CHUNK_TYPES)[number];
 
 export interface MemoryChunkMetadata {
   date: string | null;
@@ -11,6 +22,8 @@ export interface MemoryChunkMetadata {
   chunkType: ChunkType;
   people?: string[];
   projects?: string[];
+  goals?: string[];
+  habits?: string[];
   tags?: string[];
   importance?: number;
   sourceTitle?: string;

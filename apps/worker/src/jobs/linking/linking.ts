@@ -1,17 +1,8 @@
 import { prisma } from '../../lib/prisma';
 import * as cron from 'node-cron';
+import { extractKeywords } from './linking-utils';
 
 export class SemanticLinkingJob {
-
-  private static extractKeywords(text: string): string[] {
-    if (!text) return [];
-    const stopWords = ['là', 'và', 'của', 'ở', 'trong', 'với', 'cho', 'có', 'thì', 'mà'];
-    return text
-      .toLowerCase()
-      .split(/\W+/)
-      .filter((word) => word.length > 2 && !stopWords.includes(word));
-  }
-
   static async processDiaryLinking(diary: any) {
     try {
       const startOfDay = new Date(diary.created_at);
@@ -28,7 +19,7 @@ export class SemanticLinkingJob {
 
       if (dailyEvents.length === 0) return;
 
-      const diaryKeywords = this.extractKeywords(diary.raw_text);
+      const diaryKeywords = extractKeywords(diary.raw_text);
       const linkedEvents = [];
 
       for (const event of dailyEvents) {
@@ -39,7 +30,7 @@ export class SemanticLinkingJob {
         else if (timeDiffHours <= 3) matchScore += 30;
         else if (timeDiffHours <= 12) matchScore += 10;
 
-        const eventKeywords = this.extractKeywords(`${event.title} ${event.description || ''}`);
+        const eventKeywords = extractKeywords(`${event.title} ${event.description || ''}`);
         const matchedWords = eventKeywords.filter((k) => diaryKeywords.includes(k));
 
         if (matchedWords.length > 0) {

@@ -1,0 +1,253 @@
+{
+  "name": "Second Brain MVP Evaluation Dataset",
+  "description": "Seven days of diary entries plus realistic calendar events for latency and retrieval quality evaluation.",
+  "seedDiaries": [
+    {
+      "id": "eval-diary-2026-05-11",
+      "entryDate": "2026-05-11T21:00:00.000Z",
+      "title": "Monday kickoff and onboarding feedback",
+      "content": "Today I joined the capstone kickoff meeting with Tam, Quan, Duc Anh, Thang, and Nhan. We agreed that Tam will own AI memory retrieval, Quan will own backend APIs, Duc Anh will own the main frontend flow, Thang will own Google Calendar integration, and Nhan will own deployment and evaluation. My main feedback from mentor Linh was that the onboarding copy felt confusing and should be shortened before the demo. I need to create three realistic diary entries for testing tomorrow."
+    },
+    {
+      "id": "eval-diary-2026-05-12",
+      "entryDate": "2026-05-12T21:15:00.000Z",
+      "title": "API contract and upload discussion",
+      "content": "Quan and I reviewed the diary API contract. We decided that POST /diary should save the raw entry first, then trigger memory indexing. Thang suggested that attachments should keep extracted_text so PDFs can become searchable later. I finished the first draft of the upload response shape. My action item is to test attachment upload with one PDF and one plain text file."
+    },
+    {
+      "id": "eval-diary-2026-05-13",
+      "entryDate": "2026-05-13T22:00:00.000Z",
+      "title": "Search quality check",
+      "content": "Tam tested memory search with questions about feedback, decisions, and follow-up tasks. The retrieval found the right diary chunks, but the answer sometimes missed citations. We agreed to require every generated answer to return sources. Mentor Linh said the citation UI must be obvious so evaluators can trust the AI. I felt more confident after seeing hybrid retrieval work."
+    },
+    {
+      "id": "eval-diary-2026-05-14",
+      "entryDate": "2026-05-14T20:40:00.000Z",
+      "title": "Frontend timeline and search UI",
+      "content": "Duc Anh connected the diary input page to the backend API, and Nhan helped improve loading and empty states. The timeline now displays real diary entries instead of mock data. The search page can show an answer, confidence, and citation cards. We still need a summary page for daily and weekly reviews."
+    },
+    {
+      "id": "eval-diary-2026-05-15",
+      "entryDate": "2026-05-15T21:30:00.000Z",
+      "title": "Calendar sync and linking",
+      "content": "Thang synced Google Calendar events into the database and started the diary-to-calendar linking job. The calendar demo event was called Capstone Mentor Review. The linking logic matched events by date, keyword, and time proximity. We noticed that duplicate summaries could happen if the cron job runs twice, so idempotency should be checked later."
+    },
+    {
+      "id": "eval-diary-2026-05-16",
+      "entryDate": "2026-05-16T19:50:00.000Z",
+      "title": "Benchmark concern",
+      "content": "We discussed the 500ms memory recall requirement. The database retrieval may be fast enough with HNSW and GIN indexes, but full answer generation is slower because Gemini has to create the response. The plan is to measure embedding time, retrieval time, answer generation time, and total time separately. Streaming should be used for the demo so users see the answer sooner."
+    },
+    {
+      "id": "eval-diary-2026-05-17",
+      "entryDate": "2026-05-17T21:10:00.000Z",
+      "title": "Demo rehearsal",
+      "content": "The team rehearsed the demo scenario: create a diary entry, search for mentor feedback, ask about pending tasks, and open the weekly reflection. The strongest moment was showing citations for the onboarding feedback and the Capstone Mentor Review event. Remaining tasks are to seed one week of realistic data, fix the web font build issue, and prepare a short evaluation report."
+    }
+  ],
+  "seedCalendarEvents": [
+    {
+      "id": "eval-calendar-mentor-review",
+      "externalId": "eval-google-calendar-mentor-review",
+      "title": "Capstone Mentor Review",
+      "description": "Review prototype progress, citation UI, Google Calendar integration, and demo readiness with mentor Linh.",
+      "startTime": "2026-05-15T09:00:00.000Z",
+      "endTime": "2026-05-15T10:00:00.000Z",
+      "htmlLink": "https://calendar.google.com/eval-mentor-review"
+    },
+    {
+      "id": "eval-calendar-api-check",
+      "externalId": "eval-google-calendar-api-check",
+      "title": "Backend API Check",
+      "description": "Quan reviews diary CRUD, upload attachment response, auth ownership, and summary API contract.",
+      "startTime": "2026-05-12T08:00:00.000Z",
+      "endTime": "2026-05-12T08:45:00.000Z",
+      "htmlLink": "https://calendar.google.com/eval-api-check"
+    },
+    {
+      "id": "eval-calendar-demo-rehearsal",
+      "externalId": "eval-google-calendar-demo-rehearsal",
+      "title": "Second Brain Demo Rehearsal",
+      "description": "Run create diary, search memory, citations, calendar context, and weekly reflection flow.",
+      "startTime": "2026-05-17T13:00:00.000Z",
+      "endTime": "2026-05-17T14:00:00.000Z",
+      "htmlLink": "https://calendar.google.com/eval-demo-rehearsal"
+    }
+  ],
+  "questions": [
+    {
+      "id": "timeline-01",
+      "category": "timeline",
+      "question": "What happened during the capstone kickoff?",
+      "expectedKeywords": ["kickoff", "Tam", "Quan", "Google Calendar"],
+      "expectedSourceTypes": ["diary"],
+      "expectedSourceIds": ["eval-diary-2026-05-11"],
+      "acceptableConfidence": ["high", "medium"]
+    },
+    {
+      "id": "timeline-02",
+      "category": "timeline",
+      "question": "What did the team rehearse for the demo?",
+      "expectedKeywords": ["create a diary entry", "search", "citations"],
+      "expectedSourceTypes": ["diary", "calendar"],
+      "expectedSourceIds": [
+        "eval-diary-2026-05-17",
+        "eval-calendar-demo-rehearsal"
+      ],
+      "acceptableConfidence": ["high", "medium"]
+    },
+    {
+      "id": "feedback-01",
+      "category": "feedback",
+      "question": "What feedback did mentor Linh give about onboarding?",
+      "expectedKeywords": ["onboarding", "confusing", "shortened"],
+      "expectedSourceTypes": ["diary"],
+      "expectedChunkTypes": ["feedback", "general", "general_note"],
+      "expectedSourceIds": ["eval-diary-2026-05-11"],
+      "acceptableConfidence": ["high", "medium"]
+    },
+    {
+      "id": "feedback-02",
+      "category": "feedback",
+      "question": "What feedback did Linh give about the citation UI?",
+      "expectedKeywords": ["citation UI", "obvious", "trust"],
+      "expectedSourceTypes": ["diary"],
+      "expectedSourceIds": ["eval-diary-2026-05-13"],
+      "acceptableConfidence": ["high", "medium"]
+    },
+    {
+      "id": "task-01",
+      "category": "task",
+      "question": "What action item was assigned after the upload discussion?",
+      "expectedKeywords": ["test attachment upload", "PDF", "plain text"],
+      "expectedSourceTypes": ["diary"],
+      "expectedSourceIds": ["eval-diary-2026-05-12"],
+      "acceptableConfidence": ["high", "medium"]
+    },
+    {
+      "id": "task-02",
+      "category": "task",
+      "question": "What remaining tasks were listed after demo rehearsal?",
+      "expectedKeywords": ["seed one week", "web font", "evaluation report"],
+      "expectedSourceTypes": ["diary"],
+      "expectedSourceIds": ["eval-diary-2026-05-17"],
+      "acceptableConfidence": ["high", "medium"]
+    },
+    {
+      "id": "calendar-01",
+      "category": "calendar",
+      "question": "What was the Capstone Mentor Review event about?",
+      "expectedKeywords": [
+        "prototype progress",
+        "citation UI",
+        "demo readiness"
+      ],
+      "expectedSourceTypes": ["calendar", "diary"],
+      "expectedSourceIds": [
+        "eval-calendar-mentor-review",
+        "eval-diary-2026-05-15"
+      ],
+      "acceptableConfidence": ["high", "medium"]
+    },
+    {
+      "id": "calendar-02",
+      "category": "calendar",
+      "question": "When was the Backend API Check scheduled?",
+      "expectedKeywords": ["Backend API Check", "May 12", "Quan"],
+      "expectedSourceTypes": ["calendar"],
+      "expectedSourceIds": ["eval-calendar-api-check"],
+      "acceptableConfidence": ["high", "medium"]
+    },
+    {
+      "id": "summary-01",
+      "category": "summary",
+      "question": "Summarize the team's progress across the week.",
+      "expectedKeywords": ["AI memory", "backend", "frontend", "calendar"],
+      "expectedSourceTypes": ["diary", "calendar"],
+      "acceptableConfidence": ["high", "medium"]
+    },
+    {
+      "id": "summary-02",
+      "category": "summary",
+      "question": "What were the main risks mentioned this week?",
+      "expectedKeywords": ["citations", "duplicate summaries", "500ms"],
+      "expectedSourceTypes": ["diary"],
+      "acceptableConfidence": ["high", "medium"]
+    },
+    {
+      "id": "memory-01",
+      "category": "memory",
+      "question": "Why did the team decide to use streaming for the demo?",
+      "expectedKeywords": ["answer sooner", "Gemini", "slower"],
+      "expectedSourceTypes": ["diary"],
+      "expectedSourceIds": ["eval-diary-2026-05-16"],
+      "acceptableConfidence": ["high", "medium"]
+    },
+    {
+      "id": "memory-02",
+      "category": "memory",
+      "question": "Which indexes were mentioned for memory retrieval performance?",
+      "expectedKeywords": ["HNSW", "GIN", "database retrieval"],
+      "expectedSourceTypes": ["diary"],
+      "expectedSourceIds": ["eval-diary-2026-05-16"],
+      "acceptableConfidence": ["high", "medium"]
+    },
+    {
+      "id": "decision-01",
+      "category": "decision",
+      "question": "What did the team decide about POST /diary?",
+      "expectedKeywords": ["save the raw entry", "trigger memory indexing"],
+      "expectedSourceTypes": ["diary"],
+      "expectedSourceIds": ["eval-diary-2026-05-12"],
+      "acceptableConfidence": ["high", "medium"]
+    },
+    {
+      "id": "decision-02",
+      "category": "decision",
+      "question": "What did the team agree about generated answers?",
+      "expectedKeywords": ["require", "sources", "citations"],
+      "expectedSourceTypes": ["diary"],
+      "expectedSourceIds": ["eval-diary-2026-05-13"],
+      "acceptableConfidence": ["high", "medium"]
+    },
+    {
+      "id": "frontend-01",
+      "category": "frontend",
+      "question": "What frontend work did Duc Anh and Nhan complete?",
+      "expectedKeywords": [
+        "diary input",
+        "loading",
+        "empty states",
+        "timeline"
+      ],
+      "expectedSourceTypes": ["diary"],
+      "expectedSourceIds": ["eval-diary-2026-05-14"],
+      "acceptableConfidence": ["high", "medium"]
+    },
+    {
+      "id": "workflow-01",
+      "category": "workflow",
+      "question": "How did the linking job match diary entries to calendar events?",
+      "expectedKeywords": ["date", "keyword", "time proximity"],
+      "expectedSourceTypes": ["diary"],
+      "expectedSourceIds": ["eval-diary-2026-05-15"],
+      "acceptableConfidence": ["high", "medium"]
+    },
+    {
+      "id": "no-data-01",
+      "category": "no_data",
+      "question": "What did the team decide about mobile push notification pricing?",
+      "expectedKeywords": ["not found", "insufficient", "chưa"],
+      "expectedNoSources": true,
+      "acceptableConfidence": ["low"]
+    },
+    {
+      "id": "no-data-02",
+      "category": "no_data",
+      "question": "What was the user's medical diagnosis this week?",
+      "expectedKeywords": ["not found", "insufficient", "chưa"],
+      "expectedNoSources": true,
+      "acceptableConfidence": ["low"]
+    }
+  ]
+}

@@ -1,0 +1,433 @@
+
+
+===== PAGE 1 / 11: roleDivideAndPlanning.pdf =====
+
+           1. Dang Minh Tam 
+    AI Memory Engine & Retrieval System (CORE BRAIN) 
+      Main Responsibility 
+Phát triển hệ thống “trí nhớ và truy vấn” của sản phẩm 
+       Key Tasks 
+• Chunking system 
+• Tách diary thành các đơn vị có ý nghĩa (meeting, feedback, task) 
+• Embedding pipeline 
+• Chuyển text → vector (Gemini / embedding model) 
+• Lưu vào pgvector 
+• Hybrid retrieval 
+• Filter theo metadata (date, tag) 
+• Kết hợp vector similarity search 
+• Query processing 
+• Parse câu hỏi → tìm context → generate answer 
+• Prompt engineering 
+• Đảm bảo câu trả lời chính xác 
+• Có citations (nguồn) rõ ràng 
+ 
+          Deliverables 
+• API logic cho /search 
+• Kết quả: 
+ 
+{ 
+  "answer": "...", 
+  "sources": [...] 
+} 
+ 
+• Retrieval chính xác (yếu tố quan trọng nhất của project) 
+ 
+ 
+           2. Tran Nguyen Quan 
+    Backend API & Data Layer (MAIN OWNER) 
+      Main Responsibility 
+Xây dựng hệ thống backend + database + bảo mật 
+       Key Tasks 
+• Authentication 
+• Supabase JWT 
+• user session 
+• Database (PostgreSQL) 
+
+
+===== PAGE 2 / 11: roleDivideAndPlanning.pdf =====
+
+• diary_entries 
+• memory_chunks 
+• summaries 
+• calendar_events 
+• Core APIs 
+• /diary (CRUD) 
+• /upload (attachments) 
+• /search (AI integration) 
+• /summary 
+• /calendar 
+• Middleware 
+• Auth validation 
+• Input validation 
+ 
+    Collaboration 
+• Làm việc cùng Thắng (co-owner backend phần integration) 
+ 
+          Deliverables 
+• API ổn định 
+• Data structure rõ ràng 
+• System backend hoạt động trơn tru 
+ 
+ 
+           3. Duong Minh Duc Anh 
+    Frontend UI/UX & Product Experience (CO-OWNER) 
+      Main Responsibility 
+Xây dựng giao diện chính và trải nghiệm người dùng 
+       Key Tasks 
+• Core UI 
+• Diary page (create + timeline) 
+• Search interface (ask → answer) 
+• UI Structure 
+• Layout (dashboard) 
+• Component structure 
+• Routing 
+ 
+    Collaboration với Nhân 
+• Explainability UI (sources, highlight) 
+• Summary UI (daily / weekly) 
+• UX states (loading, error) 
+
+
+===== PAGE 3 / 11: roleDivideAndPlanning.pdf =====
+
+ 
+          Deliverables 
+• Giao diện rõ ràng, dễ dùng 
+• Flow demo mượt 
+ 
+ 
+           4. Nguyen Tan Thang 
+    Workflow, Integration & Backend Co-owner 
+      Main Responsibility 
+Xây dựng automation + tích hợp Google + xử lý dữ liệu 
+ 
+       Key Tasks 
+1. Google Calendar Integration 
+• OAuth login 
+• Sync events (past + upcoming) 
+• Normalize & lưu DB 
+ 
+2. Advanced Linking Logic 
+• Match: 
+• date 
+• keyword 
+• time proximity 
+• Gắn: 
+• event ↔ diary 
+• event ↔ memory 
+ 
+3. Summary Pipeline 
+• Daily summary (diary + events) 
+• Weekly summary (từ daily) 
+• Trigger bằng cron 
+ 
+4. Data Pre-processing 
+• Clean & format data trước khi đưa vào AI 
+• Combine diary + calendar context 
+ 
+5. Backend Support (Co-owner) 
+• API: 
+• /calendar 
+• /summary 
+• Data transformation layer 
+
+
+===== PAGE 4 / 11: roleDivideAndPlanning.pdf =====
+
+ 
+          Deliverables 
+• Calendar integration hoạt động 
+• Summary tự động 
+• Data pipeline hỗ trợ AI 
+ 
+ 
+           5. Nguyen Thanh Nhan 
+    Frontend Co-owner + DevOps & Evaluation 
+      Main Responsibility 
+Đảm bảo system chạy ổn + demo chất lượng cao 
+ 
+       Key Tasks 
+   Frontend (Co-owner) 
+• UI enhancement: 
+• formatting data 
+• improve display 
+• Explainability UI: 
+• hiển thị sources rõ ràng 
+• highlight text 
+• UX & Stability: 
+• loading states 
+• error handling 
+• empty states 
+• Data binding: 
+• connect API → UI 
+• handle async data 
+ 
+   DevOps & Evaluation 
+• Deployment 
+• FE: Vercel 
+• BE: Railway / Render 
+• Seed Data 
+• diary entries (1 tuần) 
+• calendar events realistic 
+• System Testing 
+• test full flow 
+• AI Evaluation 
+• test queries 
+
+
+===== PAGE 5 / 11: roleDivideAndPlanning.pdf =====
+
+• kiểm tra độ chính xác 
+ 
+          Deliverables 
+• System chạy online 
+• Demo data chất lượng 
+• UI ổn định + không lỗi 
+ 
+    SYSTEM FLOW 
+ 
+Frontend (Đức Anh + Nhân) 
+        ↓ 
+Backend API (Quan + Thắng) 
+        ↓ 
+AI Memory (Tam) 
+        ↓ 
+Database (Supabase) 
+ 
+Workflow (Thắng) 
+        ↓ 
+Summary → lưu DB 
+ 
+Testing / Deployment (Nhân) 
+        ↔ kiểm tra toàn hệ thống 
+ 
+CAPSTONE_SECOND_BRAIN/ 
+├── .github/                  # (Nhân) Chứa workflows CI/CD tự động deploy 
+├── docker/                   # (Nhân) File Docker compose để chạy DB, Redis ở local 
+│ 
+├── apps/                     # Chứa các ứng dụng có thể chạy lên (Runnable) 
+│   ├── api/                  # (Quân) Backend chính (NestJS) 
+│   │   └── src/ 
+│   │       ├── modules/      # Tách tính năng rành mạch: 
+│   │       │   ├── auth/     # - Xử lý đăng nhập Supabase JWT 
+│   │       │   ├── diary/    # - API CRUD nhật ký 
+│   │       │   └── search/   # - API nhận câu hỏi AI 
+│   │       └── main.ts        
+│   │ 
+│   ├── web/                  # (Đức Anh & Nhân) Frontend chính (Next.js App Router) 
+│   │   └── src/ 
+│   │       ├── app/          # Chứa các trang (Dashboard, Timeline, Search) 
+│   │       ├── components/   # UI components (Button, Modal, Insight Cards) 
+
+
+===== PAGE 6 / 11: roleDivideAndPlanning.pdf =====
+
+│   │       └── lib/          # API client gọi xuống backend 
+│   │ 
+│   └── worker/               # (Thắng) Background Jobs (Node.js/Temporal) 
+│       └── src/ 
+│           ├── jobs/         # Chứa các task chạy ngầm: 
+│           │   ├── sync-calendar/ # Đồng bộ Google Calendar 
+│           │   └── summarize/     # Tự động tóm tắt Daily/Weekly 
+│           └── index.ts 
+│ 
+├── packages/                 # Chứa code dùng chung, KHÔNG tự chạy được 
+│   ├── db/                   # (Quân & Tâm) Mọi thứ về Database 
+│   │   ├── prisma/           # - Schema Prisma nằm ở đây 
+│   │   └── src/              # - Export DB client để api & worker gọi 
+│   │ 
+│   ├── ai/                   # (Tâm) Core Brain & LLM 
+│   │   └── src/ 
+│   │       ├── chunking/     # Logic cắt nhỏ nội dung 
+│   │       ├── embeddings/   # Gọi AI Gateway tạo vector 
+│   │       └── prompts/      # Lưu các template prompt cho mô hình 
+│   │ 
+│   └── shared/               # (Cả team) Nguồn sự thật duy nhất cho Type 
+│       └── src/ 
+│           ├── types/        # Interface/Type dùng chung (VD: IDiaryEntry) 
+│           └── utils/        # Hàm helper dùng chung (VD: format date) 
+│ 
+├── .env                      # Biến môi trường local (chỉ để ở gốc hoặc trong từng app) 
+├── package.json              # Chứa scripts tổng (như pnpm dev, pnpm build) 
+├── pnpm-workspace.yaml       # (Hoặc turbo.json) Khai báo liên kết các thư mục 
+└── README.md                 # Hướng dẫn setup cho thành viên mới 
+ 
+WEEK 1 — FOUNDATION 
+      Goal: 
+System chạy được skeleton (UI + API + DB + basic AI test) 
+ 
+           Tam (AI) 
+• Thiết kế schema memory_chunks 
+• Test embedding với sample diary 
+• Xác định format input/output cho AI 
+• Viết prototype chunking (basic) 
+
+
+===== PAGE 7 / 11: roleDivideAndPlanning.pdf =====
+
+ 
+           Quan (Backend) 
+• Setup project + DB schema: 
+• diary_entries 
+• memory_chunks 
+• Làm API: 
+• /diary (create + get) 
+• Setup auth (Supabase) 
+ 
+           Đức Anh (Frontend) 
+• Setup Next.js project 
+• Build: 
+• Diary input UI 
+• Timeline UI (mock data) 
+ 
+           Thắng (Workflow) 
+• Setup Google OAuth 
+• Test fetch calendar events 
+• Thiết kế schema calendar_events 
+ 
+           Nhân (DevOps + FE) 
+• Deploy FE + BE (basic) 
+• Tạo seed data đơn giản 
+• Hỗ trợ UI test flow 
+ 
+       WEEK 2 — CORE SYSTEM (DIARY + DATA) 
+      Goal: 
+Diary + Calendar hoạt động end-to-end 
+ 
+Tam 
+• Implement chunking thật 
+• Lưu chunk vào DB 
+• Gắn metadata (date, tag) 
+ 
+Quan 
+• Hoàn thiện /diary (CRUD) 
+• API /upload (optional) 
+
+
+===== PAGE 8 / 11: roleDivideAndPlanning.pdf =====
+
+• Middleware (auth + validation) 
+ 
+Đức Anh 
+• Connect UI ↔ API /diary 
+• Hoàn thiện: 
+• create entry 
+• view timeline 
+ 
+Thắng 
+• Sync calendar → DB 
+• API /calendar (cùng Quan) 
+• Normalize event data 
+ 
+Nhân 
+• Test full flow: 
+• create diary → lưu DB 
+• Improve UI (hiển thị data thật) 
+• Seed data realistic hơn 
+ 
+       WEEK 3 — AI SEARCH (CRITICAL   ) 
+      Goal: 
+User hỏi → system trả lời được 
+ 
+Tam 
+• Implement: 
+• vector search 
+• hybrid retrieval 
+• Generate answer + citations 
+• Optimize prompt (basic) 
+ 
+Quan 
+• API /search 
+• Connect AI logic 
+• Format response cho FE 
+ 
+Đức Anh 
+• Build search UI: 
+
+
+===== PAGE 9 / 11: roleDivideAndPlanning.pdf =====
+
+• input question 
+• hiển thị answer 
+• Hiển thị citations 
+ 
+Thắng 
+• Data preprocessing: 
+• combine diary + calendar 
+• Linking: 
+• event ↔ diary 
+ 
+Nhân 
+• Test AI: 
+• đúng / sai 
+• Fix UI result display 
+• Debug system 
+ 
+       WEEK 4 — WORKFLOW & INTEGRATION 
+      Goal: 
+System có automation + chiều sâu 
+ 
+Tam 
+• Improve retrieval accuracy 
+• Fix sai context 
+• Tuning prompt 
+ 
+Quan 
+• Optimize API 
+• Fix bug backend 
+ 
+Đức Anh 
+• Build summary UI: 
+• daily / weekly view 
+• UI polish 
+ 
+Thắng 
+• Implement: 
+• daily summary 
+
+
+===== PAGE 10 / 11: roleDivideAndPlanning.pdf =====
+
+• weekly summary 
+• Setup cron job 
+• Improve linking logic 
+ 
+Nhân 
+• Test full system flow 
+• Improve demo data 
+• UI polish + UX fix 
+ 
+       WEEK 5 — DEMO READY 
+      Goal: 
+System ổn định + demo “ăn điểm” 
+ 
+Tam 
+• Fix AI sai 
+• Final tuning 
+• Đảm bảo: 
+• answer đúng 
+• có citations rõ 
+ 
+Quan 
+• Fix bug 
+• Stabilize API 
+ 
+Đức Anh 
+• Polish UI 
+• Tối ưu demo flow 
+ 
+Thắng 
+• Fix summary pipeline 
+• Đảm bảo calendar + diary + AI connect tốt 
+ 
+Nhân 
+• Test toàn bộ system: 
+• create → search → summary 
+• Chuẩn bị: 
+• demo data 
+
+
+===== PAGE 11 / 11: roleDivideAndPlanning.pdf =====
+
+• demo scenario 
+ 

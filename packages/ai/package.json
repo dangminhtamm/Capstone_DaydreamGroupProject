@@ -15,9 +15,14 @@
     "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\"",
     "build": "pnpm run clean && tsc -p tsconfig.build.json",
     "ask:memory": "node --experimental-strip-types scripts/ask-memory.ts",
+    "benchmark:memory": "node --experimental-strip-types scripts/benchmark-memory.ts",
+    "eval:retrieval": "node --experimental-strip-types scripts/eval-retrieval.ts",
+    "eval:answer": "node --experimental-strip-types scripts/eval-memory.ts",
+    "eval:memory": "node --experimental-strip-types scripts/eval-memory.ts",
+    "seed:memory-eval": "node --experimental-strip-types scripts/seed-memory-evaluation.ts",
     "index:memory": "node --experimental-strip-types scripts/insert-memory-chunks.ts",
     "test:chunker": "node --env-file=.env --experimental-strip-types scripts/test-chunker.ts",
-    "test": "node --env-file=.env --experimental-strip-types --test src/*.test.ts",
+    "test": "node --experimental-strip-types --test src/*.test.ts",
     "test:embedding": "node --env-file=.env --experimental-strip-types scripts/test-embedding.ts"
   },
   "devDependencies": {
