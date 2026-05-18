@@ -102,10 +102,10 @@ export default function SearchPage() {
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(340px,0.9fr)]">
         <section className="rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white via-white to-indigo-50/40 p-6 shadow-sm shadow-slate-200/60">
           <div className="mb-5">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Week 3 Search UI</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">AI-powered recall</p>
             <h3 className="mt-2 text-2xl font-bold tracking-tight text-slate-950">Ask your Second Brain</h3>
             <p className="mt-1 text-sm text-slate-600">
-              Type a natural-language question. The backend will return an answer with citations.
+              Type a natural-language question. Your memories will surface the most relevant answer.
             </p>
           </div>
 
@@ -154,15 +154,30 @@ export default function SearchPage() {
               <button
                 type="submit"
                 disabled={!canSubmit}
-                className="inline-flex cursor-pointer items-center justify-center rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-200 transition hover:-translate-y-0.5 hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none disabled:hover:translate-y-0"
+                className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-200 transition hover:-translate-y-0.5 hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none disabled:hover:translate-y-0"
               >
-                {isSearching ? "Searching memories..." : "Ask question"}
+                {isSearching ? (
+                  <>
+                    <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    Searching memories...
+                  </>
+                ) : (
+                  <>
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                    Ask question
+                  </>
+                )}
               </button>
             </form>
           )}
         </section>
 
-        <section className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm shadow-slate-200/60">
+        <section className="rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white to-slate-50/50 p-6 shadow-sm shadow-slate-200/60">
           <div className="mb-5 flex items-start justify-between gap-3">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Answer</p>
@@ -176,10 +191,20 @@ export default function SearchPage() {
           </div>
 
           {isSearching ? (
-            <div className="space-y-3">
-              <div className="h-4 w-11/12 animate-pulse rounded bg-slate-200" />
-              <div className="h-4 w-9/12 animate-pulse rounded bg-slate-200" />
-              <div className="h-4 w-10/12 animate-pulse rounded bg-slate-200" />
+            <div className="space-y-4">
+              <div className="flex items-center gap-3 rounded-2xl border border-indigo-100 bg-indigo-50/60 px-4 py-3">
+                <svg className="h-4 w-4 shrink-0 animate-spin text-indigo-500" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                <p className="text-sm font-medium text-indigo-700">Searching through your memories…</p>
+              </div>
+              <div className="space-y-2.5">
+                <div className="h-3.5 w-11/12 animate-pulse rounded-full bg-slate-200" />
+                <div className="h-3.5 w-9/12 animate-pulse rounded-full bg-slate-200" />
+                <div className="h-3.5 w-10/12 animate-pulse rounded-full bg-slate-200" />
+                <div className="h-3.5 w-7/12 animate-pulse rounded-full bg-slate-200" />
+              </div>
             </div>
           ) : result ? (
             <div className="rounded-2xl border border-indigo-100 bg-indigo-50/40 p-4">
@@ -199,7 +224,7 @@ export default function SearchPage() {
         </section>
       </div>
 
-      <section className="mt-6 rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm shadow-slate-200/60">
+      <section className="mt-6 rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white via-white to-indigo-50/30 p-6 shadow-sm shadow-slate-200/60">
         <div className="mb-4 flex items-center justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Citations</p>

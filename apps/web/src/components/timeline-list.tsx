@@ -33,7 +33,9 @@ export function TimelineList({ entries }: TimelineListProps) {
   return (
     <div className="relative">
       {/* Timeline vertical line */}
-      <div className="absolute left-[19px] top-8 bottom-8 w-0.5 bg-gradient-to-b from-slate-200 via-slate-300 to-slate-200" />
+      {paginatedEntries.length > 1 && (
+        <div className="absolute left-[19px] top-8 bottom-28 w-0.5 bg-gradient-to-b from-slate-200 via-slate-300 to-slate-200" />
+      )}
       
       <ul className="space-y-6">
         {paginatedEntries.map((entry, index) => (
@@ -44,10 +46,10 @@ export function TimelineList({ entries }: TimelineListProps) {
             </div>
             
             {/* Card */}
-            <div className="group relative rounded-2xl border-2 border-slate-200 bg-white p-6 shadow-md hover:shadow-xl transition-all duration-300 hover:-translate-y-1">
+            <div className="group relative rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white to-slate-50/50 p-6 shadow-sm shadow-slate-200/60 transition-all duration-300 hover:-translate-y-0.5 hover:border-indigo-200 hover:shadow-md">
               {/* Entry number badge */}
               <div className="absolute -top-3 right-6">
-                <span className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 shadow-sm">
+                <span className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 ring-1 ring-indigo-100 shadow-sm">
                   Entry #{entries.length - index}
                 </span>
               </div>
@@ -67,8 +69,8 @@ export function TimelineList({ entries }: TimelineListProps) {
               
               {/* Content */}
               <div className="relative">
-                <div className="absolute left-0 top-0 bottom-0 w-1 rounded-full bg-indigo-500 opacity-50"></div>
-                <p className="pl-4 text-base text-slate-700 leading-relaxed">
+                <div className="absolute left-0 top-0 bottom-0 w-1 rounded-full bg-gradient-to-b from-indigo-400 to-indigo-200"></div>
+                <p className="pl-4 text-sm text-slate-700 leading-relaxed">
                   {entry.content}
                 </p>
               </div>
@@ -132,7 +134,7 @@ export function TimelineList({ entries }: TimelineListProps) {
               type="button"
               onClick={() => goToPage(currentPage - 1)}
               disabled={currentPage === 1}
-              className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              className="cursor-pointer rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Previous
             </button>
@@ -143,7 +145,7 @@ export function TimelineList({ entries }: TimelineListProps) {
               type="button"
               onClick={() => goToPage(currentPage + 1)}
               disabled={currentPage === totalPages}
-              className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              className="cursor-pointer rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Next
             </button>
