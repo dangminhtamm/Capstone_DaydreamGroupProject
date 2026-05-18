@@ -1,16 +1,33 @@
-import { Controller, Post, Body, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Param,
+  Query,
+  Request,
+  UseGuards,
+} from '@nestjs/common';
 import { SummaryService } from './summary.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { CreateSummaryDto } from './dto/create-summary.dto';
+import { ListSummariesQueryDto } from './dto/list-summaries-query.dto';
 
 @Controller('summary')
+@UseGuards(JwtAuthGuard)
 export class SummaryController {
   constructor(private readonly summaryService: SummaryService) {}
 
-  @Post()
-  @UseGuards(JwtAuthGuard) // 1. Validates Authentication
-  async createSummary(@Body() body: CreateSummaryDto) {
-    // 2. Validates Input via DTO
-    return this.summaryService.generateSummary(body.content);
+  @Get()
+  async findAll(
+    @Request() req: { user: { userId: string } },
+    @Query() query: ListSummariesQueryDto,
+  ) {
+    return this.summaryService.findAll(req.user.userId, query);
+  }
+
+  @Get(':id')
+  async findOne(
+    @Request() req: { user: { userId: string } },
+    @Param('id') id: string,
+  ) {
+    return this.summaryService.findOne(req.user.userId, id);
   }
 }

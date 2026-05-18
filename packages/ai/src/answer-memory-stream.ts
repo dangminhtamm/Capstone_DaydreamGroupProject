@@ -5,16 +5,23 @@
 // structured citation metadata at the end as a special SSE event.
 
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { retrieveMemory, type MemorySearchHit, type RetrievalFilters } from "./retrieval.ts";
+import {
+  retrieveMemory,
+  type MemorySearchHit,
+  type RetrievalFilters,
+} from "./retrieval.ts";
 import type { MemoryDbClient } from "./types.ts";
 import {
   type MemoryCitation,
   buildCitations,
   classifyRetrievalConfidence,
 } from "./answer-utils.ts";
+import { inferRetrievalFilters } from "./answer-memory.ts";
 
-const MIN_TOP_SIMILARITY = Number(process.env.MEMORY_MIN_TOP_SIMILARITY ?? 0.65);
-const DEFAULT_MAX_DISTANCE = Number(process.env.MEMORY_MAX_DISTANCE ?? 0.35);
+const MIN_TOP_SIMILARITY = Number(
+  process.env.MEMORY_MIN_TOP_SIMILARITY ?? 0.55,
+);
+const DEFAULT_MAX_DISTANCE = Number(process.env.MEMORY_MAX_DISTANCE ?? 0.5);
 const MAX_ANSWER_TOKENS = Number(process.env.MEMORY_MAX_ANSWER_TOKENS ?? 512);
 
 // Singleton Gemini client — avoids re-initialization overhead per request
@@ -71,6 +78,7 @@ export async function answerMemoryStream(
 
   // Phase 1: Retrieve memory chunks (this is the fast part, ≤500ms target)
   const chunks = await retrieveMemory(normalizedQuestion, userId, dbClient, {
+    ...inferRetrievalFilters(normalizedQuestion),
     ...options.filters,
     limit: options.limit ?? 8,
     maxDistance: options.maxDistance ?? DEFAULT_MAX_DISTANCE,
@@ -88,12 +96,11 @@ export async function answerMemoryStream(
   const topSimilarity = sortedChunks[0]?.similarity ?? 0;
 
   if (topSimilarity < minTopSimilarity) {
-    const citations = buildCitations(sortedChunks.slice(0, 3));
     return {
       stream: textToStream(
         "Mình tìm thấy một vài ký ức gần nghĩa, nhưng độ liên quan chưa đủ cao để trả lời chắc chắn.",
       ),
-      citations,
+      citations: [],
       confidence: "low",
       noMemory: false,
     };
@@ -109,7 +116,7 @@ export async function answerMemoryStream(
         `[${source.marker}]`,
         `date: ${source.occurredAt}`,
         `type: ${source.sourceType}/${source.chunkType}`,
-        `evidence: ${source.quote}`,
+        `memory: ${source.quote}`,
       ].join("\n"),
     )
     .join("\n\n");
@@ -142,7 +149,24 @@ Rules:
     },
   });
 
-  const geminiStream = await model.generateContentStream(prompt);
+  let geminiStream;
+  try {
+    geminiStream = await model.generateContentStream(prompt);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(
+      `[AnswerMemoryStream] Failed to start Gemini stream: ${message.replace(/\s+/g, " ").slice(0, 240)}`,
+    );
+
+    return {
+      stream: textToStream(
+        "Mình đã tìm thấy ký ức liên quan, nhưng chưa thể tạo câu trả lời streaming ở lần này.",
+      ),
+      citations: [],
+      confidence: "low",
+      noMemory: false,
+    };
+  }
 
   // Convert Gemini's async iterator into a ReadableStream<string>
   const stream = new ReadableStream<string>({
@@ -161,7 +185,10 @@ Rules:
     },
   });
 
-  const confidence = classifyRetrievalConfidence(topSimilarity, citations.length);
+  const confidence = classifyRetrievalConfidence(
+    topSimilarity,
+    citations.length,
+  );
 
   return {
     stream,

@@ -1,9 +1,4 @@
-import {
-  Injectable,
-  InternalServerErrorException,
-  NotFoundException,
-  Optional,
-} from '@nestjs/common';
+import { Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { indexMemoryFromDiary } from '@second-brain/ai';
 import {
   deleteMemoryChunksForSource,
@@ -41,8 +36,7 @@ export class DiaryService {
       },
     });
 
-    // Dispatch to background queue if available, otherwise index inline
-    const indexingResult = await this.dispatchOrIndexDiary(
+    const indexingResult = await this.tryQueueDiaryIndex(
       user.id,
       entry,
       dto.title,
@@ -104,12 +98,7 @@ export class DiaryService {
       },
     });
 
-    // Dispatch to background queue if available, otherwise index inline
-    const indexingResult = await this.dispatchOrIndexDiary(
-      user.id,
-      entry,
-      title,
-    );
+    const indexingResult = await this.tryQueueDiaryIndex(user.id, entry, title);
 
     return {
       ...this.toClientEntry(entry),
@@ -133,51 +122,63 @@ export class DiaryService {
     });
   }
 
-  // -----------------------------------------------------------------------
-  // Dispatch: Queue vs Inline
-  // -----------------------------------------------------------------------
-
-  /**
-   * Try to enqueue the indexing job to BullMQ.
-   * If the queue is unavailable (no Redis), fall back to synchronous inline indexing.
-   */
-  private async dispatchOrIndexDiary(
+  private async tryQueueDiaryIndex(
     userId: string,
     entry: { id: string; raw_text: string; entry_date: Date },
     sourceTitle: string,
   ): Promise<{ indexed: boolean; chunkCount: number; queued: boolean }> {
-    // Try queue-based approach first
-    if (this.memoryQueue) {
-      try {
-        await this.memoryQueue.enqueueDiaryIndex({
+    if (!this.memoryQueue) {
+      console.warn(
+        '[DiaryService] Memory queue unavailable; indexing diary in background.',
+      );
+      this.indexDiaryEntryInBackground(userId, entry, sourceTitle);
+      return { indexed: false, chunkCount: 0, queued: false };
+    }
+
+    try {
+      await withTimeout(
+        this.memoryQueue.enqueueDiaryIndex({
           userId,
           diaryId: entry.id,
           rawText: entry.raw_text,
           entryDate: entry.entry_date.toISOString(),
           sourceTitle,
-        });
-
-        console.log(`[DiaryService] Diary ${entry.id} enqueued for background indexing`);
-        return { indexed: false, chunkCount: 0, queued: true };
-      } catch (queueError) {
-        console.warn(
-          '[DiaryService] Failed to enqueue job, falling back to inline:',
-          queueError instanceof Error ? queueError.message : queueError,
-        );
-        // Fall through to inline indexing
-      }
-    }
-
-    // Inline fallback (original behavior)
-    try {
-      const result = await this.indexDiaryEntryInline(userId, entry, sourceTitle);
-      return { indexed: true, chunkCount: result.chunkCount, queued: false };
-    } catch (error) {
-      console.error('Failed to index diary entry into memory chunks:', error);
-      throw new InternalServerErrorException(
-        'Diary entry was saved, but memory indexing failed.',
+        }),
+        1500,
+        'Timed out while enqueueing diary memory indexing.',
       );
+
+      console.log(
+        `[DiaryService] Diary ${entry.id} enqueued for background indexing`,
+      );
+      return { indexed: false, chunkCount: 0, queued: true };
+    } catch (queueError) {
+      console.warn(
+        '[DiaryService] Diary was saved, but memory indexing was not queued. Falling back to background inline indexing:',
+        queueError instanceof Error ? queueError.message : queueError,
+      );
+      this.indexDiaryEntryInBackground(userId, entry, sourceTitle);
+      return { indexed: false, chunkCount: 0, queued: false };
     }
+  }
+
+  private indexDiaryEntryInBackground(
+    userId: string,
+    entry: { id: string; raw_text: string; entry_date: Date },
+    sourceTitle: string,
+  ) {
+    void this.indexDiaryEntryInline(userId, entry, sourceTitle)
+      .then((result) => {
+        console.log(
+          `[DiaryService] Background indexed diary ${entry.id}: ${result.chunkCount} chunks`,
+        );
+      })
+      .catch((error) => {
+        console.error(
+          `[DiaryService] Background memory indexing failed for diary ${entry.id}:`,
+          error,
+        );
+      });
   }
 
   // -----------------------------------------------------------------------
@@ -249,7 +250,12 @@ export class DiaryService {
   private async persistEntityMentions(
     userId: string,
     diaryId: string,
-    indexingResult: { chunks: Array<{ chunkIndex: number; entityMentions?: Array<{ entityType: string; entityValue: string }> }> },
+    indexingResult: {
+      chunks: Array<{
+        chunkIndex: number;
+        entityMentions?: Array<{ entityType: string; entityValue: string }>;
+      }>;
+    },
   ) {
     try {
       await deleteEntityMentionsForSource(this.prisma as any, {
@@ -264,7 +270,11 @@ export class DiaryService {
         sourceId: diaryId,
       });
 
-      const mentionPayloads: Array<{ chunkId: string; entityType: string; entityValue: string }> = [];
+      const mentionPayloads: Array<{
+        chunkId: string;
+        entityType: string;
+        entityValue: string;
+      }> = [];
 
       for (const chunk of indexingResult.chunks) {
         const chunkId = chunkIdMap.get(chunk.chunkIndex);
@@ -294,7 +304,13 @@ export class DiaryService {
     return `${title.trim()}\n\n${content.trim()}`;
   }
 
-  private toClientEntry(entry: { id: string; raw_text: string; status: string; created_at: Date; updated_at: Date }) {
+  private toClientEntry(entry: {
+    id: string;
+    raw_text: string;
+    status: string;
+    created_at: Date;
+    updated_at: Date;
+  }) {
     const [title, ...contentParts] = entry.raw_text.split('\n\n');
 
     return {
@@ -306,4 +322,18 @@ export class DiaryService {
       updatedAt: entry.updated_at.toISOString(),
     };
   }
+}
+
+function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  message: string,
+): Promise<T> {
+  let timer: NodeJS.Timeout;
+
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }

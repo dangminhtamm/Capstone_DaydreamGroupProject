@@ -1,10 +1,20 @@
 // packages/ai/src/index.ts
-export { CHUNK_TYPES, type ChunkType, type SemanticChunk, type MemoryChunkMetadata } from "./types.ts";
+export {
+  CHUNK_TYPES,
+  type ChunkType,
+  type SemanticChunk,
+  type MemoryChunkMetadata,
+} from "./types.ts";
 export { generateSemanticChunks } from "./chunker.ts";
-export { retrieveMemory, type RetrievalFilters } from "./retrieval.ts";
+export {
+  retrieveMemory,
+  retrieveMemoryWithEmbedding,
+  type RetrievalFilters,
+} from "./retrieval.ts";
 export {
   answerFromChunks,
   answerMemory,
+  inferRetrievalFilters,
   type AnswerMemoryOptions,
   type AnswerMemoryResult,
 } from "./answer-memory.ts";

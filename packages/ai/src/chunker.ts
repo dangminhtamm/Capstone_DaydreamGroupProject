@@ -21,7 +21,14 @@ const SemanticChunkSchema = z.object({
       goals: z.array(z.string()).default([]),
       habits: z.array(z.string()).default([]),
       tags: z.array(z.string()).default([]),
-      importance: z.number().int().min(1).max(5),
+      importance: z.preprocess(
+        (value) => {
+          const parsed = Number(value);
+          if (!Number.isFinite(parsed)) return 3;
+          return Math.min(5, Math.max(1, Math.round(parsed)));
+        },
+        z.number().int().min(1).max(5),
+      ),
     }),
   ),
 });
@@ -104,6 +111,7 @@ Rules:
 - Do not invent people, projects, dates, or outcomes.
 - Keep chunk text self-contained.
 - evidence must be copied or tightly paraphrased from the source.
+- importance must be an integer from 1 to 5.
 - goals: extract any mentioned objectives, targets, or aspirations (e.g., "finish capstone by June", "save 10M VND").
 - habits: extract any recurring routines or behavioural patterns (e.g., "morning run", "daily journaling", "weekly review").
 - If the diary has no useful memory, return an empty chunks array.

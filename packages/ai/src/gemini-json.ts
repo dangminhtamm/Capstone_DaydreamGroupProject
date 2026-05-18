@@ -40,7 +40,10 @@ export async function generateGeminiJson<T>(
   });
 
   let lastError: Error | null = null;
-  const maxRetries = 2;
+  const configuredRetries = Number(process.env.GEMINI_JSON_MAX_RETRIES ?? 2);
+  const maxRetries = Number.isFinite(configuredRetries)
+    ? Math.max(0, Math.floor(configuredRetries))
+    : 2;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
@@ -52,26 +55,107 @@ export async function generateGeminiJson<T>(
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
 
-      // Only retry on transient/network errors, not on validation failures
-      const isTransient =
-        lastError.message.includes("500") ||
-        lastError.message.includes("503") ||
-        lastError.message.includes("429") ||
-        lastError.message.includes("ECONNRESET") ||
-        lastError.message.includes("fetch failed");
+      // Only retry on transient/network errors, not on validation failures.
+      const isTransient = isTransientGeminiError(lastError);
 
       if (!isTransient || attempt === maxRetries) break;
 
-      const delayMs = 1000 * (attempt + 1);
+      const delayMs = getRetryDelayMs(lastError, attempt);
       console.warn(
-        `[GeminiJSON] Transient error (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${delayMs}ms:`,
-        lastError.message,
+        `[GeminiJSON] ${summarizeTransientError(lastError)}; retrying in ${delayMs}ms (attempt ${attempt + 1}/${maxRetries + 1}).`,
       );
       await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
   }
 
   throw lastError!;
+}
+
+function isTransientGeminiError(error: Error): boolean {
+  const status = getErrorStatus(error);
+  return (
+    status === 429 ||
+    status === 500 ||
+    status === 503 ||
+    error.message.includes("ECONNRESET") ||
+    error.message.includes("fetch failed")
+  );
+}
+
+function getRetryDelayMs(error: Error, attempt: number): number {
+  const configuredMax = Number(process.env.GEMINI_JSON_MAX_RETRY_DELAY_MS ?? 60_000);
+  const maxDelayMs = Number.isFinite(configuredMax) ? configuredMax : 60_000;
+  const status = getErrorStatus(error);
+  const retryInfoDelay = extractRetryInfoDelayMs(error);
+
+  if (retryInfoDelay !== null) {
+    return clampDelay(retryInfoDelay, 1_000, maxDelayMs);
+  }
+
+  const baseDelayMs = status === 429 ? 15_000 : 5_000;
+  const exponentialDelayMs = baseDelayMs * 2 ** attempt;
+  return clampDelay(exponentialDelayMs, 1_000, maxDelayMs);
+}
+
+function extractRetryInfoDelayMs(error: Error): number | null {
+  const details = (error as { errorDetails?: unknown }).errorDetails;
+  if (Array.isArray(details)) {
+    for (const detail of details) {
+      const retryDelay = (detail as { retryDelay?: unknown })?.retryDelay;
+      const parsed = parseDurationToMs(retryDelay);
+      if (parsed !== null) return parsed;
+    }
+  }
+
+  const fromJson = error.message.match(/"retryDelay"\s*:\s*"([^"]+)"/);
+  const parsedJsonDelay = parseDurationToMs(fromJson?.[1]);
+  if (parsedJsonDelay !== null) return parsedJsonDelay;
+
+  const fromText = error.message.match(/Please retry in ([\d.]+)s/i);
+  if (fromText?.[1]) {
+    return Math.ceil(Number(fromText[1]) * 1000);
+  }
+
+  return null;
+}
+
+function parseDurationToMs(value: unknown): number | null {
+  if (typeof value !== "string") return null;
+
+  const seconds = value.match(/^([\d.]+)s$/);
+  if (seconds) return Math.ceil(Number(seconds[1]) * 1000);
+
+  const millis = value.match(/^([\d.]+)ms$/);
+  if (millis) return Math.ceil(Number(millis[1]));
+
+  return null;
+}
+
+function getErrorStatus(error: Error): number | undefined {
+  const status = (error as { status?: unknown }).status;
+  if (typeof status === "number") return status;
+
+  const statusMatch = error.message.match(/\[(429|500|503)[^\]]*\]/);
+  return statusMatch?.[1] ? Number(statusMatch[1]) : undefined;
+}
+
+function clampDelay(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(max, Math.max(min, Math.round(value)));
+}
+
+function summarizeTransientError(error: Error): string {
+  const status = getErrorStatus(error);
+  const label =
+    status === 429
+      ? "429 quota/rate limit"
+      : status === 503
+        ? "503 service unavailable"
+        : status === 500
+          ? "500 server error"
+          : "transient Gemini error";
+
+  return `${label}: ${error.message.replace(/\s+/g, " ").slice(0, 180)}`;
 }
 
 function parseJsonResponse(text: string): unknown {

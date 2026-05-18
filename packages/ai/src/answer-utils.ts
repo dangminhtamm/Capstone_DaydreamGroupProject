@@ -26,17 +26,33 @@ export function buildCitations(chunks: MemorySearchHit[]): MemoryCitation[] {
       sourceType: chunk.sourceType,
       sourceId: chunk.sourceId,
       sourceTitle: metadata.sourceTitle,
-      occurredAt: chunk.occurredAt instanceof Date
-        ? chunk.occurredAt.toISOString()
-        : new Date(chunk.occurredAt).toISOString(),
+      occurredAt:
+        chunk.occurredAt instanceof Date
+          ? chunk.occurredAt.toISOString()
+          : new Date(chunk.occurredAt).toISOString(),
       chunkType: chunk.chunkType,
-      quote: trimEvidence(chunk.evidence ?? chunk.text),
+      quote: trimEvidence(selectBestEvidence(chunk)),
       similarity: Number(chunk.similarity),
       vectorSimilarity: Number(chunk.vectorSimilarity ?? 0),
       lexicalScore: Number(chunk.lexicalScore ?? 0),
       retrievalMode: chunk.retrievalMode,
     };
   });
+}
+
+function selectBestEvidence(chunk: MemorySearchHit): string {
+  const evidence = chunk.evidence?.trim();
+  const text = chunk.text.trim();
+
+  if (!evidence) return text;
+
+  // Calendar and attachment summary chunks often stored a short title/snippet as
+  // evidence. For answer generation, the full chunk text is more grounding.
+  if (evidence.length < 40 && text.length > evidence.length) {
+    return text;
+  }
+
+  return evidence;
 }
 
 export function safeMetadata(metadata: unknown): { sourceTitle?: string } {
@@ -60,6 +76,6 @@ export function classifyRetrievalConfidence(
   citationCount: number,
 ): "high" | "medium" | "low" {
   if (topSimilarity >= 0.8 && citationCount >= 2) return "high";
-  if (topSimilarity >= 0.65 && citationCount >= 1) return "medium";
+  if (topSimilarity >= 0.55 && citationCount >= 1) return "medium";
   return "low";
 }
