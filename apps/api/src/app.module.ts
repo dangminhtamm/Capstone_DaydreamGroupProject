@@ -15,7 +15,6 @@ import { JwtAuthGuard } from './modules/auth/jwt-auth.guard';
 import { PrismaService } from './prisma/prisma.service';
 import { SearchController } from './modules/search/search.controller';
 import { SearchService } from './modules/search/search.service';
-import { MemoryQueueModule } from './modules/memory-queue/memory-queue.module';
 
 @Module({
   imports: [
@@ -25,7 +24,6 @@ import { MemoryQueueModule } from './modules/memory-queue/memory-queue.module';
     }),
     AuthModule,
     CalendarModule,
-    MemoryQueueModule,
   ],
   controllers: [
     AppController,

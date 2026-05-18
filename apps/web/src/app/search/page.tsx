@@ -66,9 +66,9 @@ export default function SearchPage() {
     setError(null);
 
     try {
-      // Use the new streaming SSE endpoint
+      // Backend search endpoint returns a grounded answer and citation sources.
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
-      const response = await fetch(`${apiUrl}/api/search/stream`, {
+      const response = await fetch(`${apiUrl}/api/search`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -84,72 +84,11 @@ export default function SearchPage() {
         throw new Error(`Search failed with status ${response.status}`);
       }
 
-      if (!response.body) {
-        throw new Error("No response body returned from stream.");
-      }
-
-      // Initialize result state to show stream progressively
-      setResult({ answer: "", confidence: "low", sources: [] });
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let done = false;
-      let buffer = "";
-
-      while (!done) {
-        const { value, done: readerDone } = await reader.read();
-        done = readerDone;
-
-        if (value) {
-          buffer += decoder.decode(value, { stream: true });
-
-          // Parse SSE format
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || ""; // Keep the incomplete line in the buffer
-
-          let currentEvent = "message";
-
-          for (const line of lines) {
-            if (line.startsWith("event: ")) {
-              currentEvent = line.substring(7).trim();
-            } else if (line.startsWith("data: ")) {
-              const data = line.substring(6).trim();
-              
-              if (currentEvent === "token") {
-                try {
-                  const tokenText = JSON.parse(data);
-                  setResult((prev) => prev ? { ...prev, answer: prev.answer + tokenText } : null);
-                } catch (e) {
-                  console.error("Failed to parse token:", data);
-                }
-              } else if (currentEvent === "metadata") {
-                try {
-                  const metadata = JSON.parse(data);
-                  setResult((prev) => prev ? { 
-                    ...prev, 
-                    confidence: metadata.confidence, 
-                    sources: metadata.sources 
-                  } : null);
-                } catch (e) {
-                  console.error("Failed to parse metadata:", data);
-                }
-              } else if (currentEvent === "done") {
-                done = true;
-              } else if (currentEvent === "error") {
-                try {
-                  const errData = JSON.parse(data);
-                  setError(errData.message || "Stream error occurred");
-                } catch (e) {
-                  setError("Stream error occurred");
-                }
-                done = true;
-              }
-            }
-          }
-        }
-      }
+      const data = (await response.json()) as SearchResponse;
+      setResult(data);
     } catch (searchError) {
       setError(searchError instanceof Error ? searchError.message : "Search failed. Please try again.");
+      setResult(null);
     } finally {
       setIsSearching(false);
     }
@@ -163,10 +102,10 @@ export default function SearchPage() {
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(340px,0.9fr)]">
         <section className="rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white via-white to-indigo-50/40 p-6 shadow-sm shadow-slate-200/60">
           <div className="mb-5">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Week 3 Search UI</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">AI-powered recall</p>
             <h3 className="mt-2 text-2xl font-bold tracking-tight text-slate-950">Ask your Second Brain</h3>
             <p className="mt-1 text-sm text-slate-600">
-              Type a natural-language question. The backend will return an answer with citations.
+              Type a natural-language question. Your memories will surface the most relevant answer.
             </p>
           </div>
 
@@ -215,15 +154,30 @@ export default function SearchPage() {
               <button
                 type="submit"
                 disabled={!canSubmit}
-                className="inline-flex cursor-pointer items-center justify-center rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-200 transition hover:-translate-y-0.5 hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none disabled:hover:translate-y-0"
+                className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-200 transition hover:-translate-y-0.5 hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none disabled:hover:translate-y-0"
               >
-                {isSearching ? "Searching memories..." : "Ask question"}
+                {isSearching ? (
+                  <>
+                    <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    Searching memories...
+                  </>
+                ) : (
+                  <>
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                    Ask question
+                  </>
+                )}
               </button>
             </form>
           )}
         </section>
 
-        <section className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm shadow-slate-200/60">
+        <section className="rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white to-slate-50/50 p-6 shadow-sm shadow-slate-200/60">
           <div className="mb-5 flex items-start justify-between gap-3">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Answer</p>
@@ -236,11 +190,21 @@ export default function SearchPage() {
             ) : null}
           </div>
 
-          {isSearching && !result?.answer ? (
-            <div className="space-y-3">
-              <div className="h-4 w-11/12 animate-pulse rounded bg-slate-200" />
-              <div className="h-4 w-9/12 animate-pulse rounded bg-slate-200" />
-              <div className="h-4 w-10/12 animate-pulse rounded bg-slate-200" />
+          {isSearching ? (
+            <div className="space-y-4">
+              <div className="flex items-center gap-3 rounded-2xl border border-indigo-100 bg-indigo-50/60 px-4 py-3">
+                <svg className="h-4 w-4 shrink-0 animate-spin text-indigo-500" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                <p className="text-sm font-medium text-indigo-700">Searching through your memories…</p>
+              </div>
+              <div className="space-y-2.5">
+                <div className="h-3.5 w-11/12 animate-pulse rounded-full bg-slate-200" />
+                <div className="h-3.5 w-9/12 animate-pulse rounded-full bg-slate-200" />
+                <div className="h-3.5 w-10/12 animate-pulse rounded-full bg-slate-200" />
+                <div className="h-3.5 w-7/12 animate-pulse rounded-full bg-slate-200" />
+              </div>
             </div>
           ) : result ? (
             <div className="rounded-2xl border border-indigo-100 bg-indigo-50/40 p-4">
@@ -260,7 +224,7 @@ export default function SearchPage() {
         </section>
       </div>
 
-      <section className="mt-6 rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm shadow-slate-200/60">
+      <section className="mt-6 rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white via-white to-indigo-50/30 p-6 shadow-sm shadow-slate-200/60">
         <div className="mb-4 flex items-center justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Citations</p>

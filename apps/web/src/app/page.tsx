@@ -33,7 +33,7 @@ export default function Home() {
           ) : (
             <button
               onClick={signInWithGoogle}
-              className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 transition-colors"
+              className="flex cursor-pointer items-center gap-2 px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 transition-colors"
             >
               Sign in with Google
             </button>
@@ -72,7 +72,7 @@ export default function Home() {
             ) : (
               <button
                 onClick={signInWithGoogle}
-                className="flex items-center gap-3 px-6 py-3 bg-white text-slate-900 font-medium rounded-xl border border-slate-200 hover:bg-slate-50 transition-colors shadow-sm"
+                className="flex cursor-pointer items-center gap-3 px-6 py-3 bg-white text-slate-900 font-medium rounded-xl border border-slate-200 hover:bg-slate-50 transition-colors shadow-sm"
               >
                 <svg className="w-5 h-5" viewBox="0 0 24 24">
                   <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
@@ -88,34 +88,34 @@ export default function Home() {
 
         {/* Features */}
         <div className="mt-24 grid grid-cols-1 md:grid-cols-3 gap-8">
-          <div className="p-6 rounded-2xl bg-white border border-slate-200 shadow-sm">
+          <div className="p-6 rounded-3xl bg-white border border-slate-200/80 shadow-sm shadow-slate-200/60 transition hover:-translate-y-1 hover:shadow-md hover:border-indigo-200">
             <div className="w-12 h-12 rounded-xl bg-indigo-100 flex items-center justify-center mb-4">
               <svg className="w-6 h-6 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
               </svg>
             </div>
-            <h3 className="text-lg font-semibold text-slate-900">Daily Diary</h3>
-            <p className="mt-2 text-slate-600">Capture your thoughts and experiences with our intuitive diary interface.</p>
+            <h3 className="text-lg font-bold text-slate-900">Daily Diary</h3>
+            <p className="mt-2 text-sm text-slate-600">Capture your thoughts and experiences with our intuitive diary interface.</p>
           </div>
 
-          <div className="p-6 rounded-2xl bg-white border border-slate-200 shadow-sm">
+          <div className="p-6 rounded-3xl bg-white border border-slate-200/80 shadow-sm shadow-slate-200/60 transition hover:-translate-y-1 hover:shadow-md hover:border-purple-200">
             <div className="w-12 h-12 rounded-xl bg-purple-100 flex items-center justify-center mb-4">
               <svg className="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             </div>
-            <h3 className="text-lg font-semibold text-slate-900">Mood Tracking</h3>
-            <p className="mt-2 text-slate-600">Track your emotional journey and identify patterns over time.</p>
+            <h3 className="text-lg font-bold text-slate-900">Mood Tracking</h3>
+            <p className="mt-2 text-sm text-slate-600">Track your emotional journey and identify patterns over time.</p>
           </div>
 
-          <div className="p-6 rounded-2xl bg-white border border-slate-200 shadow-sm">
+          <div className="p-6 rounded-3xl bg-white border border-slate-200/80 shadow-sm shadow-slate-200/60 transition hover:-translate-y-1 hover:shadow-md hover:border-emerald-200">
             <div className="w-12 h-12 rounded-xl bg-emerald-100 flex items-center justify-center mb-4">
               <svg className="w-6 h-6 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             </div>
-            <h3 className="text-lg font-semibold text-slate-900">Timeline View</h3>
-            <p className="mt-2 text-slate-600">Browse your memories in a beautiful, chronological timeline.</p>
+            <h3 className="text-lg font-bold text-slate-900">Timeline View</h3>
+            <p className="mt-2 text-sm text-slate-600">Browse your memories in a beautiful, chronological timeline.</p>
           </div>
         </div>
       </main>
