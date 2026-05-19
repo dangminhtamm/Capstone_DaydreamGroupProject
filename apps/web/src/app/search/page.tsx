@@ -46,6 +46,29 @@ type SearchResponse = {
 
 type ResponseLanguage = "en" | "vi";
 
+type SearchHistoryItem = {
+  query: string;
+  answer: string;
+  confidence: "high" | "medium" | "low";
+  timestamp: string;
+};
+
+const HISTORY_KEY = "dd-search-history";
+const MAX_HISTORY = 10;
+
+function loadHistory(): SearchHistoryItem[] {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveHistory(items: SearchHistoryItem[]) {
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(items.slice(0, MAX_HISTORY)));
+}
+
 const suggestedQuestions = [
   "What did I work on recently?",
   "What important events happened this week?",
@@ -67,11 +90,14 @@ export default function SearchPage() {
   const [responseLanguage, setResponseLanguage] = useState<ResponseLanguage>("en");
   const [showAuthPrompt, setShowAuthPrompt] = useState(false);
   const [analyticsOpen, setAnalyticsOpen] = useState(false);
+  const [searchHistory, setSearchHistory] = useState<SearchHistoryItem[]>([]);
+  const [showHistory, setShowHistory] = useState(true);
 
-  // Persist language preference
+  // Persist language preference + load search history
   useEffect(() => {
     const saved = localStorage.getItem("dd-response-lang") as ResponseLanguage | null;
     if (saved === "en" || saved === "vi") setResponseLanguage(saved);
+    setSearchHistory(loadHistory());
   }, []);
 
   const toggleLanguage = () => {
@@ -133,6 +159,17 @@ export default function SearchPage() {
 
       const data = (await response.json()) as SearchResponse;
       setResult(data);
+
+      // Save to search history
+      const newItem: SearchHistoryItem = {
+        query: normalizedQuestion,
+        answer: data.answer || "",
+        confidence: data.confidence || "low",
+        timestamp: new Date().toISOString(),
+      };
+      const updated = [newItem, ...searchHistory.filter(h => h.query !== normalizedQuestion)].slice(0, MAX_HISTORY);
+      setSearchHistory(updated);
+      saveHistory(updated);
 
       // Persist token usage for sidebar widget (Order 2: 3d)
       if (data.analytics?.tokenUsage) {
@@ -228,6 +265,51 @@ export default function SearchPage() {
                   </button>
                 ))}
               </div>
+
+              {/* Search History */}
+              {searchHistory.length > 0 && (
+                <div className="rounded-2xl border border-slate-200 bg-white/60 p-3 dark:border-slate-700 dark:bg-slate-800/40">
+                  <div className="mb-2 flex items-center justify-between">
+                    <button
+                      type="button"
+                      onClick={() => setShowHistory(!showHistory)}
+                      className="flex cursor-pointer items-center gap-1.5 text-xs font-semibold text-slate-500 transition hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+                    >
+                      <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                      Recent Searches
+                      <svg className={`h-3 w-3 transition-transform ${showHistory ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setSearchHistory([]); localStorage.removeItem(HISTORY_KEY); }}
+                      className="cursor-pointer text-[11px] font-medium text-slate-400 transition hover:text-rose-500 dark:text-slate-500 dark:hover:text-rose-400"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                  {showHistory && (
+                    <div className="space-y-1.5">
+                      {searchHistory.map((item, i) => (
+                        <button
+                          key={`${item.query}-${i}`}
+                          type="button"
+                          onClick={() => {
+                            setQuestion(item.query);
+                            setResult({ answer: item.answer, confidence: item.confidence, sources: [] });
+                          }}
+                          className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs text-slate-600 transition hover:bg-indigo-50 hover:text-indigo-700 dark:text-slate-400 dark:hover:bg-indigo-900/20 dark:hover:text-indigo-300"
+                        >
+                          <svg className="h-3 w-3 shrink-0 text-slate-400 dark:text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                          <span className="flex-1 truncate">{item.query}</span>
+                          <span className="shrink-0 text-[10px] text-slate-400 dark:text-slate-500">
+                            {new Date(item.timestamp).toLocaleDateString()}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {error ? (
                 <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-700 dark:bg-rose-900/20 dark:text-rose-400">
