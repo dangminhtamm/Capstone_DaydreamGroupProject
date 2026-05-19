@@ -66,6 +66,9 @@ export interface AnswerMemoryResult {
   answer: string;
   confidence: "high" | "medium" | "low";
   citations: MemoryCitation[];
+  noMemory?: boolean;
+  suggestions?: string[];
+  tokenUsage?: { inputTokens: number; outputTokens: number; model: string };
   modelError?: {
     status?: number;
     kind: "quota" | "service_unavailable" | "validation" | "transient" | "unknown";
@@ -73,11 +76,14 @@ export interface AnswerMemoryResult {
   };
 }
 
+export type ResponseLanguage = 'en' | 'vi';
+
 export interface AnswerMemoryOptions {
   filters?: RetrievalFilters;
   limit?: number;
   maxDistance?: number;
   minTopSimilarity?: number;
+  responseLanguage?: ResponseLanguage;
 }
 
 export async function answerMemory(
@@ -87,9 +93,10 @@ export async function answerMemory(
   options: AnswerMemoryOptions = {},
 ): Promise<AnswerMemoryResult> {
   const normalizedQuestion = question.trim();
+  const lang = options.responseLanguage ?? 'en';
 
   if (!normalizedQuestion) {
-    return lowConfidenceNoAnswer("Bạn chưa nhập câu hỏi.");
+    return noMemoryResult(lang === 'vi' ? 'Bạn chưa nhập câu hỏi.' : 'Please enter a question.', lang);
   }
 
   const inferredFilters = inferRetrievalFilters(normalizedQuestion);
@@ -102,19 +109,24 @@ export async function answerMemory(
 
   return answerFromChunks(normalizedQuestion, chunks, {
     minTopSimilarity: options.minTopSimilarity ?? MIN_TOP_SIMILARITY,
+    responseLanguage: lang,
   });
 }
 
 export async function answerFromChunks(
   question: string,
   chunks: MemorySearchHit[],
-  options: { minTopSimilarity?: number } = {},
+  options: { minTopSimilarity?: number; responseLanguage?: ResponseLanguage } = {},
 ): Promise<AnswerMemoryResult> {
   const minTopSimilarity = options.minTopSimilarity ?? MIN_TOP_SIMILARITY;
+  const lang = options.responseLanguage ?? 'en';
 
   if (!chunks.length) {
-    return lowConfidenceNoAnswer(
-      "Mình chưa tìm thấy ký ức đủ liên quan để trả lời chắc chắn.",
+    return noMemoryResult(
+      lang === 'vi'
+        ? 'Mình chưa tìm thấy ký ức đủ liên quan để trả lời chắc chắn.'
+        : 'I couldn\'t find any relevant memories to answer your question.',
+      lang,
     );
   }
 
@@ -122,12 +134,12 @@ export async function answerFromChunks(
   const topSimilarity = sortedChunks[0]?.similarity ?? 0;
 
   if (topSimilarity < minTopSimilarity) {
-    return {
-      answer:
-        "Mình tìm thấy một vài ký ức gần nghĩa, nhưng độ liên quan chưa đủ cao để trả lời chắc chắn.",
-      confidence: "low",
-      citations: [],
-    };
+    return noMemoryResult(
+      lang === 'vi'
+        ? 'Mình tìm thấy một vài ký ức gần nghĩa, nhưng độ liên quan chưa đủ cao để trả lời chắc chắn.'
+        : 'I found some loosely related memories, but the relevance isn\'t strong enough for a confident answer.',
+      lang,
+    );
   }
 
   const sources = buildCitations(sortedChunks);
@@ -143,6 +155,10 @@ export async function answerFromChunks(
       ].join("\n");
     })
     .join("\n\n");
+
+  const languageInstruction = lang === 'vi'
+    ? '- PHẢI trả lời bằng tiếng Việt.'
+    : '- You MUST answer in English.';
 
   const prompt = `
 You are the grounded answer generator for a personal Second Brain memory system.
@@ -160,7 +176,7 @@ Rules:
 - However, you MUST still provide the citations in the JSON output with their respective claims.
 - If the sources do not answer the question, say that the memory is insufficient and set confidence to "low".
 - Prefer a concise answer over a fluent but unsupported answer.
-- Keep the answer in the same language as the user question.
+${languageInstruction}
 `.trim();
 
   try {
@@ -179,12 +195,12 @@ Rules:
     );
 
     if (!validModelCitations.length) {
-      return {
-        answer:
-          "Mình tìm thấy một số ký ức liên quan, nhưng câu trả lời sinh ra không có citation hợp lệ nên mình không thể xác nhận chắc chắn.",
-        confidence: "low",
-        citations: [],
-      };
+      return noMemoryResult(
+        lang === 'vi'
+          ? 'Mình tìm thấy một số ký ức liên quan, nhưng câu trả lời sinh ra không có citation hợp lệ nên mình không thể xác nhận chắc chắn.'
+          : 'I found some related memories, but the generated answer had no valid citations, so I cannot confirm it reliably.',
+        lang,
+      );
     }
 
     const citedMarkerToClaim = new Map(
@@ -221,7 +237,9 @@ Rules:
 
     return {
       answer:
-        "Mình đã tìm thấy ký ức liên quan, nhưng không thể tạo câu trả lời có cấu trúc đáng tin cậy ở lần này.",
+        lang === 'vi'
+          ? 'Mình đã tìm thấy ký ức liên quan, nhưng không thể tạo câu trả lời có cấu trúc đáng tin cậy ở lần này.'
+          : 'I found relevant memories, but was unable to generate a structured answer this time.',
       confidence: "low",
       citations: [],
       modelError,
@@ -377,10 +395,24 @@ function summarizeError(message: string): string {
   return message.replace(/\s+/g, " ").slice(0, 240);
 }
 
-function lowConfidenceNoAnswer(message: string): AnswerMemoryResult {
+function noMemoryResult(message: string, lang: ResponseLanguage): AnswerMemoryResult {
+  const suggestions = lang === 'vi'
+    ? [
+        'Thêm nhật ký mới về chủ đề này',
+        'Thử diễn đạt lại câu hỏi',
+        'Đồng bộ Google Calendar để thêm ký ức',
+      ]
+    : [
+        'Add a new diary entry about this topic',
+        'Try rephrasing your question',
+        'Sync your Google Calendar for more memories',
+      ];
+
   return {
     answer: message,
     confidence: "low",
     citations: [],
+    noMemory: true,
+    suggestions,
   };
 }

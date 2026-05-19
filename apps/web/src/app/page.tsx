@@ -102,7 +102,7 @@ export default function Home() {
             ) : (
               <>
                 <Link
-                  href="/signup"
+                  href="/diary"
                   className="px-6 py-3 bg-indigo-600 text-white font-medium rounded-xl hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200 dark:shadow-indigo-900/40"
                 >
                   Get Started Free
@@ -125,8 +125,8 @@ export default function Home() {
         </div>
 
         {/* Features */}
-        <div className="mt-24 grid grid-cols-1 md:grid-cols-3 gap-8">
-          <div className="p-6 rounded-3xl bg-white border border-slate-200/80 shadow-sm shadow-slate-200/60 transition hover:-translate-y-1 hover:shadow-md hover:border-indigo-200 dark:bg-slate-800/60 dark:border-slate-700 dark:shadow-slate-900/40 dark:hover:border-indigo-500/50">
+        <div className="mt-24 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <Link href="/diary" className="group p-6 rounded-3xl bg-white border border-slate-200/80 shadow-sm shadow-slate-200/60 transition hover:-translate-y-1 hover:shadow-md hover:border-indigo-200 dark:bg-slate-800/60 dark:border-slate-700 dark:shadow-slate-900/40 dark:hover:border-indigo-500/50">
             <div className="w-12 h-12 rounded-xl bg-indigo-100 flex items-center justify-center mb-4 dark:bg-indigo-900/50">
               <svg className="w-6 h-6 text-indigo-600 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
@@ -134,19 +134,21 @@ export default function Home() {
             </div>
             <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100">Daily Diary</h3>
             <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">Capture your thoughts and experiences with our intuitive diary interface.</p>
-          </div>
+            <span className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 opacity-0 transition group-hover:opacity-100 dark:text-indigo-400">Try it out →</span>
+          </Link>
 
-          <div className="p-6 rounded-3xl bg-white border border-slate-200/80 shadow-sm shadow-slate-200/60 transition hover:-translate-y-1 hover:shadow-md hover:border-purple-200 dark:bg-slate-800/60 dark:border-slate-700 dark:shadow-slate-900/40 dark:hover:border-purple-500/50">
+          <Link href="/search" className="group p-6 rounded-3xl bg-white border border-slate-200/80 shadow-sm shadow-slate-200/60 transition hover:-translate-y-1 hover:shadow-md hover:border-purple-200 dark:bg-slate-800/60 dark:border-slate-700 dark:shadow-slate-900/40 dark:hover:border-purple-500/50">
             <div className="w-12 h-12 rounded-xl bg-purple-100 flex items-center justify-center mb-4 dark:bg-purple-900/50">
               <svg className="w-6 h-6 text-purple-600 dark:text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
               </svg>
             </div>
-            <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100">Mood Tracking</h3>
-            <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">Track your emotional journey and identify patterns over time.</p>
-          </div>
+            <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100">AI Search</h3>
+            <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">Ask questions and get answers grounded in your saved memories.</p>
+            <span className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-purple-600 opacity-0 transition group-hover:opacity-100 dark:text-purple-400">Try it out →</span>
+          </Link>
 
-          <div className="p-6 rounded-3xl bg-white border border-slate-200/80 shadow-sm shadow-slate-200/60 transition hover:-translate-y-1 hover:shadow-md hover:border-emerald-200 dark:bg-slate-800/60 dark:border-slate-700 dark:shadow-slate-900/40 dark:hover:border-emerald-500/50">
+          <Link href="/timeline" className="group p-6 rounded-3xl bg-white border border-slate-200/80 shadow-sm shadow-slate-200/60 transition hover:-translate-y-1 hover:shadow-md hover:border-emerald-200 dark:bg-slate-800/60 dark:border-slate-700 dark:shadow-slate-900/40 dark:hover:border-emerald-500/50">
             <div className="w-12 h-12 rounded-xl bg-emerald-100 flex items-center justify-center mb-4 dark:bg-emerald-900/50">
               <svg className="w-6 h-6 text-emerald-600 dark:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -154,7 +156,19 @@ export default function Home() {
             </div>
             <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100">Timeline View</h3>
             <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">Browse your memories in a beautiful, chronological timeline.</p>
-          </div>
+            <span className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-emerald-600 opacity-0 transition group-hover:opacity-100 dark:text-emerald-400">Try it out →</span>
+          </Link>
+
+          <Link href="/summary" className="group p-6 rounded-3xl bg-white border border-slate-200/80 shadow-sm shadow-slate-200/60 transition hover:-translate-y-1 hover:shadow-md hover:border-amber-200 dark:bg-slate-800/60 dark:border-slate-700 dark:shadow-slate-900/40 dark:hover:border-amber-500/50">
+            <div className="w-12 h-12 rounded-xl bg-amber-100 flex items-center justify-center mb-4 dark:bg-amber-900/50">
+              <svg className="w-6 h-6 text-amber-600 dark:text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-6m4 6V7m4 10v-3M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z" />
+              </svg>
+            </div>
+            <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100">Summary Dashboard</h3>
+            <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">See your writing stats, streaks, and activity trends at a glance.</p>
+            <span className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-amber-600 opacity-0 transition group-hover:opacity-100 dark:text-amber-400">Try it out →</span>
+          </Link>
         </div>
       </main>
     </div>

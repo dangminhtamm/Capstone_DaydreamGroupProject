@@ -23,8 +23,10 @@ export function DiaryInputForm() {
   const [errorMessage, setErrorMessage] = useState<string>("");
 
   const canSubmit = useMemo(() => {
-    return draft.title.trim().length > 0 && draft.content.trim().length > 0 && isAuthenticated;
-  }, [draft, isAuthenticated]);
+    return draft.title.trim().length > 0 && draft.content.trim().length > 0;
+  }, [draft]);
+
+  const [showAuthPrompt, setShowAuthPrompt] = useState(false);
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -34,6 +36,13 @@ export function DiaryInputForm() {
       return;
     }
 
+    // Gate: must be signed in to save
+    if (!isAuthenticated) {
+      setShowAuthPrompt(true);
+      return;
+    }
+
+    setShowAuthPrompt(false);
     setState("saving");
 
     try {
@@ -110,9 +119,31 @@ export function DiaryInputForm() {
             </span>
           )}
           {!isAuthenticated && (
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 ring-1 ring-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:ring-amber-700">
-              Please login to save diary entries.
-            </span>
+            <div className={`flex items-center gap-3 rounded-xl border px-4 py-3 transition-all ${
+              showAuthPrompt
+                ? 'border-indigo-300 bg-indigo-50 dark:border-indigo-600 dark:bg-indigo-900/30'
+                : 'border-amber-200 bg-amber-50 dark:border-amber-700 dark:bg-amber-900/20'
+            }`}>
+              <svg className={`h-4 w-4 shrink-0 ${showAuthPrompt ? 'text-indigo-600 dark:text-indigo-400' : 'text-amber-600 dark:text-amber-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              </svg>
+              <div className="flex-1">
+                <p className={`text-sm font-medium ${showAuthPrompt ? 'text-indigo-900 dark:text-indigo-200' : 'text-amber-800 dark:text-amber-300'}`}>
+                  {showAuthPrompt ? 'Sign in to save your diary entry' : 'You\'re exploring as a guest'}
+                </p>
+                <p className={`mt-0.5 text-xs ${showAuthPrompt ? 'text-indigo-700 dark:text-indigo-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                  {showAuthPrompt ? 'Your entry is ready — just sign in to keep it!' : 'Feel free to write — sign in when you\'re ready to save.'}
+                </p>
+              </div>
+              <a
+                href="/login"
+                className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold text-white transition ${
+                  showAuthPrompt ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-amber-600 hover:bg-amber-700'
+                }`}
+              >
+                Sign in
+              </a>
+            </div>
           )}
         </div>
       </form>

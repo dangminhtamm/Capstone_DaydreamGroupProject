@@ -1,6 +1,16 @@
 import { NotFoundException } from '@nestjs/common';
 import { DiaryService } from './diary.service';
 
+// Mock the external AI/DB functions so tests don't call real APIs
+jest.mock('@second-brain/ai', () => ({
+  indexMemoryFromDiary: jest.fn().mockResolvedValue({ chunkCount: 2 }),
+}));
+jest.mock('@second-brain/db', () => ({
+  insertMemoryChunks: jest.fn(),
+  pruneMemoryChunksForSource: jest.fn(),
+  deleteMemoryChunksForSource: jest.fn(),
+}));
+
 describe('DiaryService', () => {
   const prisma = {
     user: {
@@ -13,20 +23,17 @@ describe('DiaryService', () => {
       update: jest.fn(),
       delete: jest.fn(),
     },
-    $transaction: jest.fn(),
-  };
-  const queue = {
-    enqueueDiaryIndex: jest.fn(),
+    $transaction: jest.fn((fn: any) => fn(prisma)),
   };
 
   let service: DiaryService;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    service = new DiaryService(prisma as any, queue as any);
+    service = new DiaryService(prisma as any);
   });
 
-  it('creates a diary for the authenticated user and queues indexing', async () => {
+  it('creates a diary for the authenticated user and indexes memory', async () => {
     const entryDate = new Date('2026-05-18T09:00:00.000Z');
     prisma.user.findUnique.mockResolvedValue({ id: 'user-1' });
     prisma.diaryEntry.create.mockResolvedValue({
@@ -37,7 +44,6 @@ describe('DiaryService', () => {
       updated_at: entryDate,
       entry_date: entryDate,
     });
-    queue.enqueueDiaryIndex.mockResolvedValue({ id: 'job-1' });
 
     const result = await service.create('supabase-user-1', {
       title: 'Title',
@@ -51,18 +57,11 @@ describe('DiaryService', () => {
         status: 'published',
       },
     });
-    expect(queue.enqueueDiaryIndex).toHaveBeenCalledWith({
-      userId: 'user-1',
-      diaryId: 'diary-1',
-      rawText: 'Title\n\nContent',
-      entryDate: entryDate.toISOString(),
-      sourceTitle: 'Title',
-    });
     expect(result).toMatchObject({
       id: 'diary-1',
       title: 'Title',
       content: 'Content',
-      memoryQueued: true,
+      memoryIndexed: true,
     });
   });
 

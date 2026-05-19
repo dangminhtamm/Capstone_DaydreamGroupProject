@@ -1,6 +1,7 @@
 import { Type } from 'class-transformer';
 import {
   IsDateString,
+  IsIn,
   IsInt,
   IsNumber,
   IsOptional,
@@ -44,4 +45,9 @@ export class SearchQueryDto {
   @Min(0)
   @Max(2)
   maxDistance?: number;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['en', 'vi'])
+  responseLanguage?: 'en' | 'vi';
 }

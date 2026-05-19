@@ -21,6 +21,7 @@ export class SearchService {
       const result = await answerMemory(queryDto.question, user.id, this.prisma, {
         limit: queryDto.limit ?? 8,
         maxDistance: queryDto.maxDistance,
+        responseLanguage: queryDto.responseLanguage ?? 'en',
         filters: {
           chunkType: queryDto.chunkType,
           sourceType: queryDto.sourceType,
@@ -33,6 +34,8 @@ export class SearchService {
         answer: result.answer,
         confidence: result.confidence,
         sources: result.citations,
+        noMemory: result.noMemory ?? false,
+        suggestions: result.suggestions ?? [],
       };
     } catch (error) {
       console.error('Failed to answer memory search question:', error);

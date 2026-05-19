@@ -17,6 +17,7 @@ export {
   inferRetrievalFilters,
   type AnswerMemoryOptions,
   type AnswerMemoryResult,
+  type ResponseLanguage,
 } from "./answer-memory.ts";
 export { type MemoryCitation } from "./answer-utils.ts";
 export {

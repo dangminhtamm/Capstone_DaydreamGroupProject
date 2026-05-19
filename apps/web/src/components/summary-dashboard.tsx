@@ -263,9 +263,35 @@ export function SummaryDashboard() {
 
   if (!isAuthenticated) {
     return (
-      <div className="rounded-3xl border border-amber-200 bg-amber-50 p-8 text-center dark:border-amber-700 dark:bg-amber-900/20">
-        <p className="text-lg font-semibold text-amber-950 dark:text-amber-300">Login required</p>
-        <p className="mt-2 text-sm text-amber-700 dark:text-amber-400">Please sign in to view your summary dashboard.</p>
+      <div className="space-y-6">
+        {/* Demo stat cards (blurred) */}
+        <div className="pointer-events-none select-none opacity-50 blur-[1px]">
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+            {['Total Entries', 'This Week', 'Words Written', 'Avg. Words'].map((label) => (
+              <div key={label} className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+                <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">{label}</p>
+                <div className="mt-2 h-7 w-1/2 rounded-full bg-slate-200 dark:bg-slate-700" />
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Overlay CTA */}
+        <div className="-mt-16 relative z-10 rounded-3xl border border-indigo-200/70 bg-white/90 p-8 text-center shadow-lg backdrop-blur dark:border-indigo-700/50 dark:bg-slate-800/90">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-indigo-100 text-indigo-600 dark:bg-indigo-900/40 dark:text-indigo-400">
+            <svg className="h-7 w-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-6m4 6V7m4 10v-3M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z" />
+            </svg>
+          </div>
+          <h3 className="mt-4 text-base font-bold text-slate-900 dark:text-slate-100">Your insights will appear here</h3>
+          <p className="mt-1.5 text-sm text-slate-500 dark:text-slate-400">Sign in to see your writing stats, streaks, and activity trends.</p>
+          <a
+            href="/login"
+            className="mt-5 inline-flex cursor-pointer items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700"
+          >
+            Sign in to get started
+          </a>
+        </div>
       </div>
     );
   }

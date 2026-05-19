@@ -1,6 +1,7 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useMemo, useState, useEffect } from "react";
+import Link from "next/link";
 import { DashboardShell } from "@/components/dashboard-shell";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -21,7 +22,11 @@ type SearchResponse = {
   answer: string;
   confidence: "high" | "medium" | "low";
   sources: SearchCitation[];
+  noMemory?: boolean;
+  suggestions?: string[];
 };
+
+type ResponseLanguage = "en" | "vi";
 
 const suggestedQuestions = [
   "What did I work on recently?",
@@ -36,15 +41,29 @@ const confidenceStyles = {
 };
 
 export default function SearchPage() {
-  const { isAuthenticated, isLoading: isAuthLoading, signInWithGoogle, getAccessToken } = useAuth();
+  const { isAuthenticated, isLoading: isAuthLoading, getAccessToken } = useAuth();
   const [question, setQuestion] = useState("");
   const [result, setResult] = useState<SearchResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSearching, setIsSearching] = useState(false);
+  const [responseLanguage, setResponseLanguage] = useState<ResponseLanguage>("en");
+  const [showAuthPrompt, setShowAuthPrompt] = useState(false);
+
+  // Persist language preference
+  useEffect(() => {
+    const saved = localStorage.getItem("dd-response-lang") as ResponseLanguage | null;
+    if (saved === "en" || saved === "vi") setResponseLanguage(saved);
+  }, []);
+
+  const toggleLanguage = () => {
+    const next = responseLanguage === "en" ? "vi" : "en";
+    setResponseLanguage(next);
+    localStorage.setItem("dd-response-lang", next);
+  };
 
   const canSubmit = useMemo(
-    () => question.trim().length > 0 && !isSearching && isAuthenticated,
-    [question, isAuthenticated, isSearching],
+    () => question.trim().length > 0 && !isSearching,
+    [question, isSearching],
   );
 
   async function handleSearch(event: FormEvent<HTMLFormElement>) {
@@ -56,17 +75,25 @@ export default function SearchPage() {
       return;
     }
 
-    const token = getAccessToken();
-    if (!token) {
-      setError("Please sign in with Google before using memory search.");
+    // Gate: must be signed in to search
+    if (!isAuthenticated) {
+      setError(null);
+      setShowAuthPrompt(true);
       return;
     }
+
+    const token = getAccessToken();
+    if (!token) {
+      setError("Session expired. Please sign in again.");
+      return;
+    }
+
+    setShowAuthPrompt(false);
 
     setIsSearching(true);
     setError(null);
 
     try {
-      // Backend search endpoint returns a grounded answer and citation sources.
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
       const response = await fetch(`${apiUrl}/api/search`, {
         method: "POST",
@@ -77,6 +104,7 @@ export default function SearchPage() {
         body: JSON.stringify({
           question: normalizedQuestion,
           limit: 8,
+          responseLanguage,
         }),
       });
 
@@ -101,27 +129,28 @@ export default function SearchPage() {
     >
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(340px,0.9fr)]">
         <section className="rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white via-white to-indigo-50/40 p-6 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:from-slate-800 dark:via-slate-800 dark:to-indigo-950/30 dark:shadow-slate-900/40">
-          <div className="mb-5">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600 dark:text-indigo-400">AI-powered recall</p>
-            <h3 className="mt-2 text-2xl font-bold tracking-tight text-slate-950 dark:text-slate-100">Ask your Second Brain</h3>
-            <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-              Type a natural-language question. Your memories will surface the most relevant answer.
-            </p>
+          <div className="mb-5 flex items-start justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600 dark:text-indigo-400">AI-powered recall</p>
+              <h3 className="mt-2 text-2xl font-bold tracking-tight text-slate-950 dark:text-slate-100">Ask your Second Brain</h3>
+              <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+                Type a natural-language question. Your memories will surface the most relevant answer.
+              </p>
+            </div>
+
+            {/* Language Toggle */}
+            <button
+              type="button"
+              onClick={toggleLanguage}
+              className="flex shrink-0 cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:border-indigo-300 hover:bg-indigo-50 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-300 dark:hover:border-indigo-500 dark:hover:bg-indigo-900/30"
+              title={`AI responds in ${responseLanguage === "en" ? "English" : "Vietnamese"}. Click to toggle.`}
+            >
+              <span className="text-lg">{responseLanguage === "en" ? "🇺🇸" : "🇻🇳"}</span>
+              <span className="hidden sm:inline">{responseLanguage === "en" ? "English" : "Tiếng Việt"}</span>
+            </button>
           </div>
 
-          {!isAuthLoading && !isAuthenticated ? (
-            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-700 dark:bg-amber-900/20">
-              <p className="text-sm font-medium text-amber-900 dark:text-amber-300">Google sign-in is required</p>
-              <p className="mt-1 text-sm text-amber-700 dark:text-amber-400">Search uses your Supabase JWT to access private memories.</p>
-              <button
-                onClick={signInWithGoogle}
-                className="mt-4 cursor-pointer rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800"
-              >
-                Sign in with Google
-              </button>
-            </div>
-          ) : (
-            <form onSubmit={handleSearch} className="space-y-4">
+          <form onSubmit={handleSearch} className="space-y-4">
               <label className="block">
                 <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Question</span>
                 <textarea
@@ -151,6 +180,32 @@ export default function SearchPage() {
                 </div>
               ) : null}
 
+              {/* Guest sign-in prompt (shown when attempting to search without auth) */}
+              {showAuthPrompt && (
+                <div className="flex items-center gap-3 rounded-xl border border-indigo-300 bg-indigo-50 px-4 py-3 dark:border-indigo-600 dark:bg-indigo-900/30">
+                  <svg className="h-4 w-4 shrink-0 text-indigo-600 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                  </svg>
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-indigo-900 dark:text-indigo-200">Sign in to search your memories</p>
+                    <p className="mt-0.5 text-xs text-indigo-700 dark:text-indigo-400">Search requires authentication to access your private memories.</p>
+                  </div>
+                  <a
+                    href="/login"
+                    className="shrink-0 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-indigo-700"
+                  >
+                    Sign in
+                  </a>
+                </div>
+              )}
+
+              {/* Inline guest hint (always visible when not authed and no auth prompt) */}
+              {!isAuthLoading && !isAuthenticated && !showAuthPrompt && (
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  💡 You&apos;re exploring as a guest — <a href="/login" className="font-medium text-indigo-600 underline hover:text-indigo-700 dark:text-indigo-400">sign in</a> to search your personal memories.
+                </p>
+              )}
+
               <button
                 type="submit"
                 disabled={!canSubmit}
@@ -174,7 +229,6 @@ export default function SearchPage() {
                 )}
               </button>
             </form>
-          )}
         </section>
 
         <section className="rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white to-slate-50/50 p-6 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:from-slate-800 dark:to-slate-800/50 dark:shadow-slate-900/40">
@@ -204,6 +258,59 @@ export default function SearchPage() {
                 <div className="h-3.5 w-9/12 animate-pulse rounded-full bg-slate-200 dark:bg-slate-700" />
                 <div className="h-3.5 w-10/12 animate-pulse rounded-full bg-slate-200 dark:bg-slate-700" />
                 <div className="h-3.5 w-7/12 animate-pulse rounded-full bg-slate-200 dark:bg-slate-700" />
+              </div>
+            </div>
+          ) : result?.noMemory ? (
+            /* No Relevant Memories — Special UX */
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-5 dark:border-amber-700/60 dark:bg-amber-900/20">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/50">
+                    <svg className="h-5 w-5 text-amber-600 dark:text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-amber-900 dark:text-amber-200">No relevant memories found</p>
+                    <p className="mt-1 text-sm text-amber-700 dark:text-amber-400">{result.answer}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Actionable suggestions */}
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800/60">
+                <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  Suggested actions
+                </p>
+                <div className="space-y-2">
+                  <Link
+                    href="/diary"
+                    className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 dark:border-slate-600 dark:bg-slate-700/50 dark:text-slate-300 dark:hover:border-indigo-500 dark:hover:bg-indigo-900/30 dark:hover:text-indigo-400"
+                  >
+                    <span className="text-lg">📝</span>
+                    {responseLanguage === "vi" ? "Thêm nhật ký mới về chủ đề này" : "Add a new diary entry about this topic"}
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setResult(null);
+                      const textarea = document.querySelector("textarea");
+                      textarea?.focus();
+                    }}
+                    className="flex w-full cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 dark:border-slate-600 dark:bg-slate-700/50 dark:text-slate-300 dark:hover:border-indigo-500 dark:hover:bg-indigo-900/30 dark:hover:text-indigo-400"
+                  >
+                    <span className="text-lg">🔄</span>
+                    {responseLanguage === "vi" ? "Thử diễn đạt lại câu hỏi" : "Try rephrasing your question"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setQuestion(suggestedQuestions[0])}
+                    className="flex w-full cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 dark:border-slate-600 dark:bg-slate-700/50 dark:text-slate-300 dark:hover:border-indigo-500 dark:hover:bg-indigo-900/30 dark:hover:text-indigo-400"
+                  >
+                    <span className="text-lg">💡</span>
+                    {responseLanguage === "vi" ? "Thử một câu hỏi gợi ý" : "Try a suggested question instead"}
+                  </button>
+                </div>
               </div>
             </div>
           ) : result ? (
@@ -253,7 +360,7 @@ export default function SearchPage() {
                 </p>
                 {source.claim ? <p className="mt-2 text-sm text-slate-700 dark:text-slate-300">{source.claim}</p> : null}
                 <blockquote className="mt-3 rounded-r-xl border-l-4 border-indigo-200 bg-white px-3 py-2 text-sm italic text-slate-600 dark:border-indigo-700 dark:bg-slate-700/50 dark:text-slate-400">
-                  “{source.quote}”
+                  &ldquo;{source.quote}&rdquo;
                 </blockquote>
                 <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-500 dark:text-slate-400">
                   <span className="rounded-full bg-slate-100 px-2 py-1 dark:bg-slate-700">type: {source.sourceType}</span>
