@@ -96,4 +96,80 @@ describe('DiaryService', () => {
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({ id: 'diary-1', title: 'Title' });
   });
+
+  describe('toClientEntry robust parsing fallbacks', () => {
+    it('correctly handles default double newline format', async () => {
+      const entryDate = new Date('2026-05-18T09:00:00.000Z');
+      prisma.user.findUnique.mockResolvedValue({ id: 'user-1' });
+      prisma.diaryEntry.findMany.mockResolvedValue([
+        {
+          id: 'diary-1',
+          raw_text: 'A Beautiful Day\n\nI went to the park and had a great time.',
+          status: 'published',
+          created_at: entryDate,
+          updated_at: entryDate,
+        },
+      ]);
+      const result = await service.findAll('supabase-user-1');
+      expect(result[0]).toMatchObject({
+        title: 'A Beautiful Day',
+        content: 'I went to the park and had a great time.',
+      });
+    });
+
+    it('gracefully falls back to single newline if double newline is missing', async () => {
+      const entryDate = new Date('2026-05-18T09:00:00.000Z');
+      prisma.user.findUnique.mockResolvedValue({ id: 'user-1' });
+      prisma.diaryEntry.findMany.mockResolvedValue([
+        {
+          id: 'diary-2',
+          raw_text: 'Single Newline Title\nThis is content on a single newline.',
+          status: 'published',
+          created_at: entryDate,
+          updated_at: entryDate,
+        },
+      ]);
+      const result = await service.findAll('supabase-user-1');
+      expect(result[0]).toMatchObject({
+        title: 'Single Newline Title',
+        content: 'This is content on a single newline.',
+      });
+    });
+
+    it('uses the whole text as title if it has no newlines and is short', async () => {
+      const entryDate = new Date('2026-05-18T09:00:00.000Z');
+      prisma.user.findUnique.mockResolvedValue({ id: 'user-1' });
+      prisma.diaryEntry.findMany.mockResolvedValue([
+        {
+          id: 'diary-3',
+          raw_text: 'Just a short note with no newlines',
+          status: 'published',
+          created_at: entryDate,
+          updated_at: entryDate,
+        },
+      ]);
+      const result = await service.findAll('supabase-user-1');
+      expect(result[0]).toMatchObject({
+        title: 'Just a short note with no newlines',
+        content: 'Just a short note with no newlines',
+      });
+    });
+
+    it('truncates the title and retains full text as content if no newlines and long text', async () => {
+      const entryDate = new Date('2026-05-18T09:00:00.000Z');
+      prisma.user.findUnique.mockResolvedValue({ id: 'user-1' });
+      prisma.diaryEntry.findMany.mockResolvedValue([
+        {
+          id: 'diary-4',
+          raw_text: 'This is a very long diary entry without any newline characters because the user typed a long single line stream of conscious thoughts containing a lot of details.',
+          status: 'published',
+          created_at: entryDate,
+          updated_at: entryDate,
+        },
+      ]);
+      const result = await service.findAll('supabase-user-1');
+      expect(result[0].title).toBe('This is a very long diary entry without any newline chara...');
+      expect(result[0].content).toBe('This is a very long diary entry without any newline characters because the user typed a long single line stream of conscious thoughts containing a lot of details.');
+    });
+  });
 });
