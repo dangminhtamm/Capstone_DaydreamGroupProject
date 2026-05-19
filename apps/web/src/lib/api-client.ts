@@ -91,7 +91,43 @@ export async function getDiaryEntry(
   return response.json();
 }
 
-// Search API
+export type UpdateDiaryPayload = {
+  title?: string;
+  content?: string;
+  attachments?: string[];
+};
+
+export async function updateDiaryEntry(
+  id: string,
+  payload: UpdateDiaryPayload,
+  accessToken: string | null
+): Promise<DiaryEntry> {
+  const response = await authFetch(`/api/diary/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  }, accessToken);
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ message: 'Failed to update diary entry' }));
+    throw new Error(error.message || `HTTP ${response.status}`);
+  }
+
+  return response.json();
+}
+
+export async function deleteDiaryEntry(
+  id: string,
+  accessToken: string | null
+): Promise<void> {
+  const response = await authFetch(`/api/diary/${id}`, {
+    method: 'DELETE',
+  }, accessToken);
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ message: 'Failed to delete diary entry' }));
+    throw new Error(error.message || `HTTP ${response.status}`);
+  }
+}
 type AskPayload = {
   question: string;
 };

@@ -22,8 +22,10 @@ _Transform unstructured thoughts into structured, retrievable memory with AI-pow
 | **Hierarchical Reflection** | Aggregates data from daily diary entries into weekly and monthly AI-generated insights. |
 | **Grounded Memory Retrieval** | Prevents AI hallucination by grounding every answer in actual diary chunks and calendar events. |
 | **Explainable AI** | Provides exact citation markers (`[S1]`, `[S2]`, …) and confidence scores (`high` / `medium` / `low`) for every retrieved answer. |
-| **Google Calendar Integration** | Context-aware memory enriched by automated Google Calendar event sync. |
-| **Semantic Search** | Vector-based search using Gemini embeddings (`gemini-embedding-001`) with pgvector for cosine similarity retrieval. |
+| **AI Observability** | Full transparency with token usage tracking, timing pipeline breakdown, and an interactive analytics panel per query. |
+| **Semantic Search + History** | Vector-based search using Gemini embeddings with persistent search history and cached answers. |
+| **Timeline Calendar** | Mini calendar sidebar on timeline with date-based filtering and entry statistics. |
+| **Cross-Platform Auth** | Email + Google OAuth with automatic account linking. Avatar upload, password management for all account types. |
 | **Entity Extraction** | Automated detection of people, projects, goals, and habits across memory chunks. |
 
 ---
@@ -65,10 +67,10 @@ Capstone_DaydreamGroupProject/
 ├── apps/
 │   ├── web/                          # Next.js 16 frontend (React 19)
 │   │   └── src/
-│   │       ├── app/                  # Pages: Dashboard, Diary, Search, Timeline
-│   │       ├── components/           # UI: NavHeader, DiaryForm, TimelineList, etc.
-│   │       ├── contexts/             # Auth & app-level React context providers
-│   │       └── lib/                  # API client, Supabase helpers, mock data
+│   │       ├── app/                  # Pages: Diary, Timeline, Search, Summary, Settings
+│   │       ├── components/           # UI: DiaryForm, TimelineList, Calendar, DashboardShell
+│   │       ├── contexts/             # Auth & Theme React context providers
+│   │       └── lib/                  # API client, Supabase helpers
 │   │
 │   ├── api/                          # NestJS 11 backend (REST API on port 3001)
 │   │   └── src/
@@ -131,6 +133,22 @@ Capstone_DaydreamGroupProject/
 | `EntityMention` | Extracted entities (person, project, goal, habit) from chunks |
 | `Attachment` | File uploads linked to diary entries |
 | `GmailMessage` | Synced Gmail messages (future integration) |
+
+---
+
+## 🌐 Frontend Routes
+
+| Route | Page | Description |
+|---|---|---|
+| `/` | Landing | Hero page with feature cards |
+| `/login` | Login | Email + Google OAuth sign in |
+| `/signup` | Sign Up | Email registration with avatar upload and password strength indicator |
+| `/diary` | Diary Input | Create new diary entries with word count |
+| `/timeline` | Timeline | Browse entries with mini calendar, date filter, and quick stats |
+| `/search` | Memory Search | AI-powered semantic search with search history and cached answers |
+| `/summary` | Summary | AI-generated daily/weekly/monthly reflections with token usage dashboard |
+| `/settings` | Settings | Profile, avatar upload, password management, theme, language |
+| `/auth/callback` | Auth Callback | Supabase OAuth redirect handler |
 
 ---
 
@@ -294,15 +312,15 @@ pnpm --filter @second-brain/api test:e2e
 
 | Member | Responsibility |
 |---|---|
-| **Đặng Minh Tâm** | AI Memory Engine & System Architecture |
-| **Trần Nguyên Quân** | Backend Core, API & Security |
-| **Dương Minh Đức Anh** | Frontend UI/UX & Explainability Interface |
-| **Nguyễn Tấn Thắng** | Workflows & Google Integrations |
-| **Nguyễn Thanh Nhân** | QA, Demo Data & Platform Support |
+| **Dang Minh Tam** | AI Memory Engine & System Architecture |
+| **Tran Nguyen Quan** | Backend Core, API & Security |
+| **Duong Minh Duc Anh** | Frontend UI/UX & Explainability Interface |
+| **Nguyen Tan Thang** | Workflows & Google Integrations |
+| **Nguyen Thanh Nhan** | QA, Demo Data & Platform Support |
 
 ---
 
 ## 📄 License
 
 This project is **UNLICENSED** — intended for academic capstone use only.
-]]>
+

@@ -20,6 +20,9 @@ type AuthContextType = {
   isAuthenticated: boolean;
   configError: string | null;
   signInWithGoogle: () => Promise<void>;
+  signUpWithEmail: (email: string, password: string, displayName: string) => Promise<{ error?: string }>;
+  signInWithEmail: (email: string, password: string) => Promise<{ error?: string }>;
+  resetPassword: (email: string) => Promise<{ error?: string }>;
   signOut: () => Promise<void>;
   getAccessToken: () => string | null;
   supabase: SupabaseClient | null;
@@ -124,6 +127,60 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const signUpWithEmail = useCallback(async (email: string, password: string, displayName: string): Promise<{ error?: string }> => {
+    if (!supabase) return { error: 'Supabase not configured' };
+
+    const redirectUrl = typeof window !== 'undefined'
+      ? `${window.location.origin}/auth/callback`
+      : 'http://localhost:3000/auth/callback';
+
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        emailRedirectTo: redirectUrl,
+        data: {
+          full_name: displayName,
+        },
+      },
+    });
+
+    if (error) return { error: error.message };
+
+    // Supabase returns a user with empty identities when the email already exists
+    // (and email confirmation is enabled). Detect this case.
+    if (data?.user?.identities?.length === 0) {
+      return { error: 'An account with this email already exists. Try signing in or use Google login.' };
+    }
+
+    return {};
+  }, []);
+
+  const signInWithEmail = useCallback(async (email: string, password: string): Promise<{ error?: string }> => {
+    if (!supabase) return { error: 'Supabase not configured' };
+
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+
+    if (error) return { error: error.message };
+    router.push('/diary');
+    return {};
+  }, [router]);
+
+  const resetPassword = useCallback(async (email: string): Promise<{ error?: string }> => {
+    if (!supabase) return { error: 'Supabase not configured' };
+
+    const redirectUrl = typeof window !== 'undefined'
+      ? `${window.location.origin}/auth/callback?type=recovery`
+      : 'http://localhost:3000/auth/callback?type=recovery';
+
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: redirectUrl,
+    });
+
+    if (error) return { error: error.message };
+    return {};
+  }, []);
+
   const signOut = useCallback(async () => {
     if (!supabase) {
       return;
@@ -143,6 +200,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isAuthenticated: !!user,
     configError,
     signInWithGoogle,
+    signUpWithEmail,
+    signInWithEmail,
+    resetPassword,
     signOut,
     getAccessToken,
     supabase,

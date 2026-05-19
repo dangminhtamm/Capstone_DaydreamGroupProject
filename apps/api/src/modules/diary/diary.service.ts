@@ -195,12 +195,39 @@ export class DiaryService {
   }
 
   private toClientEntry(entry: { id: string; raw_text: string; status: string; created_at: Date; updated_at: Date }) {
-    const [title, ...contentParts] = entry.raw_text.split('\n\n');
+    const trimmedText = entry.raw_text.trim();
+    
+    let title = 'Untitled';
+    let content = '';
+
+    // First try splitting on double newline (\n\n) as it is the primary format
+    const doubleNewLineIndex = trimmedText.indexOf('\n\n');
+    if (doubleNewLineIndex !== -1) {
+      title = trimmedText.slice(0, doubleNewLineIndex).trim();
+      content = trimmedText.slice(doubleNewLineIndex + 2).trim();
+    } else {
+      // Fallback: try splitting on the first single newline
+      const singleNewLineIndex = trimmedText.indexOf('\n');
+      if (singleNewLineIndex !== -1) {
+        title = trimmedText.slice(0, singleNewLineIndex).trim();
+        content = trimmedText.slice(singleNewLineIndex + 1).trim();
+      } else {
+        // If there are no newlines at all, use the whole text as title (up to a reasonable limit) and empty content
+        if (trimmedText.length <= 60) {
+          title = trimmedText;
+          content = '';
+        } else {
+          // If the text is long, truncate the title and set the whole text as content
+          title = trimmedText.slice(0, 57) + '...';
+          content = trimmedText;
+        }
+      }
+    }
 
     return {
       id: entry.id,
       title: title || 'Untitled',
-      content: contentParts.join('\n\n') || entry.raw_text,
+      content: content || trimmedText || 'No content',
       status: entry.status,
       createdAt: entry.created_at.toISOString(),
       updatedAt: entry.updated_at.toISOString(),

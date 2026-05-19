@@ -1,6 +1,16 @@
 import { NotFoundException } from '@nestjs/common';
 import { DiaryService } from './diary.service';
 
+// Mock the external AI/DB functions so tests don't call real APIs
+jest.mock('@second-brain/ai', () => ({
+  indexMemoryFromDiary: jest.fn().mockResolvedValue({ chunkCount: 2 }),
+}));
+jest.mock('@second-brain/db', () => ({
+  insertMemoryChunks: jest.fn(),
+  pruneMemoryChunksForSource: jest.fn(),
+  deleteMemoryChunksForSource: jest.fn(),
+}));
+
 describe('DiaryService', () => {
   const prisma = {
     user: {
@@ -13,20 +23,17 @@ describe('DiaryService', () => {
       update: jest.fn(),
       delete: jest.fn(),
     },
-    $transaction: jest.fn(),
-  };
-  const queue = {
-    enqueueDiaryIndex: jest.fn(),
+    $transaction: jest.fn((fn: any) => fn(prisma)),
   };
 
   let service: DiaryService;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    service = new DiaryService(prisma as any, queue as any);
+    service = new DiaryService(prisma as any);
   });
 
-  it('creates a diary for the authenticated user and queues indexing', async () => {
+  it('creates a diary for the authenticated user and indexes memory', async () => {
     const entryDate = new Date('2026-05-18T09:00:00.000Z');
     prisma.user.findUnique.mockResolvedValue({ id: 'user-1' });
     prisma.diaryEntry.create.mockResolvedValue({
@@ -37,7 +44,6 @@ describe('DiaryService', () => {
       updated_at: entryDate,
       entry_date: entryDate,
     });
-    queue.enqueueDiaryIndex.mockResolvedValue({ id: 'job-1' });
 
     const result = await service.create('supabase-user-1', {
       title: 'Title',
@@ -51,18 +57,11 @@ describe('DiaryService', () => {
         status: 'published',
       },
     });
-    expect(queue.enqueueDiaryIndex).toHaveBeenCalledWith({
-      userId: 'user-1',
-      diaryId: 'diary-1',
-      rawText: 'Title\n\nContent',
-      entryDate: entryDate.toISOString(),
-      sourceTitle: 'Title',
-    });
     expect(result).toMatchObject({
       id: 'diary-1',
       title: 'Title',
       content: 'Content',
-      memoryQueued: true,
+      memoryIndexed: true,
     });
   });
 
@@ -96,5 +95,81 @@ describe('DiaryService', () => {
     });
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({ id: 'diary-1', title: 'Title' });
+  });
+
+  describe('toClientEntry robust parsing fallbacks', () => {
+    it('correctly handles default double newline format', async () => {
+      const entryDate = new Date('2026-05-18T09:00:00.000Z');
+      prisma.user.findUnique.mockResolvedValue({ id: 'user-1' });
+      prisma.diaryEntry.findMany.mockResolvedValue([
+        {
+          id: 'diary-1',
+          raw_text: 'A Beautiful Day\n\nI went to the park and had a great time.',
+          status: 'published',
+          created_at: entryDate,
+          updated_at: entryDate,
+        },
+      ]);
+      const result = await service.findAll('supabase-user-1');
+      expect(result[0]).toMatchObject({
+        title: 'A Beautiful Day',
+        content: 'I went to the park and had a great time.',
+      });
+    });
+
+    it('gracefully falls back to single newline if double newline is missing', async () => {
+      const entryDate = new Date('2026-05-18T09:00:00.000Z');
+      prisma.user.findUnique.mockResolvedValue({ id: 'user-1' });
+      prisma.diaryEntry.findMany.mockResolvedValue([
+        {
+          id: 'diary-2',
+          raw_text: 'Single Newline Title\nThis is content on a single newline.',
+          status: 'published',
+          created_at: entryDate,
+          updated_at: entryDate,
+        },
+      ]);
+      const result = await service.findAll('supabase-user-1');
+      expect(result[0]).toMatchObject({
+        title: 'Single Newline Title',
+        content: 'This is content on a single newline.',
+      });
+    });
+
+    it('uses the whole text as title if it has no newlines and is short', async () => {
+      const entryDate = new Date('2026-05-18T09:00:00.000Z');
+      prisma.user.findUnique.mockResolvedValue({ id: 'user-1' });
+      prisma.diaryEntry.findMany.mockResolvedValue([
+        {
+          id: 'diary-3',
+          raw_text: 'Just a short note with no newlines',
+          status: 'published',
+          created_at: entryDate,
+          updated_at: entryDate,
+        },
+      ]);
+      const result = await service.findAll('supabase-user-1');
+      expect(result[0]).toMatchObject({
+        title: 'Just a short note with no newlines',
+        content: 'Just a short note with no newlines',
+      });
+    });
+
+    it('truncates the title and retains full text as content if no newlines and long text', async () => {
+      const entryDate = new Date('2026-05-18T09:00:00.000Z');
+      prisma.user.findUnique.mockResolvedValue({ id: 'user-1' });
+      prisma.diaryEntry.findMany.mockResolvedValue([
+        {
+          id: 'diary-4',
+          raw_text: 'This is a very long diary entry without any newline characters because the user typed a long single line stream of conscious thoughts containing a lot of details.',
+          status: 'published',
+          created_at: entryDate,
+          updated_at: entryDate,
+        },
+      ]);
+      const result = await service.findAll('supabase-user-1');
+      expect(result[0].title).toBe('This is a very long diary entry without any newline chara...');
+      expect(result[0].content).toBe('This is a very long diary entry without any newline characters because the user typed a long single line stream of conscious thoughts containing a lot of details.');
+    });
   });
 });

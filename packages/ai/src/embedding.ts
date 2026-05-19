@@ -46,6 +46,10 @@ export class GeminiEmbeddingProvider implements AdvancedEmbeddingProvider {
   private ai: GoogleGenerativeAI;
   readonly dimension = DEFAULT_EMBEDDING_DIMENSION;
 
+  // In-memory LRU cache for query embeddings — avoids re-embedding identical questions
+  private queryCache = new Map<string, number[]>();
+  private readonly queryCacheMaxSize = Number(process.env.EMBEDDING_CACHE_SIZE ?? 150);
+
   constructor(apiKey?: string) {
     const key = apiKey ?? process.env.GEMINI_API_KEY;
 
@@ -63,7 +67,24 @@ export class GeminiEmbeddingProvider implements AdvancedEmbeddingProvider {
   }
 
   async embedQuery(text: string): Promise<number[]> {
-    return this.embed(text, "RETRIEVAL_QUERY");
+    const cacheKey = text.trim().toLowerCase();
+    const cached = this.queryCache.get(cacheKey);
+    if (cached) {
+      // Move to end (most-recently-used) by re-inserting
+      this.queryCache.delete(cacheKey);
+      this.queryCache.set(cacheKey, cached);
+      return cached;
+    }
+
+    const embedding = await this.embed(text, "RETRIEVAL_QUERY");
+
+    // Evict oldest entry if at capacity
+    if (this.queryCache.size >= this.queryCacheMaxSize) {
+      const oldest = this.queryCache.keys().next().value;
+      if (oldest !== undefined) this.queryCache.delete(oldest);
+    }
+    this.queryCache.set(cacheKey, embedding);
+    return embedding;
   }
 
   async embed(

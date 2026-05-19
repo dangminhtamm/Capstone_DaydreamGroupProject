@@ -7,16 +7,41 @@
   --surface: #ffffff;
   --surface-2: #f1f5f9;
   --border: #e2e8f0;
+  --border-subtle: rgba(226, 232, 240, 0.8);
   --text-muted: #64748b;
+  --text-secondary: #475569;
+  --accent: #6366f1;
+  --accent-light: #e0e7ff;
+  --accent-surface: rgba(99, 102, 241, 0.08);
+  --danger: #ef4444;
+  --danger-light: #fef2f2;
+  --success: #10b981;
+  --success-light: #ecfdf5;
+  --warning: #f59e0b;
+  --warning-light: #fffbeb;
+  --shadow-color: rgba(148, 163, 184, 0.15);
 }
 
 .dark {
-  --background: #0f172a;
+  --background: #0b1120;
   --foreground: #f1f5f9;
   --surface: #1e293b;
   --surface-2: #0f172a;
   --border: #334155;
+  --border-subtle: rgba(51, 65, 85, 0.8);
   --text-muted: #94a3b8;
+  --text-secondary: #cbd5e1;
+  --accent: #818cf8;
+  --accent-light: rgba(99, 102, 241, 0.2);
+  --accent-surface: rgba(129, 140, 248, 0.1);
+  --danger: #f87171;
+  --danger-light: rgba(239, 68, 68, 0.15);
+  --success: #34d399;
+  --success-light: rgba(16, 185, 129, 0.15);
+  --warning: #fbbf24;
+  --warning-light: rgba(245, 158, 11, 0.15);
+  --shadow-color: rgba(0, 0, 0, 0.4);
+  color-scheme: dark;
 }
 
 @theme inline {
@@ -34,7 +59,23 @@ body {
   padding: 0;
   background: var(--background);
   color: var(--foreground);
-  transition: background 0.2s, color 0.2s;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+/* Smooth scrollbar in dark mode */
+.dark ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.dark ::-webkit-scrollbar-track {
+  background: var(--surface-2);
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
 }
 
 @keyframes slideDown {
@@ -65,4 +106,28 @@ body {
 
 .animate-fade-in {
   animation: fadeIn 0.22s ease-out both;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+@keyframes modalIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.animate-modal-in {
+  animation: modalIn 0.2s ease-out both;
 }

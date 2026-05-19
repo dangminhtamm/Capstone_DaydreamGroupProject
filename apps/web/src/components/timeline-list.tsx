@@ -2,6 +2,9 @@
 
 import { useMemo, useState } from "react";
 import { formatDateTime } from "@second-brain/shared";
+import { EditDiaryModal } from "./edit-diary-modal";
+import { ConfirmDialog } from "./confirm-dialog";
+import type { UpdateDiaryPayload } from "@/lib/api-client";
 
 type DiaryEntry = {
   id: string;
@@ -14,11 +17,13 @@ type DiaryEntry = {
 
 type TimelineListProps = {
   entries: DiaryEntry[];
+  onUpdate?: (id: string, payload: UpdateDiaryPayload) => Promise<void>;
+  onDelete?: (id: string) => Promise<void>;
 };
 
 const PAGE_SIZE = 5;
 
-export function TimelineList({ entries }: TimelineListProps) {
+export function TimelineList({ entries, onUpdate, onDelete }: TimelineListProps) {
   const [currentPage, setCurrentPage] = useState(1);
   const totalPages = Math.max(1, Math.ceil(entries.length / PAGE_SIZE));
   const paginatedEntries = useMemo(() => {
@@ -26,40 +31,136 @@ export function TimelineList({ entries }: TimelineListProps) {
     return entries.slice(start, start + PAGE_SIZE);
   }, [currentPage, entries]);
 
+  // Edit modal state
+  const [editingEntry, setEditingEntry] = useState<DiaryEntry | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Delete dialog state
+  const [deletingEntry, setDeletingEntry] = useState<DiaryEntry | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // Toast feedback
+  const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
+
+  const showToast = (type: "success" | "error", message: string) => {
+    setToast({ type, message });
+    setTimeout(() => setToast(null), 3000);
+  };
+
+  const handleSaveEdit = async (data: { title: string; content: string }) => {
+    if (!editingEntry || !onUpdate) return;
+    setIsSaving(true);
+    try {
+      await onUpdate(editingEntry.id, data);
+      showToast("success", "Entry updated successfully");
+      setEditingEntry(null);
+    } catch (error) {
+      showToast("error", error instanceof Error ? error.message : "Failed to update");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deletingEntry || !onDelete) return;
+    setIsDeleting(true);
+    try {
+      await onDelete(deletingEntry.id);
+      showToast("success", "Entry deleted successfully");
+      setDeletingEntry(null);
+    } catch (error) {
+      showToast("error", error instanceof Error ? error.message : "Failed to delete");
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   const goToPage = (page: number) => {
     setCurrentPage(Math.min(Math.max(page, 1), totalPages));
   };
 
   return (
     <div className="relative">
+      {/* Toast notification */}
+      {toast && (
+        <div className={`animate-fade-in fixed top-6 right-6 z-50 flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-medium shadow-lg ${
+          toast.type === "success"
+            ? "bg-emerald-600 text-white"
+            : "bg-rose-600 text-white"
+        }`}>
+          {toast.type === "success" ? (
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            </svg>
+          ) : (
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          )}
+          {toast.message}
+        </div>
+      )}
+
       {/* Timeline vertical line */}
       {paginatedEntries.length > 1 && (
-        <div className="absolute left-[19px] top-8 bottom-28 w-0.5 bg-gradient-to-b from-slate-200 via-slate-300 to-slate-200" />
+        <div className="absolute left-[19px] top-8 bottom-28 w-0.5 bg-gradient-to-b from-slate-200 via-slate-300 to-slate-200 dark:from-slate-700 dark:via-slate-600 dark:to-slate-700" />
       )}
       
       <ul className="space-y-6">
         {paginatedEntries.map((entry, index) => (
           <li key={entry.id} className="relative pl-14">
             {/* Timeline dot */}
-            <div className="absolute left-0 top-6 w-10 h-10 rounded-full bg-indigo-500 shadow-lg flex items-center justify-center text-white font-bold border-4 border-white z-10">
-              <span className="text-lg">📝</span>
+            <div className="absolute left-0 top-6 w-10 h-10 rounded-full bg-indigo-500 shadow-lg flex items-center justify-center text-white font-bold border-4 border-white dark:border-slate-900 z-10">
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
             </div>
             
             {/* Card */}
-            <div className="group relative rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white to-slate-50/50 p-6 shadow-sm shadow-slate-200/60 transition-all duration-300 hover:-translate-y-0.5 hover:border-indigo-200 hover:shadow-md">
-              {/* Entry number badge */}
-              <div className="absolute -top-3 right-6">
-                <span className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 ring-1 ring-indigo-100 shadow-sm">
-                  Entry #{entries.length - index}
+            <div className="group relative rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white to-slate-50/50 p-6 shadow-sm shadow-slate-200/60 transition-all duration-300 hover:-translate-y-0.5 hover:border-indigo-200 hover:shadow-md dark:border-slate-700 dark:from-slate-800 dark:to-slate-800/50 dark:shadow-slate-900/40 dark:hover:border-indigo-500/50">
+              {/* Entry number badge + action buttons */}
+              <div className="absolute -top-3 right-6 flex items-center gap-2">
+                <span className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 ring-1 ring-indigo-100 shadow-sm dark:bg-indigo-900/40 dark:text-indigo-400 dark:ring-indigo-700">
+                  Entry #{entries.length - ((currentPage - 1) * PAGE_SIZE + index)}
                 </span>
               </div>
-              
+
               {/* Header */}
               <div className="flex flex-col gap-2 mb-4">
-                <h3 className="text-xl font-bold text-slate-900 pr-24">
-                  {entry.title}
-                </h3>
-                <div className="flex items-center gap-2 text-sm text-slate-500">
+                <div className="flex items-start justify-between gap-3">
+                  <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100">
+                    {entry.title}
+                  </h3>
+
+                  {/* Action buttons */}
+                  {(onUpdate || onDelete) && (
+                    <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                      {onUpdate && (
+                        <button
+                          type="button"
+                          onClick={() => setEditingEntry(entry)}
+                          className="cursor-pointer rounded-lg p-1.5 text-slate-400 transition hover:bg-indigo-50 hover:text-indigo-600 dark:hover:bg-indigo-900/30 dark:hover:text-indigo-400"
+                          title="Edit entry"
+                        >
+                          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                          </svg>
+                        </button>
+                      )}
+                      {onDelete && (
+                        <button
+                          type="button"
+                          onClick={() => setDeletingEntry(entry)}
+                          className="cursor-pointer rounded-lg p-1.5 text-slate-400 transition hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-900/30 dark:hover:text-rose-400"
+                          title="Delete entry"
+                        >
+                          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                   </svg>
@@ -70,14 +171,14 @@ export function TimelineList({ entries }: TimelineListProps) {
               {/* Content */}
               <div className="relative">
                 <div className="absolute left-0 top-0 bottom-0 w-1 rounded-full bg-gradient-to-b from-indigo-400 to-indigo-200"></div>
-                <p className="pl-4 text-sm text-slate-700 leading-relaxed">
+                <p className="pl-4 text-sm text-slate-700 leading-relaxed dark:text-slate-300">
                   {entry.content}
                 </p>
               </div>
 
               {/* Attachments */}
               {entry.attachments && entry.attachments.length > 0 && (
-                <div className="mt-4 pt-4 border-t border-slate-100">
+                <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-700">
                   <p className="text-xs text-slate-500 mb-2">Attachments:</p>
                   <div className="flex flex-wrap gap-2">
                     {entry.attachments.map((url, i) => (
@@ -86,7 +187,7 @@ export function TimelineList({ entries }: TimelineListProps) {
                         href={url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 px-2 py-1 bg-slate-100 text-slate-600 text-xs rounded hover:bg-slate-200 transition-colors"
+                        className="inline-flex items-center gap-1 px-2 py-1 bg-slate-100 text-slate-600 text-xs rounded hover:bg-slate-200 transition-colors dark:bg-slate-700 dark:text-slate-400 dark:hover:bg-slate-600"
                       >
                         <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
@@ -99,7 +200,7 @@ export function TimelineList({ entries }: TimelineListProps) {
               )}
               
               {/* Footer decoration */}
-              <div className="mt-4 pt-4 border-t border-slate-100 flex items-center gap-2 text-xs text-slate-400">
+              <div className="mt-4 pt-4 border-t border-slate-100 flex items-center gap-2 text-xs text-slate-400 dark:border-slate-700 dark:text-slate-500">
                 <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
                 </svg>
@@ -113,19 +214,19 @@ export function TimelineList({ entries }: TimelineListProps) {
       {/* Empty state */}
       {entries.length === 0 && (
         <div className="text-center py-12">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-slate-100 mb-4">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-slate-100 mb-4 dark:bg-slate-800">
             <svg className="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
             </svg>
           </div>
-          <h3 className="text-lg font-semibold text-slate-900 mb-2">No entries yet</h3>
-          <p className="text-slate-500">Start by creating your first diary entry</p>
+          <h3 className="text-lg font-semibold text-slate-900 mb-2 dark:text-slate-100">No entries yet</h3>
+          <p className="text-slate-500 dark:text-slate-400">Start by creating your first diary entry</p>
         </div>
       )}
 
       {entries.length > PAGE_SIZE && (
-        <div className="mt-8 flex flex-col items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row">
-          <p className="text-sm text-slate-500">
+        <div className="mt-8 flex flex-col items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row dark:border-slate-700 dark:bg-slate-800">
+          <p className="text-sm text-slate-500 dark:text-slate-400">
             Showing {(currentPage - 1) * PAGE_SIZE + 1}-
             {Math.min(currentPage * PAGE_SIZE, entries.length)} of {entries.length} entries
           </p>
@@ -134,24 +235,46 @@ export function TimelineList({ entries }: TimelineListProps) {
               type="button"
               onClick={() => goToPage(currentPage - 1)}
               disabled={currentPage === 1}
-              className="cursor-pointer rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              className="cursor-pointer rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
             >
               Previous
             </button>
-            <span className="text-sm font-medium text-slate-700">
+            <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
               Page {currentPage} of {totalPages}
             </span>
             <button
               type="button"
               onClick={() => goToPage(currentPage + 1)}
               disabled={currentPage === totalPages}
-              className="cursor-pointer rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              className="cursor-pointer rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
             >
               Next
             </button>
           </div>
         </div>
       )}
+
+      {/* Edit Modal */}
+      <EditDiaryModal
+        isOpen={editingEntry !== null}
+        initialTitle={editingEntry?.title ?? ""}
+        initialContent={editingEntry?.content ?? ""}
+        isLoading={isSaving}
+        onSave={handleSaveEdit}
+        onCancel={() => setEditingEntry(null)}
+      />
+
+      {/* Delete Confirmation */}
+      <ConfirmDialog
+        isOpen={deletingEntry !== null}
+        title="Delete Diary Entry"
+        message={`Are you sure you want to delete "${deletingEntry?.title}"? This action cannot be undone.`}
+        confirmLabel="Delete"
+        variant="danger"
+        isLoading={isDeleting}
+        onConfirm={handleConfirmDelete}
+        onCancel={() => setDeletingEntry(null)}
+      />
     </div>
   );
 }
