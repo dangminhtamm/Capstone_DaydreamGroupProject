@@ -145,7 +145,30 @@ export default function SearchPage() {
               className="flex shrink-0 cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:border-indigo-300 hover:bg-indigo-50 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-300 dark:hover:border-indigo-500 dark:hover:bg-indigo-900/30"
               title={`AI responds in ${responseLanguage === "en" ? "English" : "Vietnamese"}. Click to toggle.`}
             >
-              <span className="text-lg">{responseLanguage === "en" ? "🇺🇸" : "🇻🇳"}</span>
+              {responseLanguage === "en" ? (
+                <svg className="h-5 w-5 shrink-0" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                  <clipPath id="flag-us-clip"><circle cx="12" cy="12" r="12"/></clipPath>
+                  <g clipPath="url(#flag-us-clip)">
+                    <rect width="24" height="24" fill="#B22234"/>
+                    <rect y="1.85" width="24" height="1.85" fill="white"/>
+                    <rect y="5.54" width="24" height="1.85" fill="white"/>
+                    <rect y="9.23" width="24" height="1.85" fill="white"/>
+                    <rect y="12.92" width="24" height="1.85" fill="white"/>
+                    <rect y="16.62" width="24" height="1.85" fill="white"/>
+                    <rect y="20.31" width="24" height="1.85" fill="white"/>
+                    <rect width="10" height="12.92" fill="#3C3B6E"/>
+                    <g fill="white">{[...Array(5)].map((_, r) => [...Array(r % 2 === 0 ? 6 : 5)].map((_, c) => <circle key={`${r}-${c}`} cx={r % 2 === 0 ? 0.8 + c * 1.6 : 1.6 + c * 1.6} cy={0.7 + r * 1.2} r="0.45"/>))}</g>
+                  </g>
+                </svg>
+              ) : (
+                <svg className="h-5 w-5 shrink-0" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                  <clipPath id="flag-vn-clip"><circle cx="12" cy="12" r="12"/></clipPath>
+                  <g clipPath="url(#flag-vn-clip)">
+                    <rect width="24" height="24" fill="#DA251D"/>
+                    <polygon points="12,4.8 13.76,10.22 19.44,10.22 14.84,13.58 16.6,18.98 12,15.62 7.4,18.98 9.16,13.58 4.56,10.22 10.24,10.22" fill="#FFFF00"/>
+                  </g>
+                </svg>
+              )}
               <span className="hidden sm:inline">{responseLanguage === "en" ? "English" : "Tiếng Việt"}</span>
             </button>
           </div>
