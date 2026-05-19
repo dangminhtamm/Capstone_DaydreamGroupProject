@@ -312,11 +312,11 @@ pnpm --filter @second-brain/api test:e2e
 
 | Member | Responsibility |
 |---|---|
-| **Đặng Minh Tâm** | AI Memory Engine & System Architecture |
-| **Trần Nguyên Quân** | Backend Core, API & Security |
-| **Dương Minh Đức Anh** | Frontend UI/UX & Explainability Interface |
-| **Nguyễn Tấn Thắng** | Workflows & Google Integrations |
-| **Nguyễn Thanh Nhân** | QA, Demo Data & Platform Support |
+| **Dang Minh Tam** | AI Memory Engine & System Architecture |
+| **Tran Nguyen Quan** | Backend Core, API & Security |
+| **Duong Minh Duc Anh** | Frontend UI/UX & Explainability Interface |
+| **Nguyen Tan Thang** | Workflows & Google Integrations |
+| **Nguyen Thanh Nhan** | QA, Demo Data & Platform Support |
 
 ---
 
