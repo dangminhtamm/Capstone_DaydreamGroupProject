@@ -102,7 +102,7 @@ export default function Home() {
             ) : (
               <>
                 <Link
-                  href="/diary"
+                  href="/signup"
                   className="px-6 py-3 bg-indigo-600 text-white font-medium rounded-xl hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200 dark:shadow-indigo-900/40"
                 >
                   Get Started Free
