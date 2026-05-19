@@ -18,12 +18,30 @@ type SearchCitation = {
   claim?: string;
 };
 
+type QueryAnalytics = {
+  tokenUsage: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+    model: string;
+  };
+  timing: {
+    embedMs: number;
+    retrieveMs: number;
+    generateMs: number;
+    totalMs: number;
+  };
+  chunksRetrieved: number;
+  status: "success" | "no_memory" | "error";
+};
+
 type SearchResponse = {
   answer: string;
   confidence: "high" | "medium" | "low";
   sources: SearchCitation[];
   noMemory?: boolean;
   suggestions?: string[];
+  analytics?: QueryAnalytics | null;
 };
 
 type ResponseLanguage = "en" | "vi";
@@ -48,6 +66,7 @@ export default function SearchPage() {
   const [isSearching, setIsSearching] = useState(false);
   const [responseLanguage, setResponseLanguage] = useState<ResponseLanguage>("en");
   const [showAuthPrompt, setShowAuthPrompt] = useState(false);
+  const [analyticsOpen, setAnalyticsOpen] = useState(false);
 
   // Persist language preference
   useEffect(() => {
@@ -114,6 +133,19 @@ export default function SearchPage() {
 
       const data = (await response.json()) as SearchResponse;
       setResult(data);
+
+      // Persist token usage for sidebar widget (Order 2: 3d)
+      if (data.analytics?.tokenUsage) {
+        try {
+          const todayKey = new Date().toISOString().slice(0, 10);
+          const stored = JSON.parse(localStorage.getItem("dd-token-usage") || "{}");
+          const today = stored[todayKey] || { tokens: 0, queries: 0 };
+          today.tokens += data.analytics.tokenUsage.totalTokens;
+          today.queries += 1;
+          stored[todayKey] = today;
+          localStorage.setItem("dd-token-usage", JSON.stringify(stored));
+        } catch { /* ignore localStorage errors */ }
+      }
     } catch (searchError) {
       setError(searchError instanceof Error ? searchError.message : "Search failed. Please try again.");
       setResult(null);
@@ -224,8 +256,9 @@ export default function SearchPage() {
 
               {/* Inline guest hint (always visible when not authed and no auth prompt) */}
               {!isAuthLoading && !isAuthenticated && !showAuthPrompt && (
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  💡 You&apos;re exploring as a guest — <a href="/login" className="font-medium text-indigo-600 underline hover:text-indigo-700 dark:text-indigo-400">sign in</a> to search your personal memories.
+                <p className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+                  <svg className="h-3.5 w-3.5 shrink-0 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
+                  You&apos;re exploring as a guest — <a href="/login" className="font-medium text-indigo-600 underline hover:text-indigo-700 dark:text-indigo-400">sign in</a> to search your personal memories.
                 </p>
               )}
 
@@ -310,7 +343,7 @@ export default function SearchPage() {
                     href="/diary"
                     className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 dark:border-slate-600 dark:bg-slate-700/50 dark:text-slate-300 dark:hover:border-indigo-500 dark:hover:bg-indigo-900/30 dark:hover:text-indigo-400"
                   >
-                    <span className="text-lg">📝</span>
+                    <svg className="h-5 w-5 shrink-0 text-slate-500 dark:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
                     {responseLanguage === "vi" ? "Thêm nhật ký mới về chủ đề này" : "Add a new diary entry about this topic"}
                   </Link>
                   <button
@@ -322,7 +355,7 @@ export default function SearchPage() {
                     }}
                     className="flex w-full cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 dark:border-slate-600 dark:bg-slate-700/50 dark:text-slate-300 dark:hover:border-indigo-500 dark:hover:bg-indigo-900/30 dark:hover:text-indigo-400"
                   >
-                    <span className="text-lg">🔄</span>
+                    <svg className="h-5 w-5 shrink-0 text-slate-500 dark:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
                     {responseLanguage === "vi" ? "Thử diễn đạt lại câu hỏi" : "Try rephrasing your question"}
                   </button>
                   <button
@@ -330,7 +363,7 @@ export default function SearchPage() {
                     onClick={() => setQuestion(suggestedQuestions[0])}
                     className="flex w-full cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 dark:border-slate-600 dark:bg-slate-700/50 dark:text-slate-300 dark:hover:border-indigo-500 dark:hover:bg-indigo-900/30 dark:hover:text-indigo-400"
                   >
-                    <span className="text-lg">💡</span>
+                    <svg className="h-5 w-5 shrink-0 text-slate-500 dark:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
                     {responseLanguage === "vi" ? "Thử một câu hỏi gợi ý" : "Try a suggested question instead"}
                   </button>
                 </div>
@@ -353,6 +386,119 @@ export default function SearchPage() {
           )}
         </section>
       </div>
+
+      {/* ── Query Analytics Panel (Order 1: 3a+3b+3c) ── */}
+      {result?.analytics && (
+        <section className="animate-fade-in mt-6 rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white via-white to-emerald-50/30 p-6 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:from-slate-800 dark:via-slate-800 dark:to-emerald-950/20 dark:shadow-slate-900/40">
+          <button
+            type="button"
+            onClick={() => setAnalyticsOpen(!analyticsOpen)}
+            className="flex w-full cursor-pointer items-center justify-between"
+          >
+            <div className="flex items-center gap-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-100 dark:bg-emerald-900/40">
+                <svg className="h-5 w-5 text-emerald-600 dark:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                </svg>
+              </div>
+              <div className="text-left">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-600 dark:text-emerald-400">Query Analytics</p>
+                <p className="mt-0.5 text-sm font-medium text-slate-700 dark:text-slate-300">
+                  {result.analytics.tokenUsage.totalTokens} tokens · {(result.analytics.timing.totalMs / 1000).toFixed(1)}s · {result.analytics.chunksRetrieved} chunks
+                </p>
+              </div>
+            </div>
+            <svg className={`h-5 w-5 text-slate-400 transition-transform duration-200 ${analyticsOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+
+          {analyticsOpen && (
+            <div className="mt-5 space-y-3 animate-fade-in">
+              {/* Pipeline Steps */}
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800/60">
+                <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Pipeline Steps</p>
+                <div className="space-y-2.5">
+                  {/* Embedding */}
+                  <div className="flex items-center gap-3">
+                    <svg className="h-4 w-4 shrink-0 text-slate-500 dark:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" /></svg>
+                    <span className="flex-1 text-sm text-slate-700 dark:text-slate-300">Embedding query</span>
+                    <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-700 dark:text-slate-300">
+                      {result.analytics.timing.embedMs > 0 ? `${result.analytics.timing.embedMs}ms` : 'included'}
+                    </span>
+                  </div>
+                  {/* Retrieval */}
+                  <div className="flex items-center gap-3">
+                    <svg className="h-4 w-4 shrink-0 text-slate-500 dark:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                    <span className="flex-1 text-sm text-slate-700 dark:text-slate-300">
+                      Retrieved {result.analytics.chunksRetrieved} memory chunks
+                    </span>
+                    <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-700 dark:text-slate-300">
+                      {result.analytics.timing.retrieveMs}ms
+                    </span>
+                  </div>
+                  {/* Generation */}
+                  <div className="flex items-center gap-3">
+                    <svg className="h-4 w-4 shrink-0 text-slate-500 dark:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+                    <span className="flex-1 text-sm text-slate-700 dark:text-slate-300">Generating answer</span>
+                    <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-700 dark:text-slate-300">
+                      {result.analytics.timing.generateMs > 1000
+                        ? `${(result.analytics.timing.generateMs / 1000).toFixed(1)}s`
+                        : `${result.analytics.timing.generateMs}ms`}
+                    </span>
+                  </div>
+                  {/* Confidence */}
+                  <div className="flex items-center gap-3">
+                    <svg className="h-4 w-4 shrink-0 text-slate-500 dark:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
+                    <span className="flex-1 text-sm text-slate-700 dark:text-slate-300">Confidence</span>
+                    <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ${confidenceStyles[result.confidence]}`}>
+                      {result.confidence}
+                    </span>
+                  </div>
+                  {/* Tokens */}
+                  <div className="flex items-center gap-3">
+                    <svg className="h-4 w-4 shrink-0 text-slate-500 dark:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                    <span className="flex-1 text-sm text-slate-700 dark:text-slate-300">Tokens</span>
+                    <span className="rounded-full bg-indigo-50 px-2.5 py-0.5 text-xs font-medium text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400">
+                      {result.analytics.tokenUsage.promptTokens} prompt + {result.analytics.tokenUsage.completionTokens} completion = {result.analytics.tokenUsage.totalTokens}
+                    </span>
+                  </div>
+                  {/* Status */}
+                  <div className="flex items-center gap-3">
+                    {result.analytics.status === 'success' ? (<svg className="h-4 w-4 shrink-0 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>) : result.analytics.status === 'no_memory' ? (<svg className="h-4 w-4 shrink-0 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" /></svg>) : (<svg className="h-4 w-4 shrink-0 text-rose-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>)}
+                    <span className="flex-1 text-sm text-slate-700 dark:text-slate-300">Status</span>
+                    <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                      result.analytics.status === 'success'
+                        ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+                        : result.analytics.status === 'no_memory'
+                          ? 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+                          : 'bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400'
+                    }`}>
+                      {result.analytics.status}
+                    </span>
+                  </div>
+                  {/* Total */}
+                  <div className="flex items-center gap-3 border-t border-slate-200 pt-2.5 dark:border-slate-700">
+                    <svg className="h-4 w-4 shrink-0 text-slate-500 dark:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                    <span className="flex-1 text-sm font-semibold text-slate-900 dark:text-slate-100">Total</span>
+                    <span className="rounded-full bg-slate-900 px-2.5 py-0.5 text-xs font-bold text-white dark:bg-slate-200 dark:text-slate-900">
+                      {(result.analytics.timing.totalMs / 1000).toFixed(1)}s
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Model info */}
+              <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 dark:border-slate-700 dark:bg-slate-800/40">
+                <span className="text-xs text-slate-500 dark:text-slate-400">Model</span>
+                <span className="rounded-full bg-slate-200 px-2.5 py-0.5 text-xs font-mono font-medium text-slate-700 dark:bg-slate-700 dark:text-slate-300">
+                  {result.analytics.tokenUsage.model}
+                </span>
+              </div>
+            </div>
+          )}
+        </section>
+      )}
 
       <section className="mt-6 rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white via-white to-indigo-50/30 p-6 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:from-slate-800 dark:via-slate-800 dark:to-indigo-950/30 dark:shadow-slate-900/40">
         <div className="mb-4 flex items-center justify-between">

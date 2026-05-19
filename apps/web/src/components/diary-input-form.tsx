@@ -143,12 +143,21 @@ export function DiaryInputForm() {
       </form>
       <div className="mx-auto mt-6 grid max-w-3xl grid-cols-1 gap-3 sm:grid-cols-3">
         {[
-          { icon: "✍️", title: "Write", desc: "Save your thoughts as diary entries." },
-          { icon: "🔍", title: "Search", desc: "Ask questions grounded in your memories." },
-          { icon: "📊", title: "Summarize", desc: "See writing stats and weekly trends." },
+          {
+            icon: (<svg className="h-5 w-5 text-indigo-500 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>),
+            title: "Write", desc: "Save your thoughts as diary entries."
+          },
+          {
+            icon: (<svg className="h-5 w-5 text-indigo-500 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>),
+            title: "Search", desc: "Ask questions grounded in your memories."
+          },
+          {
+            icon: (<svg className="h-5 w-5 text-indigo-500 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>),
+            title: "Summarize", desc: "See writing stats and weekly trends."
+          },
         ].map((step) => (
           <div key={step.title} className="flex items-start gap-3 rounded-2xl border border-slate-200/70 bg-white/60 px-4 py-3 shadow-sm dark:border-slate-700 dark:bg-slate-800/60">
-            <span className="text-xl leading-none">{step.icon}</span>
+            <span className="mt-0.5 shrink-0">{step.icon}</span>
             <div>
               <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">{step.title}</p>
               <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{step.desc}</p>

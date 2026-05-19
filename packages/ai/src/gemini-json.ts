@@ -13,6 +13,18 @@ export interface GenerateGeminiJsonOptions<T> {
   maxOutputTokens?: number;
 }
 
+export interface GeminiTokenUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  model: string;
+}
+
+export interface GeminiJsonResultWithMeta<T> {
+  data: T;
+  tokenUsage: GeminiTokenUsage;
+}
+
 // Singleton Gemini client — avoids re-initialization overhead per request
 let _geminiJsonClient: GoogleGenerativeAI | null = null;
 function getGeminiJsonClient(): GoogleGenerativeAI {
@@ -24,13 +36,29 @@ function getGeminiJsonClient(): GoogleGenerativeAI {
   return _geminiJsonClient;
 }
 
+/**
+ * Original function — returns only the parsed & validated JSON.
+ * Preserved for backward compatibility with existing callers.
+ */
 export async function generateGeminiJson<T>(
   options: GenerateGeminiJsonOptions<T>,
 ): Promise<T> {
+  const result = await generateGeminiJsonWithMeta(options);
+  return result.data;
+}
+
+/**
+ * Enhanced version — returns parsed JSON **plus** token usage metadata
+ * from the Gemini API response. Used by answerMemory for observability.
+ */
+export async function generateGeminiJsonWithMeta<T>(
+  options: GenerateGeminiJsonOptions<T>,
+): Promise<GeminiJsonResultWithMeta<T>> {
 
   const ai = getGeminiJsonClient();
+  const modelName = options.model;
   const model = ai.getGenerativeModel({
-    model: options.model,
+    model: modelName,
     generationConfig: {
       temperature: options.temperature ?? 0.2,
       responseMimeType: "application/json",
@@ -48,10 +76,21 @@ export async function generateGeminiJson<T>(
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       const result = await model.generateContent(options.prompt);
-      const text = result.response.text();
+      const response = result.response;
+      const text = response.text();
       const parsed = parseJsonResponse(text);
+      const validated = options.validator.parse(parsed);
 
-      return options.validator.parse(parsed);
+      // Extract token usage metadata from the Gemini response
+      const usage = response.usageMetadata;
+      const tokenUsage: GeminiTokenUsage = {
+        promptTokens: usage?.promptTokenCount ?? 0,
+        completionTokens: usage?.candidatesTokenCount ?? 0,
+        totalTokens: usage?.totalTokenCount ?? 0,
+        model: modelName,
+      };
+
+      return { data: validated, tokenUsage };
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
 

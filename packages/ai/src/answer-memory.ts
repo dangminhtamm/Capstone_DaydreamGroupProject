@@ -1,6 +1,6 @@
 import { SchemaType, type ResponseSchema } from "@google/generative-ai";
 import { z } from "zod";
-import { generateGeminiJson } from "./gemini-json.ts";
+import { generateGeminiJsonWithMeta, type GeminiTokenUsage } from "./gemini-json.ts";
 import {
   retrieveMemory,
   type MemorySearchHit,
@@ -62,12 +62,34 @@ import {
   classifyRetrievalConfidence,
 } from "./answer-utils.ts";
 
+// ── Analytics types ──────────────────────────────────────────────────
+
+export interface QueryAnalytics {
+  tokenUsage: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+    model: string;
+  };
+  timing: {
+    embedMs: number;
+    retrieveMs: number;
+    generateMs: number;
+    totalMs: number;
+  };
+  chunksRetrieved: number;
+  status: "success" | "no_memory" | "error";
+}
+
+// ── Result types ─────────────────────────────────────────────────────
+
 export interface AnswerMemoryResult {
   answer: string;
   confidence: "high" | "medium" | "low";
   citations: MemoryCitation[];
   noMemory?: boolean;
   suggestions?: string[];
+  analytics?: QueryAnalytics;
   tokenUsage?: { inputTokens: number; outputTokens: number; model: string };
   modelError?: {
     status?: number;
@@ -92,6 +114,7 @@ export async function answerMemory(
   dbClient: MemoryDbClient,
   options: AnswerMemoryOptions = {},
 ): Promise<AnswerMemoryResult> {
+  const totalStart = performance.now();
   const normalizedQuestion = question.trim();
   const lang = options.responseLanguage ?? 'en';
 
@@ -100,17 +123,32 @@ export async function answerMemory(
   }
 
   const inferredFilters = inferRetrievalFilters(normalizedQuestion);
+
+  // ── Embed + Retrieve (timed together since retrieveMemory embeds internally) ──
+  const retrieveStart = performance.now();
   const chunks = await retrieveMemory(normalizedQuestion, userId, dbClient, {
     ...inferredFilters,
     ...options.filters,
     limit: options.limit ?? 8,
     maxDistance: options.maxDistance ?? DEFAULT_MAX_DISTANCE,
   });
+  const retrieveMs = performance.now() - retrieveStart;
 
-  return answerFromChunks(normalizedQuestion, chunks, {
+  const result = await answerFromChunks(normalizedQuestion, chunks, {
     minTopSimilarity: options.minTopSimilarity ?? MIN_TOP_SIMILARITY,
     responseLanguage: lang,
   });
+
+  // Patch analytics timing: answerFromChunks already set generateMs,
+  // but we need to fill in embed/retrieve timings and total.
+  if (result.analytics) {
+    // embed is included in retrieve for this code path
+    result.analytics.timing.embedMs = 0;
+    result.analytics.timing.retrieveMs = Math.round(retrieveMs);
+    result.analytics.timing.totalMs = Math.round(performance.now() - totalStart);
+  }
+
+  return result;
 }
 
 export async function answerFromChunks(
@@ -122,24 +160,38 @@ export async function answerFromChunks(
   const lang = options.responseLanguage ?? 'en';
 
   if (!chunks.length) {
-    return noMemoryResult(
+    const result = noMemoryResult(
       lang === 'vi'
         ? 'Mình chưa tìm thấy ký ức đủ liên quan để trả lời chắc chắn.'
         : 'I couldn\'t find any relevant memories to answer your question.',
       lang,
     );
+    result.analytics = {
+      tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, model: 'n/a' },
+      timing: { embedMs: 0, retrieveMs: 0, generateMs: 0, totalMs: 0 },
+      chunksRetrieved: 0,
+      status: 'no_memory',
+    };
+    return result;
   }
 
   const sortedChunks = [...chunks].sort((a, b) => b.similarity - a.similarity);
   const topSimilarity = sortedChunks[0]?.similarity ?? 0;
 
   if (topSimilarity < minTopSimilarity) {
-    return noMemoryResult(
+    const result = noMemoryResult(
       lang === 'vi'
         ? 'Mình tìm thấy một vài ký ức gần nghĩa, nhưng độ liên quan chưa đủ cao để trả lời chắc chắn.'
         : 'I found some loosely related memories, but the relevance isn\'t strong enough for a confident answer.',
       lang,
     );
+    result.analytics = {
+      tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, model: 'n/a' },
+      timing: { embedMs: 0, retrieveMs: 0, generateMs: 0, totalMs: 0 },
+      chunksRetrieved: chunks.length,
+      status: 'no_memory',
+    };
+    return result;
   }
 
   const sources = buildCitations(sortedChunks);
@@ -180,7 +232,8 @@ ${languageInstruction}
 `.trim();
 
   try {
-    const output = await generateGeminiJson({
+    const generateStart = performance.now();
+    const geminiResult = await generateGeminiJsonWithMeta({
       model: process.env.GEMINI_ANSWER_MODEL ?? "gemini-2.5-flash",
       prompt,
       responseSchema: GeminiGroundedAnswerResponseSchema,
@@ -188,6 +241,10 @@ ${languageInstruction}
       temperature: 0.1,
       maxOutputTokens: Number(process.env.MEMORY_MAX_ANSWER_TOKENS ?? 1024),
     });
+    const generateMs = performance.now() - generateStart;
+
+    const output = geminiResult.data;
+    const tokenUsage = geminiResult.tokenUsage;
 
     const allowedMarkers = new Set(sources.map((source) => source.marker));
     const validModelCitations = output.citations.filter((citation) =>
@@ -195,12 +252,19 @@ ${languageInstruction}
     );
 
     if (!validModelCitations.length) {
-      return noMemoryResult(
+      const result = noMemoryResult(
         lang === 'vi'
           ? 'Mình tìm thấy một số ký ức liên quan, nhưng câu trả lời sinh ra không có citation hợp lệ nên mình không thể xác nhận chắc chắn.'
           : 'I found some related memories, but the generated answer had no valid citations, so I cannot confirm it reliably.',
         lang,
       );
+      result.analytics = {
+        tokenUsage,
+        timing: { embedMs: 0, retrieveMs: 0, generateMs: Math.round(generateMs), totalMs: 0 },
+        chunksRetrieved: chunks.length,
+        status: 'no_memory',
+      };
+      return result;
     }
 
     const citedMarkerToClaim = new Map(
@@ -228,6 +292,17 @@ ${languageInstruction}
       answer: output.answer,
       confidence: finalConfidence,
       citations,
+      analytics: {
+        tokenUsage,
+        timing: {
+          embedMs: 0,
+          retrieveMs: 0,
+          generateMs: Math.round(generateMs),
+          totalMs: 0,
+        },
+        chunksRetrieved: chunks.length,
+        status: 'success',
+      },
     };
   } catch (error) {
     const modelError = classifyModelError(error);
@@ -243,6 +318,12 @@ ${languageInstruction}
       confidence: "low",
       citations: [],
       modelError,
+      analytics: {
+        tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, model: 'n/a' },
+        timing: { embedMs: 0, retrieveMs: 0, generateMs: 0, totalMs: 0 },
+        chunksRetrieved: chunks.length,
+        status: 'error',
+      },
     };
   }
 }

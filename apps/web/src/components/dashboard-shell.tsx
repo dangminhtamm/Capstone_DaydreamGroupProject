@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import Image from "next/image";
-import { ReactNode, useState } from "react";
+import { ReactNode, useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 
@@ -62,6 +62,27 @@ export function DashboardShell({ children, title, description }: DashboardShellP
   const { resolvedTheme, toggleTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
 
+  // Token usage widget state (Order 2: 3d)
+  const [tokenStats, setTokenStats] = useState<{ today: number; week: number; queries: number } | null>(null);
+  useEffect(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem("dd-token-usage") || "{}");
+      const todayKey = new Date().toISOString().slice(0, 10);
+      const todayData = stored[todayKey] || { tokens: 0, queries: 0 };
+      const now = new Date();
+      let weekTokens = 0;
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(now);
+        d.setDate(d.getDate() - i);
+        const key = d.toISOString().slice(0, 10);
+        weekTokens += (stored[key]?.tokens || 0);
+      }
+      if (todayData.tokens > 0 || weekTokens > 0) {
+        setTokenStats({ today: todayData.tokens, week: weekTokens, queries: todayData.queries });
+      }
+    } catch { /* ignore */ }
+  }, []);
+
   const avatarUrl: string | undefined =
     user?.user_metadata?.avatar_url ?? user?.user_metadata?.picture ?? undefined;
   const displayName: string = user?.user_metadata?.full_name ?? user?.user_metadata?.name ?? "User";
@@ -117,6 +138,32 @@ export function DashboardShell({ children, title, description }: DashboardShellP
               })}
             </div>
           </nav>
+
+          {/* Token Usage Widget (Order 2: 3d) */}
+          {tokenStats && (
+            <div className="mx-4 mb-3 rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50 to-indigo-50/50 p-3 dark:border-slate-700 dark:from-slate-800 dark:to-indigo-950/30">
+              <div className="flex items-center gap-2 mb-2">
+                <svg className="h-4 w-4 text-indigo-500 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+                <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Token Usage</span>
+              </div>
+              <div className="space-y-1.5">
+                <div className="flex justify-between items-center">
+                  <span className="text-xs text-slate-500 dark:text-slate-400">Today</span>
+                  <span className="text-xs font-bold text-slate-900 dark:text-slate-100">{tokenStats.today.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-xs text-slate-500 dark:text-slate-400">This week</span>
+                  <span className="text-xs font-bold text-slate-900 dark:text-slate-100">{tokenStats.week.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-xs text-slate-500 dark:text-slate-400">Queries today</span>
+                  <span className="text-xs font-bold text-indigo-600 dark:text-indigo-400">{tokenStats.queries}</span>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* User section */}
           <div className="border-t border-slate-200 px-4 py-4 dark:border-slate-700">

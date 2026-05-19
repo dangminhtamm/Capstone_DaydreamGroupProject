@@ -36,6 +36,8 @@ export class SearchService {
         sources: result.citations,
         noMemory: result.noMemory ?? false,
         suggestions: result.suggestions ?? [],
+        // NEW: AI Observability analytics
+        analytics: result.analytics ?? null,
       };
     } catch (error) {
       console.error('Failed to answer memory search question:', error);

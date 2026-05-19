@@ -17,6 +17,7 @@ export {
   inferRetrievalFilters,
   type AnswerMemoryOptions,
   type AnswerMemoryResult,
+  type QueryAnalytics,
   type ResponseLanguage,
 } from "./answer-memory.ts";
 export { type MemoryCitation } from "./answer-utils.ts";
@@ -54,3 +55,7 @@ export type {
   EmbeddingProvider,
   MemoryChunk,
 } from "./types.ts";
+export {
+  type GeminiTokenUsage,
+  type GeminiJsonResultWithMeta,
+} from "./gemini-json.ts";

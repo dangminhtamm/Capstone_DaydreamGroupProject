@@ -111,7 +111,7 @@ export function TimelineList({ entries, onUpdate, onDelete }: TimelineListProps)
           <li key={entry.id} className="relative pl-14">
             {/* Timeline dot */}
             <div className="absolute left-0 top-6 w-10 h-10 rounded-full bg-indigo-500 shadow-lg flex items-center justify-center text-white font-bold border-4 border-white dark:border-slate-900 z-10">
-              <span className="text-lg">📝</span>
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
             </div>
             
             {/* Card */}
