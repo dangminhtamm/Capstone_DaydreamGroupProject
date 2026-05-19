@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import Image from "next/image";
-import { ReactNode, useEffect, useState } from "react";
+import { ReactNode, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
+import { useTheme } from "@/contexts/ThemeContext";
 
 type DashboardShellProps = {
   children: ReactNode;
@@ -51,33 +52,15 @@ const navItems = [
   },
 ];
 
-function useTheme() {
-  const [isDark, setIsDark] = useState(false);
-
-  useEffect(() => {
-    const saved = localStorage.getItem("theme");
-    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    const shouldBeDark = saved === "dark" || (!saved && prefersDark);
-    setIsDark(shouldBeDark);
-    document.documentElement.classList.toggle("dark", shouldBeDark);
-  }, []);
-
-  const toggle = () => {
-    const next = !isDark;
-    setIsDark(next);
-    document.documentElement.classList.toggle("dark", next);
-    localStorage.setItem("theme", next ? "dark" : "light");
-  };
-
-  return { isDark, toggle };
-}
+// useTheme is now imported from @/contexts/ThemeContext
 
 export function DashboardShell({ children, title, description }: DashboardShellProps) {
   const { user, isAuthenticated, isLoading, signInWithGoogle, signOut } = useAuth();
   const pathname = usePathname();
   const [openMenu, setOpenMenu] = useState<"notifications" | "settings" | null>(null);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const { isDark, toggle: toggleTheme } = useTheme();
+  const { resolvedTheme, toggleTheme } = useTheme();
+  const isDark = resolvedTheme === "dark";
 
   const avatarUrl: string | undefined =
     user?.user_metadata?.avatar_url ?? user?.user_metadata?.picture ?? undefined;

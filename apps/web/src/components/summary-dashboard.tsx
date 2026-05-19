@@ -155,11 +155,11 @@ function buildWeeklySummaries(entries: DiaryEntry[]) {
 
 function StatCard({ label, value, helper, tone }: { label: string; value: string; helper: string; tone: string }) {
   return (
-    <div className="rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white to-slate-50/50 p-5 shadow-sm shadow-slate-200/60">
+    <div className="rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white to-slate-50/50 p-5 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:from-slate-800 dark:to-slate-800/50 dark:shadow-slate-900/40">
       <div className={`mb-4 h-2 w-12 rounded-full ${tone}`} />
-      <p className="text-sm font-medium text-slate-500">{label}</p>
-      <p className="mt-2 text-3xl font-bold tracking-tight text-slate-950">{value}</p>
-      <p className="mt-2 text-sm text-slate-500">{helper}</p>
+      <p className="text-sm font-medium text-slate-500 dark:text-slate-400">{label}</p>
+      <p className="mt-2 text-3xl font-bold tracking-tight text-slate-950 dark:text-slate-100">{value}</p>
+      <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">{helper}</p>
     </div>
   );
 }
@@ -169,11 +169,11 @@ function ActivityBars({ summaries }: { summaries: DailySummary[] }) {
   const maxEntries = Math.max(...recentDays.map((day) => day.entries.length), 1);
 
   return (
-    <div className="rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white to-slate-50/50 p-6 shadow-sm shadow-slate-200/60">
+    <div className="rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white to-slate-50/50 p-6 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:from-slate-800 dark:to-slate-800/50 dark:shadow-slate-900/40">
       <div className="mb-6 flex items-center justify-between gap-3">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Activity</p>
-          <h3 className="mt-2 text-xl font-bold text-slate-950">Last 7 days</h3>
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600 dark:text-indigo-400">Activity</p>
+          <h3 className="mt-2 text-xl font-bold text-slate-950 dark:text-slate-100">Last 7 days</h3>
         </div>
         <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 ring-1 ring-indigo-100">
           daily trend
@@ -183,20 +183,20 @@ function ActivityBars({ summaries }: { summaries: DailySummary[] }) {
         {recentDays.length ? (
           recentDays.map((day) => (
             <div key={day.dateKey} className="flex flex-1 flex-col items-center gap-3">
-              <div className="flex h-32 w-full items-end rounded-2xl bg-slate-50 px-2 py-2">
+              <div className="flex h-32 w-full items-end rounded-2xl bg-slate-50 px-2 py-2 dark:bg-slate-700/50">
                 <div
                   className="w-full rounded-xl bg-gradient-to-t from-indigo-600 to-sky-400 shadow-sm transition-all"
                   style={{ height: `${Math.max((day.entries.length / maxEntries) * 100, 10)}%` }}
                 />
               </div>
               <div className="text-center">
-                <p className="text-xs font-semibold text-slate-700">{day.entries.length}</p>
-                <p className="text-[11px] text-slate-400">{day.label.split(",")[0]}</p>
+                <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">{day.entries.length}</p>
+                <p className="text-[11px] text-slate-400 dark:text-slate-500">{day.label.split(",")[0]}</p>
               </div>
             </div>
           ))
         ) : (
-          <div className="flex h-full w-full items-center justify-center rounded-2xl border border-dashed border-slate-200 text-sm text-slate-500">
+          <div className="flex h-full w-full items-center justify-center rounded-2xl border border-dashed border-slate-200 text-sm text-slate-500 dark:border-slate-600 dark:text-slate-400">
             No activity data yet
           </div>
         )}
@@ -255,7 +255,7 @@ export function SummaryDashboard() {
     return (
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {Array.from({ length: 4 }).map((_, index) => (
-          <div key={index} className="h-36 animate-pulse rounded-3xl bg-slate-200" />
+          <div key={index} className="h-36 animate-pulse rounded-3xl bg-slate-200 dark:bg-slate-700" />
         ))}
       </div>
     );
@@ -263,34 +263,34 @@ export function SummaryDashboard() {
 
   if (!isAuthenticated) {
     return (
-      <div className="rounded-3xl border border-amber-200 bg-amber-50 p-8 text-center">
-        <p className="text-lg font-semibold text-amber-950">Login required</p>
-        <p className="mt-2 text-sm text-amber-700">Please sign in to view your summary dashboard.</p>
+      <div className="rounded-3xl border border-amber-200 bg-amber-50 p-8 text-center dark:border-amber-700 dark:bg-amber-900/20">
+        <p className="text-lg font-semibold text-amber-950 dark:text-amber-300">Login required</p>
+        <p className="mt-2 text-sm text-amber-700 dark:text-amber-400">Please sign in to view your summary dashboard.</p>
       </div>
     );
   }
 
   if (state === "error") {
     return (
-      <div className="rounded-3xl border border-rose-200 bg-rose-50 p-8 text-center">
-        <p className="text-lg font-semibold text-rose-950">Unable to load dashboard</p>
-        <p className="mt-2 text-sm text-rose-700">{errorMessage}</p>
+      <div className="rounded-3xl border border-rose-200 bg-rose-50 p-8 text-center dark:border-rose-700 dark:bg-rose-900/20">
+        <p className="text-lg font-semibold text-rose-950 dark:text-rose-300">Unable to load dashboard</p>
+        <p className="mt-2 text-sm text-rose-700 dark:text-rose-400">{errorMessage}</p>
       </div>
     );
   }
 
   return (
     <div className="space-y-6">
-      <section className="rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white via-white to-indigo-50/30 p-6 shadow-sm shadow-slate-200/60">
+      <section className="rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white via-white to-indigo-50/30 p-6 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:from-slate-800 dark:via-slate-800 dark:to-indigo-950/30 dark:shadow-slate-900/40">
         <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Personal insights</p>
-            <h3 className="mt-3 text-2xl font-bold tracking-tight text-slate-950">Your activity at a glance</h3>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600 dark:text-indigo-400">Personal insights</p>
+            <h3 className="mt-3 text-2xl font-bold tracking-tight text-slate-950 dark:text-slate-100">Your activity at a glance</h3>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600 dark:text-slate-400">
               Track diary volume, writing consistency, and weekly activity patterns from your saved entries.
             </p>
           </div>
-          <div className="rounded-2xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-700">
+          <div className="rounded-2xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-700 dark:border-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300">
             <span className="font-semibold">Latest update:</span>{" "}
             {latestEntry ? weekdayFormatter.format(new Date(latestEntry.createdAt)) : "No entries yet"}
           </div>
@@ -312,24 +312,24 @@ export function SummaryDashboard() {
       <section className="grid gap-6 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
         <ActivityBars summaries={dailySummaries} />
 
-        <div className="rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white to-slate-50/50 p-6 shadow-sm shadow-slate-200/60">
+        <div className="rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white to-slate-50/50 p-6 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:from-slate-800 dark:to-slate-800/50 dark:shadow-slate-900/40">
           <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Overview</p>
-              <h3 className="mt-2 text-xl font-bold text-slate-950">Daily and weekly summaries</h3>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">Overview</p>
+              <h3 className="mt-2 text-xl font-bold text-slate-950 dark:text-slate-100">Daily and weekly summaries</h3>
             </div>
-            <div className="grid grid-cols-2 rounded-2xl bg-slate-100 p-1 text-sm font-semibold text-slate-600">
+            <div className="grid grid-cols-2 rounded-2xl bg-slate-100 p-1 text-sm font-semibold text-slate-600 dark:bg-slate-700 dark:text-slate-300">
               <button
                 type="button"
                 onClick={() => setViewMode("daily")}
-                className={`cursor-pointer rounded-xl px-4 py-2 transition ${viewMode === "daily" ? "bg-white text-indigo-700 shadow-sm" : "hover:text-slate-900"}`}
+                className={`cursor-pointer rounded-xl px-4 py-2 transition ${viewMode === "daily" ? "bg-white text-indigo-700 shadow-sm dark:bg-slate-600 dark:text-indigo-400" : "hover:text-slate-900 dark:hover:text-slate-100"}`}
               >
                 Daily
               </button>
               <button
                 type="button"
                 onClick={() => setViewMode("weekly")}
-                className={`cursor-pointer rounded-xl px-4 py-2 transition ${viewMode === "weekly" ? "bg-white text-indigo-700 shadow-sm" : "hover:text-slate-900"}`}
+                className={`cursor-pointer rounded-xl px-4 py-2 transition ${viewMode === "weekly" ? "bg-white text-indigo-700 shadow-sm dark:bg-slate-600 dark:text-indigo-400" : "hover:text-slate-900 dark:hover:text-slate-100"}`}
               >
                 Weekly
               </button>
@@ -339,17 +339,17 @@ export function SummaryDashboard() {
           {viewMode === "daily" ? (
             <div className="space-y-3">
               {dailySummaries.slice(0, 5).map((day) => (
-                <article key={day.dateKey} className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                <article key={day.dateKey} className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-700 dark:bg-slate-800/70">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div>
-                      <p className="text-sm font-bold text-slate-950">{day.label}</p>
-                      <p className="mt-1 text-sm text-slate-500">
+                      <p className="text-sm font-bold text-slate-950 dark:text-slate-100">{day.label}</p>
+                      <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
                         {day.entries.length} entries · {day.wordCount} words · {day.readingMinutes} min read
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
                       {day.topKeywords.map((keyword) => (
-                        <span key={keyword} className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-slate-600 ring-1 ring-slate-200">
+                        <span key={keyword} className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-slate-600 ring-1 ring-slate-200 dark:bg-slate-700 dark:text-slate-300 dark:ring-slate-600">
                           {keyword}
                         </span>
                       ))}
@@ -357,43 +357,43 @@ export function SummaryDashboard() {
                   </div>
                 </article>
               ))}
-              {!dailySummaries.length ? <p className="rounded-2xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-500">No daily summaries yet.</p> : null}
+              {!dailySummaries.length ? <p className="rounded-2xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-500 dark:border-slate-600 dark:text-slate-400">No daily summaries yet.</p> : null}
             </div>
           ) : (
             <div className="space-y-3">
               {weeklySummaries.slice(0, 5).map((week) => (
-                <article key={week.weekKey} className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                <article key={week.weekKey} className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-700 dark:bg-slate-800/70">
                   <div className="mb-3 flex items-center justify-between gap-3">
                     <div>
-                      <p className="text-sm font-bold text-slate-950">{week.label}</p>
-                      <p className="mt-1 text-sm text-slate-500">{week.activeDays} active days · {week.entries.length} entries</p>
+                      <p className="text-sm font-bold text-slate-950 dark:text-slate-100">{week.label}</p>
+                      <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{week.activeDays} active days · {week.entries.length} entries</p>
                     </div>
-                    <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 ring-1 ring-indigo-100">
+                    <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 ring-1 ring-indigo-100 dark:bg-indigo-900/30 dark:text-indigo-400 dark:ring-indigo-700">
                       {week.wordCount} words
                     </span>
                   </div>
-                  <div className="h-2 rounded-full bg-slate-200">
+                  <div className="h-2 rounded-full bg-slate-200 dark:bg-slate-600">
                     <div
                       className="h-2 rounded-full bg-gradient-to-r from-indigo-500 to-sky-400"
                       style={{ width: `${Math.min((week.activeDays / 7) * 100, 100)}%` }}
                     />
                   </div>
-                  <p className="mt-3 text-xs text-slate-500">Average {week.averageWords} words per active day</p>
+                  <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">Average {week.averageWords} words per active day</p>
                 </article>
               ))}
-              {!weeklySummaries.length ? <p className="rounded-2xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-500">No weekly summaries yet.</p> : null}
+              {!weeklySummaries.length ? <p className="rounded-2xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-500 dark:border-slate-600 dark:text-slate-400">No weekly summaries yet.</p> : null}
             </div>
           )}
         </div>
       </section>
 
-      <section className="rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white to-slate-50/50 p-6 shadow-sm shadow-slate-200/60">
+      <section className="rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white to-slate-50/50 p-6 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:from-slate-800 dark:to-slate-800/50 dark:shadow-slate-900/40">
         <div className="mb-5 flex items-center justify-between gap-3">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Data source</p>
-            <h3 className="mt-2 text-xl font-bold text-slate-950">Recent diary entries used</h3>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">Data source</p>
+            <h3 className="mt-2 text-xl font-bold text-slate-950 dark:text-slate-100">Recent diary entries used</h3>
           </div>
-          <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+          <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 dark:bg-slate-700 dark:text-slate-300">
             {sortedEntries.length} entries loaded
           </span>
         </div>
@@ -401,13 +401,13 @@ export function SummaryDashboard() {
         {sortedEntries.length ? (
           <div className="grid gap-3 md:grid-cols-2">
             {sortedEntries.slice(0, 4).map((entry) => (
-              <article key={entry.id} className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+              <article key={entry.id} className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-700 dark:bg-slate-800/70">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <p className="text-sm font-bold text-slate-950">{entry.title}</p>
-                    <p className="mt-1 line-clamp-2 text-sm leading-6 text-slate-600">{entry.content}</p>
+                    <p className="text-sm font-bold text-slate-950 dark:text-slate-100">{entry.title}</p>
+                    <p className="mt-1 line-clamp-2 text-sm leading-6 text-slate-600 dark:text-slate-400">{entry.content}</p>
                   </div>
-                  <span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-xs font-medium text-slate-500 ring-1 ring-slate-200">
+                  <span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-xs font-medium text-slate-500 ring-1 ring-slate-200 dark:bg-slate-700 dark:text-slate-400 dark:ring-slate-600">
                     {weekdayFormatter.format(new Date(entry.createdAt))}
                   </span>
                 </div>
@@ -415,7 +415,7 @@ export function SummaryDashboard() {
             ))}
           </div>
         ) : (
-          <p className="rounded-2xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-500">
+          <p className="rounded-2xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-500 dark:border-slate-600 dark:text-slate-400">
             Create diary entries to populate this dashboard.
           </p>
         )}
