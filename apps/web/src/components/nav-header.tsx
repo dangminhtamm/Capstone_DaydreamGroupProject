@@ -4,6 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 
+import { BrainLogo } from "@/components/brain-logo";
+
 const navLinks = [
   { href: "/", label: "Home" },
   { href: "/diary", label: "New Entry" },
@@ -18,12 +20,7 @@ export function NavHeader() {
     <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/80 backdrop-blur-sm">
       <div className="mx-auto flex h-16 max-w-5xl items-center justify-between px-4">
         {/* Logo */}
-        <Link href="/" className="flex items-center gap-2">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 text-white font-bold text-sm">
-            DD
-          </div>
-          <span className="font-semibold text-slate-900">DayDreamer</span>
-        </Link>
+        <BrainLogo size="sm" variant="badge" showText={true} href="/" />
 
         {/* Navigation */}
         <nav className="flex items-center gap-1">

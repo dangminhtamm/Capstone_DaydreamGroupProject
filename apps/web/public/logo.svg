@@ -1,0 +1,153 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100%" height="100%">
+  <defs>
+    <!-- Main Neon Gradient -->
+    <linearGradient id="brain-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#00F0FF" />
+      <stop offset="35%" stop-color="#0072FF" />
+      <stop offset="65%" stop-color="#7B2CBF" />
+      <stop offset="100%" stop-color="#FF007F" />
+    </linearGradient>
+
+    <!-- Node Glow Filter (for highly intense points of light) -->
+    <filter id="glow-blur" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="1.5" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+    
+    <filter id="glow-deep" x="-100%" y="-100%" width="300%" height="300%">
+      <feGaussianBlur stdDeviation="4" result="blur" />
+    </filter>
+
+    <!-- Radial Gradients for Node Halos -->
+    <radialGradient id="halo-cyan" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#00F0FF" stop-opacity="0.8" />
+      <stop offset="50%" stop-color="#00F0FF" stop-opacity="0.3" />
+      <stop offset="100%" stop-color="#00F0FF" stop-opacity="0" />
+    </radialGradient>
+    <radialGradient id="halo-blue" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#0072FF" stop-opacity="0.8" />
+      <stop offset="50%" stop-color="#0072FF" stop-opacity="0.3" />
+      <stop offset="100%" stop-color="#0072FF" stop-opacity="0" />
+    </radialGradient>
+    <radialGradient id="halo-purple" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#7B2CBF" stop-opacity="0.8" />
+      <stop offset="50%" stop-color="#7B2CBF" stop-opacity="0.3" />
+      <stop offset="100%" stop-color="#7B2CBF" stop-opacity="0" />
+    </radialGradient>
+    <radialGradient id="halo-pink" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#FF007F" stop-opacity="0.8" />
+      <stop offset="50%" stop-color="#FF007F" stop-opacity="0.3" />
+      <stop offset="100%" stop-color="#FF007F" stop-opacity="0" />
+    </radialGradient>
+  </defs>
+
+  <style>
+    .pulse-glow {
+      animation: pulse 4s ease-in-out infinite alternate;
+    }
+    .node-pulse {
+      animation: node-pulse 3s ease-in-out infinite alternate;
+    }
+    @keyframes pulse {
+      0% { opacity: 0.15; }
+      100% { opacity: 0.35; }
+    }
+    @keyframes node-pulse {
+      0% { transform: scale(1); opacity: 0.7; }
+      100% { transform: scale(1.15); opacity: 1; }
+    }
+  </style>
+
+  <!-- BACKGROUND DEEP GLOW (Subtle ambient backlight to make it pop) -->
+  <g filter="url(#glow-deep)" class="pulse-glow" opacity="0.25">
+    <path d="M 46,60 L 37,60 L 23,49 L 32,33 L 49,31 L 66,33 L 77,49 L 61,60 L 54,60 Z" fill="url(#brain-gradient)" />
+  </g>
+
+  <!-- SYNAPSES & CONNECTIONS -->
+  <g fill="none">
+    <!-- 1. Deep Neon Glow (Layer 1 - Thickest blurred) -->
+    <g stroke="url(#brain-gradient)" stroke-linecap="round" stroke-linejoin="round" opacity="0.25" filter="url(#glow-blur)">
+      <!-- Outer cortex path -->
+      <path d="M 46,60 L 41,60 L 41,64 L 37,64 L 37,60 L 25,60 L 23,49 L 26,38 L 32,33 L 43,28 L 49,31 L 58,28 L 66,33 L 74,38 L 77,49 L 74,60 L 61,60 L 54,60" stroke-width="6" />
+      <!-- Stem loop -->
+      <path d="M 48,60 L 48,74 A 2,2 0 0,0 52,74 L 52,60" stroke-width="6" />
+      <!-- Synaptic lines (Left Hemisphere) -->
+      <path d="M 23,49 L 44,48 M 23,49 L 32,33 M 37,60 L 44,48 M 32,33 L 44,48 M 49,31 L 44,48 M 44,48 L 47,60" stroke-width="4" />
+      <!-- Synaptic lines (Right Hemisphere) -->
+      <path d="M 49,31 L 60,45 M 60,45 L 66,33 M 60,45 L 77,49 M 60,45 L 61,60 M 60,45 L 53,60" stroke-width="4" />
+      <!-- Hemispheric connection -->
+      <path d="M 44,48 L 60,45" stroke-width="5" />
+    </g>
+
+    <!-- 2. Medium Glow (Layer 2 - Medium width) -->
+    <g stroke="url(#brain-gradient)" stroke-linecap="round" stroke-linejoin="round" opacity="0.5" filter="url(#glow-blur)">
+      <path d="M 46,60 L 41,60 L 41,64 L 37,64 L 37,60 L 25,60 L 23,49 L 26,38 L 32,33 L 43,28 L 49,31 L 58,28 L 66,33 L 74,38 L 77,49 L 74,60 L 61,60 L 54,60" stroke-width="3" />
+      <path d="M 48,60 L 48,74 A 2,2 0 0,0 52,74 L 52,60" stroke-width="3" />
+      <path d="M 23,49 L 44,48 M 23,49 L 32,33 M 37,60 L 44,48 M 32,33 L 44,48 M 49,31 L 44,48 M 44,48 L 47,60" stroke-width="2" />
+      <path d="M 49,31 L 60,45 M 60,45 L 66,33 M 60,45 L 77,49 M 60,45 L 61,60 M 60,45 L 53,60" stroke-width="2" />
+      <path d="M 44,48 L 60,45" stroke-width="2.5" />
+    </g>
+
+    <!-- 3. Crisp Core (Layer 3 - Main sharp lines) -->
+    <g stroke="url(#brain-gradient)" stroke-linecap="round" stroke-linejoin="round" opacity="0.95">
+      <path d="M 46,60 L 41,60 L 41,64 L 37,64 L 37,60 L 25,60 L 23,49 L 26,38 L 32,33 L 43,28 L 49,31 L 58,28 L 66,33 L 74,38 L 77,49 L 74,60 L 61,60 L 54,60" stroke-width="1.5" />
+      <path d="M 48,60 L 48,74 A 2,2 0 0,0 52,74 L 52,60" stroke-width="1.5" />
+      <path d="M 23,49 L 44,48 M 23,49 L 32,33 M 37,60 L 44,48 M 32,33 L 44,48 M 49,31 L 44,48 M 44,48 L 47,60" stroke-width="1" />
+      <path d="M 49,31 L 60,45 M 60,45 L 66,33 M 60,45 L 77,49 M 60,45 L 61,60 M 60,45 L 53,60" stroke-width="1" />
+      <path d="M 44,48 L 60,45" stroke-width="1.25" />
+    </g>
+  </g>
+
+  <!-- GLOWING SYNAPTIC NODES (Points of light) -->
+  <g class="node-pulse" style="transform-origin: 50% 50%;">
+    
+    <!-- L1 Node: Cyan Far-Left (23, 49) -->
+    <circle cx="23" cy="49" r="6" fill="url(#halo-cyan)" />
+    <circle cx="23" cy="49" r="2.5" fill="#00F0FF" />
+    <circle cx="23" cy="49" r="1" fill="#FFFFFF" />
+
+    <!-- L2 Node: Cyan Bottom-Left (37, 60) -->
+    <circle cx="37" cy="60" r="5" fill="url(#halo-cyan)" />
+    <circle cx="37" cy="60" r="2" fill="#00F0FF" />
+    <circle cx="37" cy="60" r="0.8" fill="#FFFFFF" />
+
+    <!-- L3 Node: Sky Blue Top-Left (32, 33) -->
+    <circle cx="32" cy="33" r="5.5" fill="url(#halo-cyan)" />
+    <circle cx="32" cy="33" r="2.2" fill="#00D2FF" />
+    <circle cx="32" cy="33" r="0.8" fill="#FFFFFF" />
+
+    <!-- L4 Node: Bright Blue Center-Left (44, 48) -->
+    <circle cx="44" cy="48" r="6" fill="url(#halo-blue)" />
+    <circle cx="44" cy="48" r="2.5" fill="#0072FF" />
+    <circle cx="44" cy="48" r="1" fill="#FFFFFF" />
+
+    <!-- L5 Node: Indigo/Purple Top-Center (49, 31) -->
+    <circle cx="49" cy="31" r="5.5" fill="url(#halo-purple)" />
+    <circle cx="49" cy="31" r="2.2" fill="#7B2CBF" />
+    <circle cx="49" cy="31" r="0.8" fill="#FFFFFF" />
+
+    <!-- R1 Node: Violet/Magenta Top-Right (66, 33) -->
+    <circle cx="66" cy="33" r="5.5" fill="url(#halo-pink)" />
+    <circle cx="66" cy="33" r="2.2" fill="#C447FF" />
+    <circle cx="66" cy="33" r="0.8" fill="#FFFFFF" />
+
+    <!-- R2 Node: Magenta Center-Right (60, 45) -->
+    <circle cx="60" cy="45" r="5.5" fill="url(#halo-purple)" />
+    <circle cx="60" cy="45" r="2.2" fill="#E033FF" />
+    <circle cx="60" cy="45" r="0.8" fill="#FFFFFF" />
+
+    <!-- R3 Node: Hot Pink Far-Right (77, 49) -->
+    <circle cx="77" cy="49" r="6" fill="url(#halo-pink)" />
+    <circle cx="77" cy="49" r="2.5" fill="#FF007F" />
+    <circle cx="77" cy="49" r="1" fill="#FFFFFF" />
+
+    <!-- R4 Node: Hot Pink Bottom-Right (61, 60) -->
+    <circle cx="61" cy="60" r="5" fill="url(#halo-pink)" />
+    <circle cx="61" cy="60" r="2" fill="#FF007F" />
+    <circle cx="61" cy="60" r="0.8" fill="#FFFFFF" />
+
+  </g>
+</svg>

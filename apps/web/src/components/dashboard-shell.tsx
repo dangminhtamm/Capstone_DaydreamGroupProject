@@ -6,6 +6,7 @@ import Image from "next/image";
 import { ReactNode, useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
+import { BrainLogo } from "@/components/brain-logo";
 
 type DashboardShellProps = {
   children: ReactNode;
@@ -105,15 +106,7 @@ export function DashboardShell({ children, title, description }: DashboardShellP
         <div className="flex h-full flex-col">
           {/* Logo */}
           <div className="border-b border-slate-200 px-6 py-5 dark:border-slate-700">
-            <Link href="/" className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 text-white font-bold text-lg shadow-md">
-                D
-              </div>
-              <div>
-                <p className="text-xs font-medium text-slate-500 uppercase tracking-wide dark:text-slate-400">DayDreamer</p>
-                <h1 className="text-base font-bold text-slate-900 dark:text-slate-100">Second Brain</h1>
-              </div>
-            </Link>
+            <BrainLogo size="sm" variant="badge" showText={true} subText="Second Brain" href="/" />
           </div>
 
           {/* Navigation */}

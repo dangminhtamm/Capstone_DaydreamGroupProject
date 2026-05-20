@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
+import { BrainLogo } from "@/components/brain-logo";
 
 export default function LoginPage() {
   const { signInWithEmail, signInWithGoogle, resetPassword, isAuthenticated } = useAuth();
@@ -55,12 +56,7 @@ export default function LoginPage() {
       {/* Minimal header */}
       <header className="border-b border-slate-200 bg-white/80 backdrop-blur-sm dark:border-slate-700 dark:bg-slate-900/80">
         <div className="mx-auto flex h-16 max-w-5xl items-center justify-between px-6">
-          <Link href="/" className="flex items-center gap-2">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 text-white font-bold text-sm">
-              DD
-            </div>
-            <span className="font-semibold text-slate-900 dark:text-slate-100">DayDreamer</span>
-          </Link>
+          <BrainLogo size="sm" variant="badge" showText={true} href="/" />
           <button
             onClick={toggleTheme}
             className="cursor-pointer rounded-xl p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
@@ -84,8 +80,8 @@ export default function LoginPage() {
         <div className="w-full max-w-md">
           {/* Logo & title */}
           <div className="mb-8 text-center">
-            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white font-bold text-lg shadow-lg shadow-indigo-200 dark:shadow-indigo-900/40">
-              DD
+            <div className="flex justify-center">
+              <BrainLogo size="lg" variant="badge" />
             </div>
             <h1 className="mt-4 text-2xl font-bold text-slate-900 dark:text-slate-100">
               Welcome back

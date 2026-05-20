@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
+import { BrainLogo } from "@/components/brain-logo";
 
 export default function Home() {
   const { user, isAuthenticated, isLoading, signInWithGoogle } = useAuth();
@@ -14,12 +15,7 @@ export default function Home() {
       {/* Header */}
       <header className="border-b border-slate-200 bg-white/80 backdrop-blur-sm dark:border-slate-700 dark:bg-slate-900/80">
         <div className="mx-auto flex h-16 max-w-5xl items-center justify-between px-6">
-          <div className="flex items-center gap-2">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 text-white font-bold text-sm">
-              DD
-            </div>
-            <span className="font-semibold text-slate-900 dark:text-slate-100">DayDreamer</span>
-          </div>
+          <BrainLogo size="sm" variant="badge" showText={true} href="/" />
 
           <div className="flex items-center gap-3">
             {/* Theme toggle */}
