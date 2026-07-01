@@ -58,7 +58,7 @@ const datasetPath =
     "../evaluation/memory-evaluation.dataset.json",
   );
 const evalLimit = process.env.MEMORY_RETRIEVAL_EVAL_LIMIT
-  ? Number(process.env.MEMORY_RETRIEVAL_EVAL_LIMIT)
+  ? parseEvalLimit(process.env.MEMORY_RETRIEVAL_EVAL_LIMIT)
   : undefined;
 const retrievalLimit = Number(process.env.MEMORY_RETRIEVAL_EVAL_SOURCE_LIMIT ?? 8);
 const noDataSimilarityThreshold = Number(
@@ -164,6 +164,7 @@ if (!process.env.GEMINI_API_KEY) {
       };
 
       console.log(JSON.stringify({ summary, results }, null, 2));
+      failIfRequested(summary, results);
     }
   } finally {
     await prisma.$disconnect();
@@ -267,4 +268,32 @@ function average(values: number[]): number {
 
 function elapsedSince(start: number): number {
   return Math.round(performance.now() - start);
+}
+
+function parseEvalLimit(value: string): number | undefined {
+  if (value.toLowerCase() === "all") return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function failIfRequested(
+  summary: { total: number; sourceRelevant: number; noDataCorrect: number; errors: number },
+  results: RetrievalEvalResult[],
+): void {
+  if (process.env.MEMORY_EVAL_FAIL_ON_ERROR !== "1") return;
+
+  const noDataTotal = results.filter((row) => row.noDataCorrect !== null).length;
+  const failed = results.filter((row) => !row.sourceRelevant || row.error);
+  const noDataFailed = results.filter((row) => row.noDataCorrect === false);
+
+  if (
+    summary.errors > 0 ||
+    summary.sourceRelevant < summary.total ||
+    summary.noDataCorrect < noDataTotal
+  ) {
+    console.error(
+      `Retrieval evaluation failed: ${failed.length} source failures, ${noDataFailed.length} no-data failures, ${summary.errors} errors.`,
+    );
+    process.exitCode = 1;
+  }
 }

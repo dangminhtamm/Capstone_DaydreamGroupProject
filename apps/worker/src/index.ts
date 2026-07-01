@@ -5,8 +5,10 @@ import {
     SummaryPipelineJob,
     WeeklySummaryPipelineJob,
     MonthlySummaryPipelineJob,
+    YearlySummaryPipelineJob,
     SyncCalendarJob,
-    SemanticLinkingJob
+    SemanticLinkingJob,
+    DataIngestionJob
 } from './jobs';
 
 console.log('===================================================');
@@ -21,10 +23,14 @@ try {
     // Data Linking Pipeline
     SemanticLinkingJob.startCron();
 
+    // Universal Data Ingestion
+    DataIngestionJob.startCron();
+
     // Data Summarization Pipeline
     SummaryPipelineJob.startCron();
     WeeklySummaryPipelineJob.startCron();
     MonthlySummaryPipelineJob.startCron();
+    YearlySummaryPipelineJob.startCron();
 
     console.log('===================================================');
     console.log('All background jobs have been scheduled successfully!');

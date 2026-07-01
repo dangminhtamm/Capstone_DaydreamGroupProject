@@ -1,6 +1,15 @@
 import { NotFoundException } from '@nestjs/common';
 import { CalendarService } from './calendar.service';
 
+jest.mock('@second-brain/ai', () => ({
+  indexMemoryFromCalendar: jest.fn(),
+}));
+
+jest.mock('@second-brain/db', () => ({
+  insertMemoryChunks: jest.fn(),
+  pruneMemoryChunksForSource: jest.fn(),
+}));
+
 describe('CalendarService', () => {
   const prisma = {
     user: {

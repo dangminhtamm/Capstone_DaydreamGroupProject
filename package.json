@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "scripts": {
     "dev": "pnpm --recursive --parallel --if-present run dev",
-    "build": "pnpm --recursive --if-present run build"
+    "build": "pnpm --recursive --if-present run build",
+    "ci:memory-eval": "pnpm --filter @second-brain/ai eval:retrieval:ci && pnpm --filter @second-brain/ai eval:answer:ci"
   },
   "packageManager": "pnpm@10.33.0",
   "devDependencies": {

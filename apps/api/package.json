@@ -21,6 +21,7 @@
     "test:e2e": "jest --config ./test/jest-e2e.json"
   },
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.4",
     "@nestjs/core": "^11.0.1",
@@ -80,6 +81,10 @@
     "testRegex": ".*\\.spec\\.ts$",
     "transform": {
       "^.+\\.(t|j)s$": "ts-jest"
+    },
+    "moduleNameMapper": {
+      "^@second-brain/ai$": "<rootDir>/../../../packages/ai/src/index.ts",
+      "^@second-brain/db$": "<rootDir>/../../../packages/db/src/index.ts"
     },
     "collectCoverageFrom": [
       "**/*.(t|j)s"

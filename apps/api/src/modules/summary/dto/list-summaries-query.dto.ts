@@ -1,7 +1,7 @@
 import { Type } from 'class-transformer';
 import { IsIn, IsInt, IsISO8601, IsOptional, Max, Min } from 'class-validator';
 
-export const SUMMARY_TYPES = ['daily', 'weekly', 'monthly'] as const;
+export const SUMMARY_TYPES = ['daily', 'weekly', 'monthly', 'yearly'] as const;
 export type SummaryType = (typeof SUMMARY_TYPES)[number];
 
 export class ListSummariesQueryDto {

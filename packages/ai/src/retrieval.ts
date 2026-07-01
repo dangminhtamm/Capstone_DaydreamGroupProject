@@ -29,7 +29,7 @@ export interface MemorySearchHit {
   distance: number | null;
   vectorSimilarity: number;
   lexicalScore: number;
-  retrievalMode: "vector" | "lexical" | "hybrid";
+  retrievalMode: "vector" | "lexical" | "hybrid" | "temporal";
   similarity: number;
 }
 
@@ -67,7 +67,7 @@ export async function retrieveMemoryWithEmbedding(
 
   const limit = Math.min(filters.limit ?? 8, 20);
   const candidateLimit = Math.max(limit * 5, 50);
-  const maxDistance = filters.maxDistance ?? 0.5;
+  const maxDistance = Math.min(filters.maxDistance ?? 0.42, 0.55);
   const vectorWeight = clampWeight(filters.vectorWeight ?? 0.7);
   const lexicalWeight = clampWeight(filters.lexicalWeight ?? 0.3);
   const lexicalOnlyWeight = 0.75;
@@ -223,7 +223,7 @@ export async function retrieveMemoryWithEmbedding(
           similarity
         FROM scored
         WHERE distance <= ${maxDistance}
-          OR "lexicalScore" >= 0.15
+          OR "lexicalScore" >= 0.65
         ORDER BY similarity DESC, "occurredAt" DESC
         LIMIT ${limit};
       `;
@@ -235,11 +235,13 @@ export async function retrieveMemoryWithEmbedding(
 
   // Post-filter: remove lexical-only hits with low scores that are likely noise.
   // These occur when a keyword happens to match but the semantic meaning is unrelated.
-  const MIN_LEXICAL_ONLY_SIMILARITY = 0.35;
-  const MIN_OVERALL_SIMILARITY = 0.3;
-  const MIN_VECTOR_ONLY_SIMILARITY = 0.45;
+  const MIN_LEXICAL_ONLY_SIMILARITY = 0.6;
+  const MIN_LEXICAL_ONLY_SCORE = 0.75;
+  const MIN_OVERALL_SIMILARITY = 0.45;
+  const MIN_VECTOR_ONLY_SIMILARITY = 0.58;
+  const MIN_HYBRID_VECTOR_SIMILARITY = 0.35;
 
-  return rawResults.filter((hit) => {
+  const strictResults = rawResults.filter((hit) => {
     // Always filter out very low similarity hits regardless of mode
     if (hit.similarity < MIN_OVERALL_SIMILARITY) return false;
 
@@ -253,13 +255,93 @@ export async function retrieveMemoryWithEmbedding(
     // Lexical-only hits with low scores are usually false positives
     if (
       hit.retrievalMode === "lexical" &&
-      hit.similarity < MIN_LEXICAL_ONLY_SIMILARITY
+      (hit.similarity < MIN_LEXICAL_ONLY_SIMILARITY ||
+        hit.lexicalScore < MIN_LEXICAL_ONLY_SCORE)
+    ) {
+      return false;
+    }
+
+    if (
+      hit.retrievalMode === "hybrid" &&
+      hit.vectorSimilarity < MIN_HYBRID_VECTOR_SIMILARITY
     ) {
       return false;
     }
 
     return true;
   });
+
+  if (strictResults.length || !shouldUseTemporalFallback(filters)) {
+    return strictResults;
+  }
+
+  return retrieveTemporalFallback(dbClient, whereClause, vectorString, limit, {
+    sourceTypeBoost,
+    chunkTypeBoost,
+  });
+}
+
+async function retrieveTemporalFallback(
+  dbClient: any,
+  whereClause: Prisma.Sql,
+  vectorString: string,
+  limit: number,
+  boosts: {
+    sourceTypeBoost: Prisma.Sql;
+    chunkTypeBoost: Prisma.Sql;
+  },
+): Promise<MemorySearchHit[]> {
+  return dbClient.$queryRaw<MemorySearchHit[]>`
+    SELECT
+      memory_chunks.id,
+      memory_chunks.source_type AS "sourceType",
+      memory_chunks.source_id AS "sourceId",
+      memory_chunks.chunk_type AS "chunkType",
+      memory_chunks.text,
+      memory_chunks.evidence,
+      memory_chunks.metadata,
+      memory_chunks.occurred_at AS "occurredAt",
+      CASE
+        WHEN memory_chunks.embedding IS NULL THEN NULL
+        ELSE memory_chunks.embedding <=> ${vectorString}::vector
+      END AS distance,
+      CASE
+        WHEN memory_chunks.embedding IS NULL THEN 0
+        ELSE GREATEST(0, 1 - (memory_chunks.embedding <=> ${vectorString}::vector))
+      END AS "vectorSimilarity",
+      0 AS "lexicalScore",
+      'temporal' AS "retrievalMode",
+      LEAST(
+        1.0,
+        0.64
+          + ${boosts.sourceTypeBoost}
+          + ${boosts.chunkTypeBoost}
+          + CASE
+              WHEN memory_chunks.embedding IS NULL THEN 0
+              ELSE GREATEST(0, 1 - (memory_chunks.embedding <=> ${vectorString}::vector)) * 0.1
+            END
+      ) AS similarity
+    FROM memory_chunks
+    ${whereClause}
+    ORDER BY
+      similarity DESC,
+      memory_chunks.occurred_at DESC,
+      memory_chunks.chunk_index ASC
+    LIMIT ${limit};
+  `;
+}
+
+function shouldUseTemporalFallback(filters: RetrievalFilters): boolean {
+  if (!filters.startDate || !filters.endDate) return false;
+
+  const start = filters.startDate.getTime();
+  const end = filters.endDate.getTime();
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
+    return false;
+  }
+
+  const maxRangeMs = 36 * 60 * 60 * 1000;
+  return end - start <= maxRangeMs;
 }
 
 function clampWeight(value: number): number {

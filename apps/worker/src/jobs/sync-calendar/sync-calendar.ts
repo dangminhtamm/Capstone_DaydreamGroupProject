@@ -1,6 +1,8 @@
 import { prisma } from '../../lib/prisma';
 import { google, calendar_v3 } from 'googleapis';
 import * as cron from 'node-cron';
+import { indexMemoryFromCalendar } from '@second-brain/ai';
+import { insertMemoryChunks, pruneMemoryChunksForSource } from '@second-brain/db';
 
 export class SyncCalendarJob {
 
@@ -71,7 +73,12 @@ export class SyncCalendarJob {
         const normalizedData = this.normalizeEvent(event, user.id);
 
         return prisma.calendarEvent.upsert({
-          where: { external_id: normalizedData.external_id },
+          where: {
+            user_id_external_id: {
+              user_id: normalizedData.user_id,
+              external_id: normalizedData.external_id,
+            },
+          },
           update: {
             title: normalizedData.title,
             description: normalizedData.description,
@@ -91,8 +98,34 @@ export class SyncCalendarJob {
         });
       });
 
-      await Promise.all(upsertPromises);
-      console.log(`[Worker - Calendar Sync] Success: Synced ${rawEvents.length} events for User ${user.id}`);
+      const syncedEvents = await Promise.all(upsertPromises);
+      const indexingResult = await indexMemoryFromCalendar({
+        userId: user.id,
+        events: syncedEvents.map((event) => ({
+          eventId: event.id,
+          externalId: event.external_id,
+          title: event.title,
+          description: event.description,
+          startTime: event.start_time,
+          endTime: event.end_time,
+          htmlLink: event.html_link,
+        })),
+        insertChunks: (chunks) =>
+          prisma.$transaction(async (tx: any) => {
+            await insertMemoryChunks(tx, chunks);
+            if (chunks.length > 0) {
+              await pruneMemoryChunksForSource(tx, {
+                userId: chunks[0].userId,
+                sourceType: chunks[0].sourceType,
+                sourceId: chunks[0].sourceId,
+                keepChunkCount: chunks.length,
+              });
+            }
+          }),
+      });
+      console.log(
+        `[Worker - Calendar Sync] Success: Synced ${rawEvents.length} events and indexed ${indexingResult.totalChunkCount} chunks for User ${user.id}`,
+      );
 
     } catch (error: any) {
       console.error(`[Worker - Calendar Sync] Error for User ${user.id}: ${error.message}`);

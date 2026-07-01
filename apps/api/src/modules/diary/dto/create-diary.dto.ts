@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsOptional, IsArray } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsArray, IsDateString } from 'class-validator';
 
 export class CreateDiaryDto {
   @IsString()
@@ -13,4 +13,8 @@ export class CreateDiaryDto {
   @IsOptional()
   @IsString({ each: true })
   attachments?: string[]; // Array of URLs from your /upload API
+
+  @IsDateString()
+  @IsOptional()
+  entryDate?: string;
 }

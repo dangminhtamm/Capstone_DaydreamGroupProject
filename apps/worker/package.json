@@ -12,8 +12,10 @@
     "@google/generative-ai": "^0.24.1",
     "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
+    "@second-brain/ai": "workspace:*",
     "@second-brain/db": "workspace:*",
     "@second-brain/shared": "workspace:*",
+    "@supabase/supabase-js": "^2.108.1",
     "dotenv": "^17.4.2",
     "googleapis": "^171.4.0",
     "node-cron": "^4.2.1"

@@ -65,6 +65,39 @@ describe('DiaryService', () => {
     });
   });
 
+  it('stores an explicit diary entry date when provided', async () => {
+    const createdAt = new Date('2026-05-18T09:00:00.000Z');
+    const explicitEntryDate = '2026-05-12T12:00:00.000Z';
+    prisma.user.findUnique.mockResolvedValue({ id: 'user-1' });
+    prisma.diaryEntry.create.mockResolvedValue({
+      id: 'diary-2',
+      raw_text: 'Backdated\n\nContent',
+      status: 'published',
+      created_at: createdAt,
+      updated_at: createdAt,
+      entry_date: new Date(explicitEntryDate),
+    });
+
+    const result = await service.create('supabase-user-1', {
+      title: 'Backdated',
+      content: 'Content',
+      entryDate: explicitEntryDate,
+    });
+
+    expect(prisma.diaryEntry.create).toHaveBeenCalledWith({
+      data: {
+        raw_text: 'Backdated\n\nContent',
+        user_id: 'user-1',
+        status: 'published',
+        entry_date: new Date(explicitEntryDate),
+      },
+    });
+    expect(result).toMatchObject({
+      id: 'diary-2',
+      entryDate: explicitEntryDate,
+    });
+  });
+
   it('does not create a diary when the authenticated user is missing', async () => {
     prisma.user.findUnique.mockResolvedValue(null);
 

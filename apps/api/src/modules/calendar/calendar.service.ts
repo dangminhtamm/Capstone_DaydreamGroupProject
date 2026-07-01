@@ -1,4 +1,6 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { indexMemoryFromCalendar } from '@second-brain/ai';
+import { insertMemoryChunks, pruneMemoryChunksForSource } from '@second-brain/db';
 import { google, calendar_v3 } from 'googleapis';
 import { PrismaService } from '../../prisma/prisma.service';
 
@@ -73,7 +75,12 @@ export class CalendarService {
                 const normalizedData = this.normalizeEvent(event, user.id);
 
                 return this.prisma.calendarEvent.upsert({
-                    where: { external_id: normalizedData.external_id },
+                    where: {
+                        user_id_external_id: {
+                            user_id: normalizedData.user_id,
+                            external_id: normalizedData.external_id,
+                        },
+                    },
                     update: {
                         title: normalizedData.title,
                         description: normalizedData.description,
@@ -93,11 +100,38 @@ export class CalendarService {
                 });
             });
 
-            await Promise.all(upsertPromises);
+            const syncedEvents = await Promise.all(upsertPromises);
+            const indexingResult = await indexMemoryFromCalendar({
+                userId: user.id,
+                events: syncedEvents.map((event) => ({
+                    eventId: event.id,
+                    externalId: event.external_id,
+                    title: event.title,
+                    description: event.description,
+                    startTime: event.start_time,
+                    endTime: event.end_time,
+                    htmlLink: event.html_link,
+                })),
+                insertChunks: (chunks) =>
+                    this.prisma.$transaction(async (tx) => {
+                        await insertMemoryChunks(tx as any, chunks);
+                        if (chunks.length > 0) {
+                            await pruneMemoryChunksForSource(tx as any, {
+                                userId: chunks[0].userId,
+                                sourceType: chunks[0].sourceType,
+                                sourceId: chunks[0].sourceId,
+                                keepChunkCount: chunks.length,
+                            });
+                        }
+                    }),
+            });
 
             return {
                 message: 'Sync completed successfully',
                 syncedCount: rawEvents.length,
+                indexedEventCount: indexingResult.indexedEventCount,
+                memoryChunkCount: indexingResult.totalChunkCount,
+                indexErrors: indexingResult.errors,
             };
 
         } catch (error) {
@@ -113,7 +147,7 @@ export class CalendarService {
         });
 
         if (!user) {
-            throw new Error('User not found');
+            throw new NotFoundException('User not found');
         }
 
         const timeMin = new Date();

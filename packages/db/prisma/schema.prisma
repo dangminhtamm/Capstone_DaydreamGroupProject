@@ -18,7 +18,7 @@ datasource db {
 model CalendarEvent {
   id          String   @id @default(uuid())
   user_id     String
-  external_id String   @unique // Google Calendar Event ID
+  external_id String // Google Calendar Event ID, unique per user
   title       String
   start_time  DateTime
   end_time    DateTime
@@ -34,6 +34,8 @@ model CalendarEvent {
   user        User        @relation(fields: [user_id], references: [id], onDelete: Cascade)
   diary_entry DiaryEntry[]
 
+  @@unique([user_id, external_id], map: "calendar_events_user_external_key")
+  @@index([user_id, start_time], map: "calendar_events_user_start_time_idx")
   @@map("calendar_events")
 }
 
@@ -50,6 +52,8 @@ model Summary {
   // Relations
   user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
+  @@unique([user_id, summary_type, period_start, period_end], map: "summaries_user_type_period_key")
+  @@index([user_id, period_start], map: "summaries_user_period_start_idx")
   @@map("summaries")
 }
 
@@ -104,6 +108,7 @@ model User {
   summaries       Summary[]
   calendar_events CalendarEvent[]
   gmail_messages  GmailMessage[]
+  search_history  SearchHistory[]
 
   @@map("users")
 }
@@ -139,6 +144,28 @@ model Attachment {
   diary_entry DiaryEntry @relation(fields: [diary_entry_id], references: [id], onDelete: Cascade)
 
   @@map("attachments")
+}
+
+model SearchHistory {
+  id               String   @id @default(uuid())
+  user_id          String
+  question         String   @db.Text
+  answer           String   @db.Text
+  confidence       String   // 'high', 'medium', 'low'
+  sources_json     String?  @db.Text // Serialized citation array
+  analytics_json   String?  @db.Text // Serialized analytics object
+  response_language String  @default("en")
+  token_count      Int      @default(0)
+
+  created_at DateTime @default(now())
+  expires_at DateTime // Cache TTL (e.g. created_at + 24h)
+
+  // Relations
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id, created_at(sort: Desc)], map: "search_history_user_created_idx")
+  @@index([user_id, question], map: "search_history_user_question_idx")
+  @@map("search_history")
 }
 
 model MemoryChunk {

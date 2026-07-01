@@ -36,4 +36,15 @@ export class StorageService {
       url: urlData.publicUrl,
     };
   }
+
+  async downloadFile(bucket: string, path: string) {
+    const { data, error } = await this.supabase.storage
+      .from(bucket)
+      .download(path);
+
+    if (error) throw error;
+    if (!data) throw new Error(`File not found in storage: ${path}`);
+
+    return Buffer.from(await data.arrayBuffer());
+  }
 }

@@ -234,6 +234,26 @@
       "acceptableConfidence": ["high", "medium"]
     },
     {
+      "id": "temporal-01",
+      "category": "temporal",
+      "question": "What happened on May 15, 2026?",
+      "expectedKeywords": ["Calendar", "linking", "Capstone Mentor Review"],
+      "expectedSourceTypes": ["diary", "calendar"],
+      "expectedSourceIds": [
+        "eval-diary-2026-05-15",
+        "eval-calendar-mentor-review"
+      ],
+      "acceptableConfidence": ["high", "medium"]
+    },
+    {
+      "id": "temporal-02",
+      "category": "temporal",
+      "question": "What did the team do in May 2026?",
+      "expectedKeywords": ["capstone", "calendar", "demo"],
+      "expectedSourceTypes": ["diary", "calendar"],
+      "acceptableConfidence": ["high", "medium"]
+    },
+    {
       "id": "no-data-01",
       "category": "no_data",
       "question": "What did the team decide about mobile push notification pricing?",
