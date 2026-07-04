@@ -6,6 +6,8 @@ import {
 } from "@prisma/client";
 import { Pool } from "pg";
 
+export * from "./src/search-history.js";
+
 export type PrismaClientLike = Pick<
   PrismaClientPackage,
   "$disconnect" | "$executeRawUnsafe" | "$queryRawUnsafe" | "$queryRaw" | "$transaction"

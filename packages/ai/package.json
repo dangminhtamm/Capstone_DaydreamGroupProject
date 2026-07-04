@@ -19,6 +19,8 @@
     "eval:retrieval": "node --experimental-strip-types scripts/eval-retrieval.ts",
     "eval:answer": "node --experimental-strip-types scripts/eval-memory.ts",
     "eval:memory": "node --experimental-strip-types scripts/eval-memory.ts",
+    "eval:retrieval:ci": "MEMORY_EVAL_FAIL_ON_ERROR=1 MEMORY_RETRIEVAL_EVAL_LIMIT=all node --experimental-strip-types scripts/eval-retrieval.ts",
+    "eval:answer:ci": "MEMORY_EVAL_FAIL_ON_ERROR=1 MEMORY_EVAL_LIMIT=all node --experimental-strip-types scripts/eval-memory.ts",
     "seed:memory-eval": "node --experimental-strip-types scripts/seed-memory-evaluation.ts",
     "index:memory": "node --experimental-strip-types scripts/insert-memory-chunks.ts",
     "test:chunker": "node --env-file=.env --experimental-strip-types scripts/test-chunker.ts",

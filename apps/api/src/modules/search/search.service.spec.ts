@@ -1,4 +1,6 @@
+import { InternalServerErrorException } from '@nestjs/common';
 import { answerMemory } from '@second-brain/ai';
+import { saveSearchHistory } from '@second-brain/db';
 import { SearchService } from './search.service';
 
 jest.mock('@second-brain/ai', () => ({
@@ -6,16 +8,17 @@ jest.mock('@second-brain/ai', () => ({
   answerMemoryStream: jest.fn(),
 }));
 
+jest.mock('@second-brain/db', () => ({
+  saveSearchHistory: jest.fn(),
+  getUserSearchHistory: jest.fn(),
+  deleteSearchHistoryItem: jest.fn(),
+  clearUserSearchHistory: jest.fn(),
+}));
+
 describe('SearchService', () => {
   const prisma = {
     user: {
       findUnique: jest.fn(),
-    },
-    memoryChunk: {
-      count: jest.fn(),
-    },
-    diaryEntry: {
-      findMany: jest.fn(),
     },
   };
 
@@ -23,47 +26,53 @@ describe('SearchService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    (saveSearchHistory as jest.Mock).mockResolvedValue(undefined);
     service = new SearchService(prisma as any);
   });
 
-  it('returns diary-date fallback when no memory chunks exist for a date query', async () => {
-    const createdAt = new Date('2026-05-18T09:00:00.000Z');
+  it('returns grounded memory answers from the AI package', async () => {
     prisma.user.findUnique.mockResolvedValue({ id: 'user-1' });
-    prisma.memoryChunk.count.mockResolvedValue(0);
-    prisma.diaryEntry.findMany.mockResolvedValue([
-      {
-        id: 'diary-1',
-        raw_text: 'nhật kí thường ngày\n\nhôm nay trời mưa, ở nhà nguyên ngày.',
-        created_at: createdAt,
-        entry_date: createdAt,
-      },
-    ]);
-
-    const result = await service.answerQuestion('supabase-user-1', {
-      question: 'hôm nay tôi làm gì?',
-      startDate: '2026-05-18T00:00:00.000Z',
-      endDate: '2026-05-18T23:59:59.999Z',
+    (answerMemory as jest.Mock).mockResolvedValue({
+      answer: 'You worked on the capstone search flow.',
+      confidence: 'high',
+      citations: [{ marker: 'S1', quote: 'capstone search flow' }],
+      noMemory: false,
+      suggestions: [],
+      analytics: { tokenUsage: { totalTokens: 42 } },
     });
-
-    expect(answerMemory).not.toHaveBeenCalled();
-    expect(result.confidence).toBe('medium');
-    expect(result.sources).toHaveLength(1);
-    expect(result.answer).toContain('hôm nay trời mưa');
-  });
-
-  it('keeps the fixed response contract when AI search fails', async () => {
-    prisma.user.findUnique.mockResolvedValue({ id: 'user-1' });
-    prisma.memoryChunk.count.mockResolvedValue(3);
-    (answerMemory as jest.Mock).mockRejectedValue(new Error('Gemini failed'));
 
     const result = await service.answerQuestion('supabase-user-1', {
       question: 'What did I work on?',
+      responseLanguage: 'en',
     });
 
-    expect(result).toEqual({
-      answer: 'Memory search is temporarily unavailable. Please try again shortly.',
-      confidence: 'low',
-      sources: [],
-    });
+    expect(answerMemory).toHaveBeenCalledWith(
+      'What did I work on?',
+      'user-1',
+      prisma,
+      expect.objectContaining({ responseLanguage: 'en' }),
+    );
+    expect(result.confidence).toBe('high');
+    expect(result.sources).toHaveLength(1);
+    expect(result.cached).toBe(false);
+    expect(saveSearchHistory).toHaveBeenCalledWith(
+      prisma,
+      expect.objectContaining({
+        userId: 'user-1',
+        question: 'What did I work on?',
+        tokenCount: 42,
+      }),
+    );
+  });
+
+  it('throws a stable HTTP error when AI search fails', async () => {
+    prisma.user.findUnique.mockResolvedValue({ id: 'user-1' });
+    (answerMemory as jest.Mock).mockRejectedValue(new Error('Gemini failed'));
+
+    await expect(
+      service.answerQuestion('supabase-user-1', {
+        question: 'What did I work on?',
+      }),
+    ).rejects.toBeInstanceOf(InternalServerErrorException);
   });
 });

@@ -11,12 +11,21 @@ import {
 } from '@nestjs/common';
 import { DiaryService } from './diary.service';
 import { CreateDiaryDto } from './dto/create-diary.dto';
+import { CopilotDto } from './dto/copilot.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 @Controller('diary')
 @UseGuards(JwtAuthGuard) // Protects all diary routes
 export class DiaryController {
   constructor(private readonly diaryService: DiaryService) {}
+
+  // IMPORTANT: Copilot must be declared BEFORE the generic @Post()
+  // because NestJS evaluates routes top-down and @Post() would
+  // catch /diary/copilot otherwise.
+  @Post('copilot')
+  copilot(@Request() req, @Body() copilotDto: CopilotDto) {
+    return this.diaryService.copilot(req.user.userId, copilotDto.text, copilotDto.action);
+  }
 
   @Post()
   create(@Request() req, @Body() createDiaryDto: CreateDiaryDto) {

@@ -1,7 +1,15 @@
-import { IsString, MinLength } from 'class-validator';
+import { IsBoolean, IsIn, IsISO8601, IsOptional } from 'class-validator';
+import { SUMMARY_TYPES, type SummaryType } from './list-summaries-query.dto';
 
 export class CreateSummaryDto {
-  @IsString()
-  @MinLength(10, { message: 'Content is too short to summarize' })
-  content: string;
+  @IsIn(SUMMARY_TYPES)
+  type!: SummaryType;
+
+  @IsOptional()
+  @IsISO8601()
+  date?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  force?: boolean;
 }

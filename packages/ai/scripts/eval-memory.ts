@@ -48,8 +48,8 @@ const datasetPath =
     "../evaluation/memory-evaluation.dataset.json",
   );
 const evalLimit = process.env.MEMORY_EVAL_LIMIT
-  ? Number(process.env.MEMORY_EVAL_LIMIT)
-  : 5;
+  ? parseEvalLimit(process.env.MEMORY_EVAL_LIMIT)
+  : undefined;
 const evalDelayMs = Number(process.env.MEMORY_EVAL_DELAY_MS ?? 13_000);
 
 if (!process.env.GEMINI_API_KEY) {
@@ -151,6 +151,7 @@ if (!process.env.GEMINI_API_KEY) {
       };
 
       console.log(JSON.stringify({ summary, results }, null, 2));
+      failIfRequested(summary, results);
     }
   } finally {
     await prisma.$disconnect();
@@ -214,4 +215,50 @@ function countModelErrors(rows: EvaluationResult[]): Record<string, number> {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function parseEvalLimit(value: string): number | undefined {
+  if (value.toLowerCase() === "all") return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function failIfRequested(
+  summary: {
+    total: number;
+    correctAnswer: number;
+    hasCitation: number;
+    sourceRelevant: number;
+    confidenceOk: number;
+    modelErrors: Record<string, number>;
+  },
+  results: EvaluationResult[],
+): void {
+  if (process.env.MEMORY_EVAL_FAIL_ON_ERROR !== "1") return;
+
+  const modelErrorCount = Object.values(summary.modelErrors).reduce(
+    (sum, value) => sum + value,
+    0,
+  );
+  const failed = results.filter(
+    (row) =>
+      !row.correctAnswer ||
+      !row.hasCitation ||
+      !row.sourceRelevant ||
+      !row.confidenceOk ||
+      row.modelError,
+  );
+
+  if (
+    modelErrorCount > 0 ||
+    summary.correctAnswer < summary.total ||
+    summary.hasCitation < summary.total ||
+    summary.sourceRelevant < summary.total ||
+    summary.confidenceOk < summary.total
+  ) {
+    console.error(
+      `Answer evaluation failed: ${failed.length} failed cases, ${modelErrorCount} model/script errors.`,
+    );
+    process.exitCode = 1;
+  }
 }

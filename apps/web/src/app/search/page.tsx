@@ -1,9 +1,15 @@
 "use client";
 
-import { FormEvent, useMemo, useState, useEffect } from "react";
+import { FormEvent, useCallback, useMemo, useState, useEffect } from "react";
 import Link from "next/link";
 import { DashboardShell } from "@/components/dashboard-shell";
 import { useAuth } from "@/contexts/AuthContext";
+import {
+  getSearchHistory,
+  clearSearchHistory as apiClearHistory,
+  deleteSearchHistoryItem as apiDeleteHistoryItem,
+  type SearchHistoryEntry,
+} from "@/lib/api-client";
 
 type SearchCitation = {
   marker: string;
@@ -35,6 +41,29 @@ type QueryAnalytics = {
   status: "success" | "no_memory" | "error";
 };
 
+type MemoryDebugTrace = {
+  question: string;
+  inferredFilters: Record<string, unknown>;
+  appliedFilters: Record<string, unknown>;
+  status: "success" | "no_memory" | "error";
+  reason: string;
+  chunksRetrieved: number;
+  topChunks: Array<{
+    id: string;
+    sourceType: string;
+    sourceId: string;
+    sourceTitle?: string;
+    chunkType: string;
+    occurredAt: string;
+    retrievalMode: string;
+    similarity: number;
+    vectorSimilarity: number;
+    lexicalScore: number;
+    distance: number | null;
+    quote: string;
+  }>;
+};
+
 type SearchResponse = {
   answer: string;
   confidence: "high" | "medium" | "low";
@@ -42,32 +71,13 @@ type SearchResponse = {
   noMemory?: boolean;
   suggestions?: string[];
   analytics?: QueryAnalytics | null;
+  debugTrace?: MemoryDebugTrace | null;
+  cached?: boolean;
+  cachedAt?: string;
 };
 
 type ResponseLanguage = "en" | "vi";
 
-type SearchHistoryItem = {
-  query: string;
-  answer: string;
-  confidence: "high" | "medium" | "low";
-  timestamp: string;
-};
-
-const HISTORY_KEY = "dd-search-history";
-const MAX_HISTORY = 10;
-
-function loadHistory(): SearchHistoryItem[] {
-  try {
-    const raw = localStorage.getItem(HISTORY_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveHistory(items: SearchHistoryItem[]) {
-  localStorage.setItem(HISTORY_KEY, JSON.stringify(items.slice(0, MAX_HISTORY)));
-}
 
 const suggestedQuestions = [
   "What did I work on recently?",
@@ -90,15 +100,52 @@ export default function SearchPage() {
   const [responseLanguage, setResponseLanguage] = useState<ResponseLanguage>("en");
   const [showAuthPrompt, setShowAuthPrompt] = useState(false);
   const [analyticsOpen, setAnalyticsOpen] = useState(false);
-  const [searchHistory, setSearchHistory] = useState<SearchHistoryItem[]>([]);
+  const [searchHistory, setSearchHistory] = useState<SearchHistoryEntry[]>([]);
   const [showHistory, setShowHistory] = useState(true);
 
-  // Persist language preference + load search history
+  // Load language preference on mount
   useEffect(() => {
     const saved = localStorage.getItem("dd-response-lang") as ResponseLanguage | null;
     if (saved === "en" || saved === "vi") setResponseLanguage(saved);
-    setSearchHistory(loadHistory());
   }, []);
+
+  // Load search history from server when authenticated
+  const loadServerHistory = useCallback(async () => {
+    if (!isAuthenticated) return;
+    try {
+      const token = getAccessToken();
+      const history = await getSearchHistory(token);
+      setSearchHistory(history);
+    } catch {
+      // Silently fail — not critical
+    }
+  }, [isAuthenticated, getAccessToken]);
+
+  useEffect(() => {
+    if (!isAuthLoading && isAuthenticated) {
+      loadServerHistory();
+    }
+  }, [isAuthLoading, isAuthenticated, loadServerHistory]);
+
+  const handleClearHistory = useCallback(async () => {
+    try {
+      const token = getAccessToken();
+      await apiClearHistory(token);
+      setSearchHistory([]);
+    } catch {
+      // Silently fail
+    }
+  }, [getAccessToken]);
+
+  const handleDeleteHistoryItem = useCallback(async (id: string) => {
+    try {
+      const token = getAccessToken();
+      await apiDeleteHistoryItem(id, token);
+      setSearchHistory((prev) => prev.filter((h) => h.id !== id));
+    } catch {
+      // Silently fail
+    }
+  }, [getAccessToken]);
 
   const toggleLanguage = () => {
     const next = responseLanguage === "en" ? "vi" : "en";
@@ -111,10 +158,7 @@ export default function SearchPage() {
     [question, isSearching],
   );
 
-  async function handleSearch(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    const normalizedQuestion = question.trim();
+  const runSearch = useCallback(async (normalizedQuestion: string) => {
     if (!normalizedQuestion) {
       setError("Please enter a question before searching.");
       return;
@@ -160,18 +204,10 @@ export default function SearchPage() {
       const data = (await response.json()) as SearchResponse;
       setResult(data);
 
-      // Save to search history
-      const newItem: SearchHistoryItem = {
-        query: normalizedQuestion,
-        answer: data.answer || "",
-        confidence: data.confidence || "low",
-        timestamp: new Date().toISOString(),
-      };
-      const updated = [newItem, ...searchHistory.filter(h => h.query !== normalizedQuestion)].slice(0, MAX_HISTORY);
-      setSearchHistory(updated);
-      saveHistory(updated);
+      // Refresh history from server (backend auto-saved)
+      loadServerHistory();
 
-      // Persist token usage for sidebar widget (Order 2: 3d)
+      // Persist token usage for sidebar widget
       if (data.analytics?.tokenUsage) {
         try {
           const todayKey = new Date().toISOString().slice(0, 10);
@@ -189,6 +225,11 @@ export default function SearchPage() {
     } finally {
       setIsSearching(false);
     }
+  }, [getAccessToken, isAuthenticated, loadServerHistory, responseLanguage]);
+
+  async function handleSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await runSearch(question.trim());
   }
 
   return (
@@ -281,30 +322,45 @@ export default function SearchPage() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => { setSearchHistory([]); localStorage.removeItem(HISTORY_KEY); }}
+                      onClick={handleClearHistory}
                       className="cursor-pointer text-[11px] font-medium text-slate-400 transition hover:text-rose-500 dark:text-slate-500 dark:hover:text-rose-400"
                     >
-                      Clear
+                      Clear All
                     </button>
                   </div>
                   {showHistory && (
                     <div className="space-y-1.5">
-                      {searchHistory.map((item, i) => (
-                        <button
-                          key={`${item.query}-${i}`}
-                          type="button"
-                          onClick={() => {
-                            setQuestion(item.query);
-                            setResult({ answer: item.answer, confidence: item.confidence, sources: [] });
-                          }}
-                          className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs text-slate-600 transition hover:bg-indigo-50 hover:text-indigo-700 dark:text-slate-400 dark:hover:bg-indigo-900/20 dark:hover:text-indigo-300"
+                      {searchHistory.map((item) => (
+                        <div
+                          key={item.id}
+                          className="group flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 transition hover:bg-indigo-50 dark:hover:bg-indigo-900/20"
                         >
-                          <svg className="h-3 w-3 shrink-0 text-slate-400 dark:text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-                          <span className="flex-1 truncate">{item.query}</span>
-                          <span className="shrink-0 text-[10px] text-slate-400 dark:text-slate-500">
-                            {new Date(item.timestamp).toLocaleDateString()}
-                          </span>
-                        </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setQuestion(item.question);
+                              void runSearch(item.question);
+                            }}
+                            className="flex flex-1 cursor-pointer items-center gap-2 text-left text-xs text-slate-600 transition hover:text-indigo-700 dark:text-slate-400 dark:hover:text-indigo-300"
+                          >
+                            <svg className="h-3 w-3 shrink-0 text-slate-400 dark:text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                            <span className="flex-1 truncate pr-2">{item.question}</span>
+                            <span className="shrink-0 text-[10px] text-slate-400 dark:text-slate-500">
+                              {new Date(item.created_at).toLocaleDateString()}
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteHistoryItem(item.id);
+                            }}
+                            className="ml-2 shrink-0 cursor-pointer p-1 text-slate-400 opacity-0 transition hover:text-rose-500 group-hover:opacity-100 dark:text-slate-500 dark:hover:text-rose-400"
+                            title="Delete item"
+                          >
+                            <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                          </button>
+                        </div>
                       ))}
                     </div>
                   )}
@@ -376,11 +432,56 @@ export default function SearchPage() {
               <h3 className="mt-2 text-2xl font-bold tracking-tight text-slate-950 dark:text-slate-100">Grounded response</h3>
             </div>
             {result ? (
-              <span className={`rounded-full px-3 py-1 text-xs font-semibold ring-1 ${confidenceStyles[result.confidence]}`}>
-                {result.confidence} confidence
-              </span>
+              <div className="flex items-center gap-2">
+                {result.cached && (
+                  <span className="flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                    <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                    Cached
+                  </span>
+                )}
+                <span className={`rounded-full px-3 py-1 text-xs font-semibold ring-1 ${confidenceStyles[result.confidence]}`}>
+                  {result.confidence} confidence
+                </span>
+              </div>
             ) : null}
           </div>
+
+          {result ? (
+            <div className={`mb-4 rounded-2xl border p-3 ${
+              result.debugTrace
+                ? "border-sky-200 bg-sky-50/80 dark:border-sky-800 dark:bg-sky-950/30"
+                : "border-amber-200 bg-amber-50/80 dark:border-amber-800 dark:bg-amber-950/30"
+            }`}>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className={`text-sm font-bold ${
+                  result.debugTrace
+                    ? "text-sky-900 dark:text-sky-200"
+                    : "text-amber-900 dark:text-amber-200"
+                }`}>
+                  Memory Debug
+                </p>
+                {result.debugTrace ? (
+                  <div className="flex flex-wrap gap-2 text-[11px] font-semibold text-sky-700 dark:text-sky-300">
+                    <span className="rounded-full bg-white/80 px-2 py-0.5 dark:bg-slate-900/70">status: {result.debugTrace.status}</span>
+                    <span className="rounded-full bg-white/80 px-2 py-0.5 dark:bg-slate-900/70">chunks: {result.debugTrace.chunksRetrieved}</span>
+                  </div>
+                ) : (
+                  <span className="rounded-full bg-white/80 px-2 py-0.5 text-[11px] font-semibold text-amber-700 dark:bg-slate-900/70 dark:text-amber-300">
+                    debugTrace missing
+                  </span>
+                )}
+              </div>
+              <p className={`mt-2 text-xs leading-5 ${
+                result.debugTrace
+                  ? "text-sky-800 dark:text-sky-300"
+                  : "text-amber-800 dark:text-amber-300"
+              }`}>
+                {result.debugTrace
+                  ? result.debugTrace.reason
+                  : "Frontend đã nhận answer nhưng API chưa trả debugTrace. Restart API/dev server rồi hỏi lại để thấy pipeline chi tiết."}
+              </p>
+            </div>
+          ) : null}
 
           {isSearching ? (
             <div className="space-y-4">
@@ -466,6 +567,77 @@ export default function SearchPage() {
               <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Submit a question to see the AI answer here.</p>
             </div>
           )}
+
+          {result?.debugTrace ? (
+            <details open className="mt-5 rounded-2xl border border-sky-200 bg-sky-50/70 p-4 dark:border-sky-800 dark:bg-sky-950/30">
+              <summary className="cursor-pointer text-sm font-bold text-sky-900 dark:text-sky-200">
+                Memory Debug
+              </summary>
+
+              <div className="mt-4 space-y-4">
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="rounded-xl border border-sky-100 bg-white/80 p-3 dark:border-sky-900 dark:bg-slate-900/60">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-sky-600 dark:text-sky-400">Status</p>
+                    <p className="mt-1 text-sm font-semibold text-slate-900 dark:text-slate-100">{result.debugTrace.status}</p>
+                  </div>
+                  <div className="rounded-xl border border-sky-100 bg-white/80 p-3 dark:border-sky-900 dark:bg-slate-900/60">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-sky-600 dark:text-sky-400">Chunks</p>
+                    <p className="mt-1 text-sm font-semibold text-slate-900 dark:text-slate-100">{result.debugTrace.chunksRetrieved}</p>
+                  </div>
+                  <div className="rounded-xl border border-sky-100 bg-white/80 p-3 dark:border-sky-900 dark:bg-slate-900/60">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-sky-600 dark:text-sky-400">Confidence</p>
+                    <p className="mt-1 text-sm font-semibold text-slate-900 dark:text-slate-100">{result.confidence}</p>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-sky-100 bg-white/80 p-3 dark:border-sky-900 dark:bg-slate-900/60">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-sky-600 dark:text-sky-400">Reason</p>
+                  <p className="mt-1 text-sm leading-6 text-slate-700 dark:text-slate-300">{result.debugTrace.reason}</p>
+                </div>
+
+                <div className="grid gap-3 lg:grid-cols-2">
+                  <div className="rounded-xl border border-sky-100 bg-white/80 p-3 dark:border-sky-900 dark:bg-slate-900/60">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-sky-600 dark:text-sky-400">Inferred filters</p>
+                    <pre className="mt-2 max-h-36 overflow-auto rounded-lg bg-slate-950 p-3 text-xs leading-5 text-slate-100">{JSON.stringify(result.debugTrace.inferredFilters, null, 2)}</pre>
+                  </div>
+                  <div className="rounded-xl border border-sky-100 bg-white/80 p-3 dark:border-sky-900 dark:bg-slate-900/60">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-sky-600 dark:text-sky-400">Applied filters</p>
+                    <pre className="mt-2 max-h-36 overflow-auto rounded-lg bg-slate-950 p-3 text-xs leading-5 text-slate-100">{JSON.stringify(result.debugTrace.appliedFilters, null, 2)}</pre>
+                  </div>
+                </div>
+
+                <div>
+                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-sky-600 dark:text-sky-400">Top retrieved chunks</p>
+                  {result.debugTrace.topChunks.length ? (
+                    <div className="space-y-3">
+                      {result.debugTrace.topChunks.map((chunk, index) => (
+                        <article key={`${chunk.id}-${index}`} className="rounded-xl border border-sky-100 bg-white/90 p-3 dark:border-sky-900 dark:bg-slate-900/70">
+                          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                            <span className="rounded-full bg-sky-100 px-2 py-0.5 font-semibold text-sky-700 dark:bg-sky-900/60 dark:text-sky-300">#{index + 1}</span>
+                            <span>{chunk.sourceTitle || `${chunk.sourceType}/${chunk.chunkType}`}</span>
+                            <span>{new Date(chunk.occurredAt).toLocaleString()}</span>
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-slate-600 dark:text-slate-300">
+                            <span className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">mode: {chunk.retrievalMode}</span>
+                            <span className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">sim: {Math.round(chunk.similarity * 100)}%</span>
+                            <span className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">vector: {Math.round(chunk.vectorSimilarity * 100)}%</span>
+                            <span className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">lexical: {Math.round(chunk.lexicalScore * 100)}%</span>
+                          </div>
+                          <blockquote className="mt-3 rounded-r-lg border-l-4 border-sky-200 bg-sky-50 px-3 py-2 text-xs leading-5 text-slate-700 dark:border-sky-800 dark:bg-slate-800 dark:text-slate-300">
+                            {chunk.quote}
+                          </blockquote>
+                        </article>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-dashed border-sky-200 p-4 text-sm text-slate-500 dark:border-sky-800 dark:text-slate-400">
+                      No chunks survived retrieval thresholds.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </details>
+          ) : null}
         </section>
       </div>
 

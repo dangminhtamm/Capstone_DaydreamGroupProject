@@ -1,8 +1,10 @@
 import {
+  BadRequestException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import { indexMemoryFromDiary } from '@second-brain/ai';
 import {
   deleteMemoryChunksForSource,
@@ -29,6 +31,7 @@ export class DiaryService {
         raw_text: `${dto.title}\n\n${dto.content}`,
         user_id: user.id,
         status: 'published',
+        ...(dto.entryDate ? { entry_date: new Date(dto.entryDate) } : {}),
       },
     });
 
@@ -92,11 +95,13 @@ export class DiaryService {
     const title = dto.title ?? existingClientEntry.title;
     const content = dto.content ?? existingClientEntry.content;
     const rawText = this.buildRawText(title, content);
+    const entryDate = dto.entryDate ? new Date(dto.entryDate) : undefined;
 
     const entry = await this.prisma.diaryEntry.update({
       where: { id },
       data: {
         raw_text: rawText,
+        ...(entryDate ? { entry_date: entryDate } : {}),
       },
     });
 
@@ -112,7 +117,10 @@ export class DiaryService {
       await this.prisma.diaryEntry
         .update({
           where: { id },
-          data: { raw_text: existingEntry.raw_text },
+          data: {
+            raw_text: existingEntry.raw_text,
+            entry_date: existingEntry.entry_date,
+          },
         })
         .catch((rollbackError) => {
           console.error('Failed to rollback diary update:', rollbackError);
@@ -194,7 +202,7 @@ export class DiaryService {
     return `${title.trim()}\n\n${content.trim()}`;
   }
 
-  private toClientEntry(entry: { id: string; raw_text: string; status: string; created_at: Date; updated_at: Date }) {
+  private toClientEntry(entry: { id: string; raw_text: string; status: string; created_at: Date; updated_at: Date; entry_date?: Date }) {
     const trimmedText = entry.raw_text.trim();
     
     let title = 'Untitled';
@@ -229,8 +237,93 @@ export class DiaryService {
       title: title || 'Untitled',
       content: content || trimmedText || 'No content',
       status: entry.status,
+      entryDate: entry.entry_date?.toISOString(),
       createdAt: entry.created_at.toISOString(),
       updatedAt: entry.updated_at.toISOString(),
     };
+  }
+
+  // ---------------------------------------------------------------------------
+  // AI Writing Copilot
+  // ---------------------------------------------------------------------------
+  private _geminiClient: GoogleGenerativeAI | null = null;
+
+  private getGeminiClient(): GoogleGenerativeAI {
+    if (!this._geminiClient) {
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        throw new InternalServerErrorException('GEMINI_API_KEY is not configured');
+      }
+      this._geminiClient = new GoogleGenerativeAI(apiKey);
+    }
+    return this._geminiClient;
+  }
+
+  async copilot(userId: string, text: string, action: string) {
+    const modelName = process.env.GEMINI_ANSWER_MODEL ?? 'gemini-2.5-flash';
+    const model = this.getGeminiClient().getGenerativeModel({
+      model: modelName,
+      generationConfig: { temperature: 0.7 },
+    });
+
+    const systemContext = [
+      'You are the AI Writing Copilot for a Smart Personal Diary app called "Second Brain".',
+      'The user writes daily diary entries to record their thoughts, emotions, and activities.',
+      'Always preserve the original language of the text (Vietnamese, English, or mixed).',
+      'Never add greetings, meta-commentary, or markdown formatting — return only the resulting text.',
+    ].join(' ');
+
+    let taskInstruction: string;
+
+    switch (action) {
+      case 'continue':
+        taskInstruction = [
+          'Continue writing this diary entry naturally.',
+          'Match the tone, style, and language of the original text.',
+          'Write 2-4 additional sentences that logically follow.',
+          'Return ONLY the continuation — do NOT repeat the original text.',
+        ].join('\n');
+        break;
+
+      case 'fix_grammar':
+        taskInstruction = [
+          'Fix all grammar, spelling, and punctuation errors in this diary entry.',
+          'Keep the original meaning, tone, and language exactly as intended.',
+          'Return ONLY the corrected full text.',
+        ].join('\n');
+        break;
+
+      case 'expand':
+        taskInstruction = [
+          'Expand this diary entry with more vivid details, sensory descriptions, and deeper reflection.',
+          'Keep the original meaning and language.',
+          'Roughly double the length while maintaining the authentic diary voice.',
+          'Return ONLY the expanded full text.',
+        ].join('\n');
+        break;
+
+      case 'summarize':
+        taskInstruction = [
+          'Summarize this diary entry into a concise 2-3 sentence overview.',
+          'Capture the key events, emotions, and insights.',
+          'Keep the same language as the original.',
+          'Return ONLY the summary.',
+        ].join('\n');
+        break;
+
+      default:
+        throw new BadRequestException(`Invalid copilot action: "${action}"`);
+    }
+
+    const prompt = `${systemContext}\n\n### Task\n${taskInstruction}\n\n### Diary Entry\n${text}`;
+
+    try {
+      const result = await model.generateContent(prompt);
+      const generatedText = result.response.text().trim();
+      return { result: generatedText };
+    } catch (error) {
+      console.error(`Copilot AI Error [action=${action}, model=${modelName}]:`, error);
+      throw new InternalServerErrorException('AI writing assistant is temporarily unavailable. Please try again.');
+    }
   }
 }

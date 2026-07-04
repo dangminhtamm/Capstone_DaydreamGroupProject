@@ -17,6 +17,7 @@ export {
   inferRetrievalFilters,
   type AnswerMemoryOptions,
   type AnswerMemoryResult,
+  type MemoryDebugTrace,
   type QueryAnalytics,
   type ResponseLanguage,
 } from "./answer-memory.ts";
@@ -40,6 +41,11 @@ export {
   type IndexMemoryFromCalendarInput,
   type IndexMemoryFromCalendarResult,
 } from "./calendar-indexer.ts";
+export {
+  indexMemoryFromAttachment,
+  type IndexMemoryFromAttachmentInput,
+  type IndexMemoryFromAttachmentResult,
+} from "./attachment-indexer.ts";
 export {
   DEFAULT_EMBEDDING_DIMENSION,
   DEFAULT_EMBEDDING_PROVIDER,

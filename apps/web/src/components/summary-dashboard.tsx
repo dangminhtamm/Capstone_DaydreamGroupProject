@@ -2,10 +2,17 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { getDiaryEntries, type DiaryEntry } from "@/lib/api-client";
+import {
+  generateSummary,
+  getDiaryEntries,
+  getSummaries,
+  type DiaryEntry,
+  type SummaryRecord,
+  type SummaryType,
+} from "@/lib/api-client";
 
 type LoadState = "idle" | "loading" | "success" | "error";
-type ViewMode = "daily" | "weekly";
+type OverviewMode = "daily" | "weekly";
 
 type DailySummary = {
   dateKey: string;
@@ -61,12 +68,25 @@ const weekFormatter = new Intl.DateTimeFormat("en", {
   day: "numeric",
 });
 
+const summaryTypeOptions: SummaryType[] = ["daily", "weekly", "monthly", "yearly"];
+
 function countWords(text: string) {
   return text.trim().split(/\s+/).filter(Boolean).length;
 }
 
+function getEntryActivityDate(entry: DiaryEntry) {
+  return entry.entryDate ?? entry.createdAt;
+}
+
 function getDateKey(value: string) {
   const date = new Date(value);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function getLocalDateInputValue(date = new Date()) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
@@ -104,7 +124,7 @@ function buildDailySummaries(entries: DiaryEntry[]) {
   const grouped = new Map<string, DiaryEntry[]>();
 
   entries.forEach((entry) => {
-    const key = getDateKey(entry.createdAt);
+    const key = getDateKey(getEntryActivityDate(entry));
     grouped.set(key, [...(grouped.get(key) ?? []), entry]);
   });
 
@@ -128,7 +148,7 @@ function buildWeeklySummaries(entries: DiaryEntry[]) {
   const grouped = new Map<string, DiaryEntry[]>();
 
   entries.forEach((entry) => {
-    const weekStart = getWeekStart(new Date(entry.createdAt));
+    const weekStart = getWeekStart(new Date(getEntryActivityDate(entry)));
     const key = weekStart.toISOString().slice(0, 10);
     grouped.set(key, [...(grouped.get(key) ?? []), entry]);
   });
@@ -140,7 +160,7 @@ function buildWeeklySummaries(entries: DiaryEntry[]) {
       const end = new Date(start);
       end.setDate(start.getDate() + 6);
       const wordCount = weekEntries.reduce((total, entry) => total + countWords(`${entry.title} ${entry.content}`), 0);
-      const activeDays = new Set(weekEntries.map((entry) => getDateKey(entry.createdAt))).size;
+      const activeDays = new Set(weekEntries.map((entry) => getDateKey(getEntryActivityDate(entry)))).size;
 
       return {
         weekKey,
@@ -160,6 +180,45 @@ function StatCard({ label, value, helper, tone }: { label: string; value: string
       <p className="text-sm font-medium text-slate-500 dark:text-slate-400">{label}</p>
       <p className="mt-2 text-3xl font-bold tracking-tight text-slate-950 dark:text-slate-100">{value}</p>
       <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">{helper}</p>
+    </div>
+  );
+}
+
+function formatSummaryPeriod(summary: SummaryRecord) {
+  const start = weekFormatter.format(new Date(summary.periodStart));
+  const end = weekFormatter.format(new Date(summary.periodEnd));
+  return start === end ? start : `${start} - ${end}`;
+}
+
+function AiSummaryList({ summaries }: { summaries: SummaryRecord[] }) {
+  if (!summaries.length) {
+    return (
+      <div className="rounded-2xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500 dark:border-slate-600 dark:text-slate-400">
+        No AI-generated summaries yet. Generate one now or wait for the background worker to add daily, weekly, monthly, and yearly reflections.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {summaries.map((summary) => (
+        <article
+          key={summary.id}
+          className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-800/70"
+        >
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold uppercase text-indigo-700 ring-1 ring-indigo-100 dark:bg-indigo-900/30 dark:text-indigo-300 dark:ring-indigo-800">
+              {summary.type}
+            </span>
+            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+              {formatSummaryPeriod(summary)}
+            </span>
+          </div>
+          <p className="whitespace-pre-wrap text-sm leading-6 text-slate-700 dark:text-slate-300">
+            {summary.content}
+          </p>
+        </article>
+      ))}
     </div>
   );
 }
@@ -208,15 +267,22 @@ function ActivityBars({ summaries }: { summaries: DailySummary[] }) {
 export function SummaryDashboard() {
   const { getAccessToken, isAuthenticated, isLoading: authLoading } = useAuth();
   const [entries, setEntries] = useState<DiaryEntry[]>([]);
+  const [aiSummaries, setAiSummaries] = useState<SummaryRecord[]>([]);
   const [state, setState] = useState<LoadState>("idle");
   const [errorMessage, setErrorMessage] = useState("");
-  const [viewMode, setViewMode] = useState<ViewMode>("daily");
+  const [overviewMode, setOverviewMode] = useState<OverviewMode>("daily");
+  const [summaryType, setSummaryType] = useState<SummaryType>("daily");
+  const [summaryDate, setSummaryDate] = useState(() => getLocalDateInputValue());
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generateMessage, setGenerateMessage] = useState("");
+  const [generateError, setGenerateError] = useState("");
 
   useEffect(() => {
     if (authLoading) return;
 
     if (!isAuthenticated) {
       setEntries([]);
+      setAiSummaries([]);
       setState("idle");
       return;
     }
@@ -226,8 +292,13 @@ export function SummaryDashboard() {
       setErrorMessage("");
 
       try {
-        const data = await getDiaryEntries(getAccessToken());
-        setEntries(data);
+        const accessToken = getAccessToken();
+        const [diaryData, summaryData] = await Promise.all([
+          getDiaryEntries(accessToken),
+          getSummaries(accessToken, { limit: 20 }),
+        ]);
+        setEntries(diaryData);
+        setAiSummaries(summaryData);
         setState("success");
       } catch (error) {
         setState("error");
@@ -239,7 +310,11 @@ export function SummaryDashboard() {
   }, [authLoading, getAccessToken, isAuthenticated]);
 
   const sortedEntries = useMemo(
-    () => [...entries].sort((first, second) => new Date(second.createdAt).getTime() - new Date(first.createdAt).getTime()),
+    () =>
+      [...entries].sort(
+        (first, second) =>
+          new Date(getEntryActivityDate(second)).getTime() - new Date(getEntryActivityDate(first)).getTime(),
+      ),
     [entries],
   );
   const dailySummaries = useMemo(() => buildDailySummaries(sortedEntries), [sortedEntries]);
@@ -250,6 +325,39 @@ export function SummaryDashboard() {
   );
   const activeDays = dailySummaries.length;
   const latestEntry = sortedEntries[0];
+  const visibleAiSummaries = useMemo(
+    () => aiSummaries.filter((summary) => summary.type === summaryType).slice(0, 5),
+    [aiSummaries, summaryType],
+  );
+
+  async function handleGenerateSummary() {
+    setIsGenerating(true);
+    setGenerateMessage("");
+    setGenerateError("");
+
+    try {
+      const accessToken = getAccessToken();
+      const selectedDate = new Date(`${summaryDate}T12:00:00`);
+      const response = await generateSummary(
+        {
+          type: summaryType,
+          date: selectedDate.toISOString(),
+          force: true,
+        },
+        accessToken,
+      );
+
+      setAiSummaries((current) => [
+        response.summary,
+        ...current.filter((summary) => summary.id !== response.summary.id),
+      ]);
+      setGenerateMessage(`${summaryType[0].toUpperCase()}${summaryType.slice(1)} summary generated.`);
+    } catch (error) {
+      setGenerateError(error instanceof Error ? error.message : "Failed to generate summary");
+    } finally {
+      setIsGenerating(false);
+    }
+  }
 
   if (authLoading || state === "loading") {
     return (
@@ -318,7 +426,7 @@ export function SummaryDashboard() {
           </div>
           <div className="rounded-2xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-700 dark:border-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300">
             <span className="font-semibold">Latest update:</span>{" "}
-            {latestEntry ? weekdayFormatter.format(new Date(latestEntry.createdAt)) : "No entries yet"}
+            {latestEntry ? weekdayFormatter.format(new Date(getEntryActivityDate(latestEntry))) : "No entries yet"}
           </div>
         </div>
       </section>
@@ -335,6 +443,56 @@ export function SummaryDashboard() {
         />
       </section>
 
+      <section className="rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white to-slate-50/50 p-6 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:from-slate-800 dark:to-slate-800/50 dark:shadow-slate-900/40">
+        <div className="mb-5 flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600 dark:text-indigo-400">AI reflections</p>
+            <h3 className="mt-2 text-xl font-bold text-slate-950 dark:text-slate-100">Generated summaries</h3>
+          </div>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+            <div className="grid grid-cols-4 rounded-2xl bg-slate-100 p-1 text-sm font-semibold text-slate-600 dark:bg-slate-700 dark:text-slate-300">
+              {summaryTypeOptions.map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => setSummaryType(option)}
+                  className={`cursor-pointer rounded-xl px-3 py-2 capitalize transition ${summaryType === option ? "bg-white text-indigo-700 shadow-sm dark:bg-slate-600 dark:text-indigo-400" : "hover:text-slate-900 dark:hover:text-slate-100"}`}
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <input
+                type="date"
+                value={summaryDate}
+                onChange={(event) => setSummaryDate(event.target.value)}
+                className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:focus:ring-indigo-900/50"
+              />
+              <button
+                type="button"
+                onClick={handleGenerateSummary}
+                disabled={isGenerating || !summaryDate}
+                className="h-10 cursor-pointer rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-indigo-400"
+              >
+                {isGenerating ? "Generating..." : "Generate now"}
+              </button>
+            </div>
+          </div>
+        </div>
+        {generateMessage ? (
+          <p className="mb-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300">
+            {generateMessage}
+          </p>
+        ) : null}
+        {generateError ? (
+          <p className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700 dark:border-rose-800 dark:bg-rose-900/30 dark:text-rose-300">
+            {generateError}
+          </p>
+        ) : null}
+        <AiSummaryList summaries={visibleAiSummaries} />
+      </section>
+
       <section className="grid gap-6 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
         <ActivityBars summaries={dailySummaries} />
 
@@ -347,22 +505,22 @@ export function SummaryDashboard() {
             <div className="grid grid-cols-2 rounded-2xl bg-slate-100 p-1 text-sm font-semibold text-slate-600 dark:bg-slate-700 dark:text-slate-300">
               <button
                 type="button"
-                onClick={() => setViewMode("daily")}
-                className={`cursor-pointer rounded-xl px-4 py-2 transition ${viewMode === "daily" ? "bg-white text-indigo-700 shadow-sm dark:bg-slate-600 dark:text-indigo-400" : "hover:text-slate-900 dark:hover:text-slate-100"}`}
+                onClick={() => setOverviewMode("daily")}
+                className={`cursor-pointer rounded-xl px-4 py-2 transition ${overviewMode === "daily" ? "bg-white text-indigo-700 shadow-sm dark:bg-slate-600 dark:text-indigo-400" : "hover:text-slate-900 dark:hover:text-slate-100"}`}
               >
                 Daily
               </button>
               <button
                 type="button"
-                onClick={() => setViewMode("weekly")}
-                className={`cursor-pointer rounded-xl px-4 py-2 transition ${viewMode === "weekly" ? "bg-white text-indigo-700 shadow-sm dark:bg-slate-600 dark:text-indigo-400" : "hover:text-slate-900 dark:hover:text-slate-100"}`}
+                onClick={() => setOverviewMode("weekly")}
+                className={`cursor-pointer rounded-xl px-4 py-2 transition ${overviewMode === "weekly" ? "bg-white text-indigo-700 shadow-sm dark:bg-slate-600 dark:text-indigo-400" : "hover:text-slate-900 dark:hover:text-slate-100"}`}
               >
                 Weekly
               </button>
             </div>
           </div>
 
-          {viewMode === "daily" ? (
+          {overviewMode === "daily" ? (
             <div className="space-y-3">
               {dailySummaries.slice(0, 5).map((day) => (
                 <article key={day.dateKey} className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-700 dark:bg-slate-800/70">
@@ -434,7 +592,7 @@ export function SummaryDashboard() {
                     <p className="mt-1 line-clamp-2 text-sm leading-6 text-slate-600 dark:text-slate-400">{entry.content}</p>
                   </div>
                   <span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-xs font-medium text-slate-500 ring-1 ring-slate-200 dark:bg-slate-700 dark:text-slate-400 dark:ring-slate-600">
-                    {weekdayFormatter.format(new Date(entry.createdAt))}
+                    {weekdayFormatter.format(new Date(getEntryActivityDate(entry)))}
                   </span>
                 </div>
               </article>

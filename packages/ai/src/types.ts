@@ -31,6 +31,8 @@ export interface MemoryChunkMetadata {
   startOffset?: number;
   endOffset?: number;
   calendarEventId?: string;
+  diaryEntryId?: string;
+  fileType?: string;
 }
 
 export interface MemoryChunk {

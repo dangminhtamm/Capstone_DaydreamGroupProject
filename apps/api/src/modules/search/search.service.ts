@@ -1,5 +1,6 @@
 import { Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { answerMemory } from '@second-brain/ai';
+import { saveSearchHistory, getUserSearchHistory, deleteSearchHistoryItem, clearUserSearchHistory } from '@second-brain/db';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SearchQueryDto } from './dto/search-query.dto';
 
@@ -17,31 +18,96 @@ export class SearchService {
       throw new NotFoundException('User not found');
     }
 
+    const lang = queryDto.responseLanguage ?? 'en';
+
+    // ── Live search ──
     try {
+      const filters: {
+        chunkType?: string;
+        sourceType?: string;
+        startDate?: Date;
+        endDate?: Date;
+      } = {};
+      if (queryDto.chunkType) filters.chunkType = queryDto.chunkType;
+      if (queryDto.sourceType) filters.sourceType = queryDto.sourceType;
+      if (queryDto.startDate) filters.startDate = new Date(queryDto.startDate);
+      if (queryDto.endDate) filters.endDate = new Date(queryDto.endDate);
+
       const result = await answerMemory(queryDto.question, user.id, this.prisma, {
         limit: queryDto.limit ?? 8,
         maxDistance: queryDto.maxDistance,
-        responseLanguage: queryDto.responseLanguage ?? 'en',
-        filters: {
-          chunkType: queryDto.chunkType,
-          sourceType: queryDto.sourceType,
-          startDate: queryDto.startDate ? new Date(queryDto.startDate) : undefined,
-          endDate: queryDto.endDate ? new Date(queryDto.endDate) : undefined,
-        },
+        responseLanguage: lang,
+        filters,
       });
 
-      return {
+      const response = {
         answer: result.answer,
         confidence: result.confidence,
         sources: result.citations,
         noMemory: result.noMemory ?? false,
         suggestions: result.suggestions ?? [],
-        // NEW: AI Observability analytics
         analytics: result.analytics ?? null,
+        debugTrace: result.debugTrace ?? null,
+        cached: false,
       };
+
+      // ── Persist to search history (async, non-blocking) ──
+      saveSearchHistory(this.prisma, {
+        userId: user.id,
+        question: queryDto.question,
+        answer: result.answer,
+        confidence: result.confidence,
+        sourcesJson: result.citations?.length ? JSON.stringify(result.citations) : null,
+        analyticsJson: result.analytics ? JSON.stringify(result.analytics) : null,
+        responseLanguage: lang,
+        tokenCount: result.analytics?.tokenUsage?.totalTokens ?? 0,
+      }).catch((err) => {
+        console.warn('Failed to save search history (non-fatal):', err);
+      });
+
+      return response;
     } catch (error) {
       console.error('Failed to answer memory search question:', error);
       throw new InternalServerErrorException('Failed to answer memory search question.');
     }
+  }
+
+  async getHistory(userId: string, limit: number = 20) {
+    const user = await this.prisma.user.findUnique({
+      where: { supabaseId: userId },
+      select: { id: true },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    return getUserSearchHistory(this.prisma, user.id, limit);
+  }
+
+  async deleteHistoryItem(userId: string, id: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { supabaseId: userId },
+      select: { id: true },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    return deleteSearchHistoryItem(this.prisma, user.id, id);
+  }
+
+  async clearHistory(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { supabaseId: userId },
+      select: { id: true },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    return clearUserSearchHistory(this.prisma, user.id);
   }
 }
