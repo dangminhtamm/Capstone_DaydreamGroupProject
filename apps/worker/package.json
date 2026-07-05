@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "ts-node -r dotenv/config src/index.ts",
+    "dev": "ts-node src/index.ts",
+    "indexing:drain": "ts-node src/drain-indexing.ts",
     "build": "tsc",
     "start": "node dist/index.js",
     "test": "node --experimental-strip-types --test src/**/*.test.ts"

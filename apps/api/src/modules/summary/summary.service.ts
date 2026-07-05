@@ -24,12 +24,17 @@ type GenerateSummaryInput = {
   force?: boolean;
 };
 
+type AuthenticatedUserInput = {
+  supabaseId: string;
+  email: string;
+};
+
 @Injectable()
 export class SummaryService {
   constructor(private prisma: PrismaService) {}
 
   async findAll(
-    supabaseUserId: string,
+    authUser: AuthenticatedUserInput | string,
     options: {
       type?: string;
       startDate?: string;
@@ -37,7 +42,7 @@ export class SummaryService {
       limit?: number;
     },
   ) {
-    const user = await this.findUserOrThrow(supabaseUserId);
+    const user = await this.findOrCreateUser(authUser);
 
     const summaries = await this.prisma.summary.findMany({
       where: {
@@ -62,8 +67,8 @@ export class SummaryService {
     };
   }
 
-  async findOne(supabaseUserId: string, summaryId: string) {
-    const user = await this.findUserOrThrow(supabaseUserId);
+  async findOne(authUser: AuthenticatedUserInput | string, summaryId: string) {
+    const user = await this.findOrCreateUser(authUser);
 
     const summary = await this.prisma.summary.findFirst({
       where: {
@@ -79,8 +84,8 @@ export class SummaryService {
     return this.toClientSummary(summary);
   }
 
-  async generateSummary(supabaseUserId: string, dto: CreateSummaryDto) {
-    const user = await this.findUserOrThrow(supabaseUserId);
+  async generateSummary(authUser: AuthenticatedUserInput | string, dto: CreateSummaryDto) {
+    const user = await this.findOrCreateUser(authUser);
     return this.generateSummaryForUserId(user.id, dto);
   }
 
@@ -102,9 +107,15 @@ export class SummaryService {
     });
 
     if (existing && !input.force) {
+      await this.enqueueSummaryIndexingJob(this.prisma, {
+        userId,
+        summaryId: existing.id,
+      });
+
       return {
         generated: false,
         summary: this.toClientSummary(existing),
+        memoryIndexingStatus: 'queued',
       };
     }
 
@@ -116,34 +127,92 @@ export class SummaryService {
     }
 
     const content = await this.generateAiSummary(input.type, period, context.text);
-    const summary = await this.prisma.summary.upsert({
-      where: {
-        user_id_summary_type_period_start_period_end: summaryPeriodKey,
-      },
-      update: { content },
-      create: {
-        ...summaryPeriodKey,
-        content,
-      },
+    const summary = await this.prisma.$transaction(async (tx) => {
+      const savedSummary = await tx.summary.upsert({
+        where: {
+          user_id_summary_type_period_start_period_end: summaryPeriodKey,
+        },
+        update: { content },
+        create: {
+          ...summaryPeriodKey,
+          content,
+        },
+      });
+
+      await this.enqueueSummaryIndexingJob(tx, {
+        userId,
+        summaryId: savedSummary.id,
+      });
+
+      return savedSummary;
     });
 
     return {
       generated: true,
       summary: this.toClientSummary(summary),
+      memoryIndexingStatus: 'queued',
     };
   }
 
-  private async findUserOrThrow(supabaseUserId: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { supabaseId: supabaseUserId },
-      select: { id: true },
-    });
+  private async findOrCreateUser(authUser: AuthenticatedUserInput | string) {
+    if (typeof authUser === 'string') {
+      const user = await this.prisma.user.findUnique({
+        where: { supabaseId: authUser },
+        select: { id: true },
+      });
 
-    if (!user) {
-      throw new NotFoundException('User not found');
+      if (!user) {
+        throw new NotFoundException('User not found');
+      }
+
+      return user;
     }
 
-    return user;
+    return this.prisma.user.upsert({
+      where: { supabaseId: authUser.supabaseId },
+      update: { email: authUser.email },
+      create: {
+        supabaseId: authUser.supabaseId,
+        email: authUser.email,
+      },
+      select: { id: true },
+    });
+  }
+
+  private async enqueueSummaryIndexingJob(
+    tx: any,
+    input: {
+      userId: string;
+      summaryId: string;
+    },
+  ) {
+    return tx.indexingOutbox.upsert({
+      where: {
+        job_type_source_type_source_id: {
+          job_type: 'index_memory',
+          source_type: 'summary',
+          source_id: input.summaryId,
+        },
+      },
+      update: {
+        user_id: input.userId,
+        status: 'pending',
+        retry_count: 0,
+        error: null,
+        payload: {},
+        run_after: new Date(),
+        locked_at: null,
+        processed_at: null,
+      },
+      create: {
+        user_id: input.userId,
+        job_type: 'index_memory',
+        source_type: 'summary',
+        source_id: input.summaryId,
+        status: 'pending',
+        payload: {},
+      },
+    });
   }
 
   private async buildSummaryContext(

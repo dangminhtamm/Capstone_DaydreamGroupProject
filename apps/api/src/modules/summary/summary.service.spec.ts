@@ -5,6 +5,7 @@ describe('SummaryService', () => {
   const prisma = {
     user: {
       findUnique: jest.fn(),
+      upsert: jest.fn(),
     },
     summary: {
       findMany: jest.fn(),
@@ -18,6 +19,10 @@ describe('SummaryService', () => {
     calendarEvent: {
       findMany: jest.fn(),
     },
+    indexingOutbox: {
+      upsert: jest.fn(),
+    },
+    $transaction: jest.fn((fn: any) => fn(prisma)),
   };
 
   let service: SummaryService;
@@ -78,6 +83,30 @@ describe('SummaryService', () => {
     );
   });
 
+  it('creates the user row from the authenticated JWT when loading summaries', async () => {
+    prisma.user.upsert.mockResolvedValue({ id: 'user-1' });
+    prisma.summary.findMany.mockResolvedValue([]);
+
+    const result = await service.findAll(
+      {
+        supabaseId: 'supabase-user-1',
+        email: 'user@example.com',
+      },
+      {},
+    );
+
+    expect(prisma.user.upsert).toHaveBeenCalledWith({
+      where: { supabaseId: 'supabase-user-1' },
+      update: { email: 'user@example.com' },
+      create: {
+        supabaseId: 'supabase-user-1',
+        email: 'user@example.com',
+      },
+      select: { id: true },
+    });
+    expect(result).toEqual({ count: 0, summaries: [] });
+  });
+
   it('only returns a summary owned by the authenticated user', async () => {
     prisma.user.findUnique.mockResolvedValue({ id: 'user-1' });
     prisma.summary.findFirst.mockResolvedValue(null);
@@ -129,6 +158,18 @@ describe('SummaryService', () => {
         type: 'daily',
         content: 'Existing summary',
       }),
+      memoryIndexingStatus: 'queued',
     });
+    expect(prisma.indexingOutbox.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          job_type_source_type_source_id: {
+            job_type: 'index_memory',
+            source_type: 'summary',
+            source_id: 'summary-1',
+          },
+        },
+      }),
+    );
   });
 });

@@ -4,7 +4,6 @@ import {
   Body,
   Controller,
   Get,
-  InternalServerErrorException,
   NotFoundException,
   Param,
   Post,
@@ -17,9 +16,6 @@ import {
   FileTypeValidator,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { GoogleGenerativeAI } from '@google/generative-ai';
-import { indexMemoryFromAttachment } from '@second-brain/ai';
-import { insertMemoryChunks, pruneMemoryChunksForSource } from '@second-brain/db';
 import { StorageService } from '../../storage/storage.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -133,44 +129,50 @@ export class UploadController {
     );
 
     const extractedText = this.extractPlainText(file);
-    const attachment = await this.prisma.attachment.create({
-      data: {
-        diary_entry_id: diaryEntry.id,
-        storage_path: uploadedFile.path,
-        file_type: file.mimetype,
-        ...(extractedText && { extracted_text: extractedText }),
-      },
-    });
-
-    let indexingResult: AttachmentIndexingResponse = {
-      memoryIndexed: false,
-      memoryChunkCount: 0,
+    let attachment: {
+      id: string;
+      diary_entry_id: string;
+      storage_path: string;
+      file_type: string;
+      extracted_text: string | null;
+      created_at: Date;
     };
-    if (extractedText) {
-      try {
-        indexingResult = await this.indexExtractedAttachment({
-          userId: user.id,
-          diaryEntryId: diaryEntry.id,
-          attachmentId: attachment.id,
-          extractedText,
-          occurredAt: diaryEntry.entry_date,
-          sourceTitle: file.originalname,
-          fileType: file.mimetype,
+
+    try {
+      attachment = await this.prisma.$transaction(async (tx) => {
+        const created = await tx.attachment.create({
+          data: {
+            diary_entry_id: diaryEntry.id,
+            storage_path: uploadedFile.path,
+            file_type: file.mimetype,
+            ...(extractedText && { extracted_text: extractedText }),
+          },
         });
-      } catch (error) {
-        indexingResult = {
-          memoryIndexed: false,
-          memoryChunkCount: 0,
-          processingError: this.toErrorMessage(error),
-        };
-      }
+
+        await this.enqueueAttachmentIndexingJob(tx, {
+          userId: user.id,
+          attachmentId: created.id,
+          originalName: file.originalname,
+        });
+
+        return created;
+      });
+    } catch (error) {
+      await this.storageService
+        .deleteFile('attachments-bucket', uploadedFile.path)
+        .catch((cleanupError) => {
+          console.warn('Failed to cleanup uploaded attachment after DB error:', cleanupError);
+        });
+      throw error;
     }
 
     return {
       message: 'Upload successful',
       url: uploadedFile.url,
       extractionStatus: extractedText ? 'extracted' : 'pending',
-      ...indexingResult,
+      memoryIndexed: false,
+      memoryIndexingStatus: 'queued',
+      memoryChunkCount: 0,
       attachment: {
         id: attachment.id,
         diaryEntryId: attachment.diary_entry_id,
@@ -210,71 +212,24 @@ export class UploadController {
       throw new NotFoundException('Attachment not found.');
     }
 
-    let extractedText = attachment.extracted_text?.trim() ?? '';
-
-    if (!extractedText) {
-      try {
-        const fileBuffer = await this.storageService.downloadFile(
-          'attachments-bucket',
-          attachment.storage_path,
-        );
-        extractedText = await this.extractTextFromBlob(
-          fileBuffer.toString('base64'),
-          attachment.file_type,
-        );
-
-        await this.prisma.attachment.update({
-          where: { id: attachment.id },
-          data: { extracted_text: extractedText },
-        });
-      } catch (error) {
-        return {
-          message: 'Attachment saved; extraction is still pending',
-          extractionStatus: 'pending',
-          memoryIndexed: false,
-          memoryChunkCount: 0,
-          processingError: this.toErrorMessage(error),
-          attachment: {
-            id: attachment.id,
-            diaryEntryId: attachment.diary_entry.id,
-            storagePath: attachment.storage_path,
-            fileType: attachment.file_type,
-            extractedText: null,
-            createdAt: attachment.created_at.toISOString(),
-          },
-        };
-      }
-    }
-
-    let indexingResult: AttachmentIndexingResponse;
-    try {
-      indexingResult = await this.indexExtractedAttachment({
-        userId: user.id,
-        diaryEntryId: attachment.diary_entry.id,
-        attachmentId: attachment.id,
-        extractedText,
-        occurredAt: attachment.diary_entry.entry_date,
-        sourceTitle: this.getStoredFileName(attachment.storage_path),
-        fileType: attachment.file_type,
-      });
-    } catch (error) {
-      indexingResult = {
-        memoryIndexed: false,
-        memoryChunkCount: 0,
-        processingError: this.toErrorMessage(error),
-      };
-    }
+    await this.enqueueAttachmentIndexingJob(this.prisma, {
+      userId: user.id,
+      attachmentId: attachment.id,
+      originalName: this.getStoredFileName(attachment.storage_path),
+    });
 
     return {
-      message: 'Attachment processed',
-      extractionStatus: extractedText ? 'extracted' : 'empty',
-      ...indexingResult,
+      message: 'Attachment processing queued',
+      extractionStatus: attachment.extracted_text ? 'extracted' : 'pending',
+      memoryIndexed: false,
+      memoryIndexingStatus: 'queued',
+      memoryChunkCount: 0,
       attachment: {
         id: attachment.id,
         diaryEntryId: attachment.diary_entry.id,
         storagePath: attachment.storage_path,
         fileType: attachment.file_type,
-        extractedText,
+        extractedText: attachment.extracted_text,
         createdAt: attachment.created_at.toISOString(),
       },
     };
@@ -289,76 +244,41 @@ export class UploadController {
     return text.length > 0 ? text : null;
   }
 
-  private async extractTextFromBlob(base64Data: string, mimeType: string) {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      throw new InternalServerErrorException('GEMINI_API_KEY is not configured.');
-    }
-
-    const ai = new GoogleGenerativeAI(apiKey);
-    const model = ai.getGenerativeModel({
-      model: process.env.GEMINI_VISION_MODEL ?? 'gemini-1.5-flash',
-    });
-
-    const prompt = `
-You are an extraction engine for a personal Second Brain app.
-Extract all readable text, transcripts, headings, labels, and meaningful textual content from this attachment.
-For images with little or no visible text, provide a concise factual description of what is shown.
-Do not invent names, dates, or claims that are not visible in the file.
-Return only the extracted text or factual description.
-`.trim();
-
-    const result = await model.generateContent([
-      prompt,
-      {
-        inlineData: {
-          data: base64Data,
-          mimeType,
+  private async enqueueAttachmentIndexingJob(
+    tx: any,
+    input: {
+      userId: string;
+      attachmentId: string;
+      originalName?: string;
+    },
+  ) {
+    return tx.indexingOutbox.upsert({
+      where: {
+        job_type_source_type_source_id: {
+          job_type: 'index_memory',
+          source_type: 'attachment',
+          source_id: input.attachmentId,
         },
       },
-    ]);
-    const extractedText = result.response.text().trim();
-
-    if (!extractedText) {
-      throw new InternalServerErrorException('Attachment extraction returned empty text.');
-    }
-
-    return extractedText;
-  }
-
-  private async indexExtractedAttachment(input: {
-    userId: string;
-    diaryEntryId: string;
-    attachmentId: string;
-    extractedText: string;
-    occurredAt: Date;
-    sourceTitle: string;
-    fileType: string;
-  }) {
-    const indexingResult = await indexMemoryFromAttachment({
-      userId: input.userId,
-      attachmentId: input.attachmentId,
-      diaryEntryId: input.diaryEntryId,
-      extractedText: input.extractedText,
-      occurredAt: input.occurredAt,
-      sourceTitle: input.sourceTitle,
-      fileType: input.fileType,
-      insertChunks: (chunks) =>
-        this.prisma.$transaction(async (tx) => {
-          await insertMemoryChunks(tx as any, chunks);
-          await pruneMemoryChunksForSource(tx as any, {
-            userId: input.userId,
-            sourceType: 'attachment',
-            sourceId: input.attachmentId,
-            keepChunkCount: chunks.length,
-          });
-        }),
+      update: {
+        user_id: input.userId,
+        status: 'pending',
+        retry_count: 0,
+        error: null,
+        payload: { originalName: input.originalName },
+        run_after: new Date(),
+        locked_at: null,
+        processed_at: null,
+      },
+      create: {
+        user_id: input.userId,
+        job_type: 'index_memory',
+        source_type: 'attachment',
+        source_id: input.attachmentId,
+        status: 'pending',
+        payload: { originalName: input.originalName },
+      },
     });
-
-    return {
-      memoryIndexed: indexingResult.chunkCount > 0,
-      memoryChunkCount: indexingResult.chunkCount,
-    };
   }
 
   private getStoredFileName(storagePath: string) {
@@ -401,15 +321,4 @@ Return only the extracted text or factual description.
       entryDate: attachment.diary_entry?.entry_date.toISOString(),
     };
   }
-
-  private toErrorMessage(error: unknown) {
-    if (error instanceof Error) return error.message;
-    return 'Attachment processing failed.';
-  }
 }
-
-type AttachmentIndexingResponse = {
-  memoryIndexed: boolean;
-  memoryChunkCount: number;
-  processingError?: string;
-};

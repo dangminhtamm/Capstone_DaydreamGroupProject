@@ -1,12 +1,12 @@
 import { PrismaPg } from "@prisma/adapter-pg";
-import {
-  Prisma,
-  PrismaClient,
+import PrismaPackage, {
   type PrismaClient as PrismaClientPackage,
 } from "@prisma/client";
 import { Pool } from "pg";
 
 export * from "./src/search-history.js";
+
+const { Prisma, PrismaClient } = PrismaPackage;
 
 export type PrismaClientLike = Pick<
   PrismaClientPackage,

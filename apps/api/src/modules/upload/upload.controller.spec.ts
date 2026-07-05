@@ -26,6 +26,7 @@ describe('UploadController', () => {
   const storageService = {
     uploadFile: jest.fn(),
     downloadFile: jest.fn(),
+    deleteFile: jest.fn(),
   };
   const prisma = {
     user: {
@@ -38,6 +39,9 @@ describe('UploadController', () => {
       create: jest.fn(),
       findFirst: jest.fn(),
       update: jest.fn(),
+    },
+    indexingOutbox: {
+      upsert: jest.fn(),
     },
     $transaction: jest.fn((fn: any) => fn(prisma)),
   };
@@ -99,7 +103,7 @@ describe('UploadController', () => {
     expect(storageService.uploadFile).not.toHaveBeenCalled();
   });
 
-  it('stores extracted text and indexes text attachments into memory chunks', async () => {
+  it('stores extracted text and queues text attachment indexing', async () => {
     const entryDate = new Date('2026-05-18T09:00:00.000Z');
     prisma.user.findUnique.mockResolvedValue({ id: 'user-1' });
     prisma.diaryEntry.findFirst.mockResolvedValue({
@@ -131,40 +135,25 @@ describe('UploadController', () => {
         extracted_text: 'hello world from upload',
       }),
     });
-    expect(indexMemoryFromAttachment).toHaveBeenCalledWith(
+    expect(prisma.indexingOutbox.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
-        userId: 'user-1',
-        attachmentId: 'attachment-1',
-        diaryEntryId: 'diary-1',
-        extractedText: 'hello world from upload',
-        sourceTitle: 'note.txt',
-        fileType: 'text/plain',
+        where: {
+          job_type_source_type_source_id: {
+            job_type: 'index_memory',
+            source_type: 'attachment',
+            source_id: 'attachment-1',
+          },
+        },
       }),
     );
-    expect(insertMemoryChunks).toHaveBeenCalledWith(
-      prisma,
-      expect.arrayContaining([
-        expect.objectContaining({
-          userId: 'user-1',
-          sourceType: 'attachment',
-          sourceId: 'attachment-1',
-          text: 'hello world from upload',
-        }),
-      ]),
-    );
-    expect(pruneMemoryChunksForSource).toHaveBeenCalledWith(
-      prisma,
-      {
-        userId: 'user-1',
-        sourceType: 'attachment',
-        sourceId: 'attachment-1',
-        keepChunkCount: 1,
-      },
-    );
+    expect(indexMemoryFromAttachment).not.toHaveBeenCalled();
+    expect(insertMemoryChunks).not.toHaveBeenCalled();
+    expect(pruneMemoryChunksForSource).not.toHaveBeenCalled();
     expect(result).toMatchObject({
       extractionStatus: 'extracted',
-      memoryIndexed: true,
-      memoryChunkCount: 1,
+      memoryIndexed: false,
+      memoryIndexingStatus: 'queued',
+      memoryChunkCount: 0,
     });
   });
 
@@ -201,14 +190,55 @@ describe('UploadController', () => {
       }),
     });
     expect(indexMemoryFromAttachment).not.toHaveBeenCalled();
+    expect(prisma.indexingOutbox.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          job_type_source_type_source_id: {
+            job_type: 'index_memory',
+            source_type: 'attachment',
+            source_id: 'attachment-2',
+          },
+        },
+      }),
+    );
     expect(result).toMatchObject({
       extractionStatus: 'pending',
       memoryIndexed: false,
+      memoryIndexingStatus: 'queued',
       memoryChunkCount: 0,
     });
   });
 
-  it('extracts pending attachments and indexes them into memory chunks on demand', async () => {
+  it('removes the uploaded storage object if attachment DB creation fails', async () => {
+    const entryDate = new Date('2026-05-18T09:00:00.000Z');
+    prisma.user.findUnique.mockResolvedValue({ id: 'user-1' });
+    prisma.diaryEntry.findFirst.mockResolvedValue({
+      id: 'diary-1',
+      entry_date: entryDate,
+    });
+    storageService.uploadFile.mockResolvedValue({
+      path: 'attachments/orphan.pdf',
+      url: 'https://storage.local/orphan.pdf',
+    });
+    const dbError = new Error('database insert failed');
+    prisma.$transaction.mockRejectedValueOnce(dbError);
+    storageService.deleteFile.mockResolvedValue(undefined);
+
+    await expect(
+      controller.uploadAttachment(
+        { user: { userId: 'supabase-user-1' } },
+        'diary-1',
+        fileFixture('orphan.pdf', 'application/pdf', '%PDF-1.4'),
+      ),
+    ).rejects.toThrow('database insert failed');
+
+    expect(storageService.deleteFile).toHaveBeenCalledWith(
+      'attachments-bucket',
+      'attachments/orphan.pdf',
+    );
+  });
+
+  it('queues pending attachments for background processing on demand', async () => {
     const entryDate = new Date('2026-05-18T09:00:00.000Z');
     prisma.user.findUnique.mockResolvedValue({ id: 'user-1' });
     prisma.attachment.findFirst.mockResolvedValue({
@@ -223,43 +253,35 @@ describe('UploadController', () => {
         entry_date: entryDate,
       },
     });
-    storageService.downloadFile.mockResolvedValue(Buffer.from('%PDF-1.4'));
-    prisma.attachment.update.mockResolvedValue({
-      id: 'attachment-2',
-      extracted_text: 'Extracted PDF text about the Alpha research plan.',
-    });
-
     const result = await controller.processAttachmentNow(
       { user: { userId: 'supabase-user-1' } },
       'attachment-2',
     );
 
-    expect(storageService.downloadFile).toHaveBeenCalledWith(
-      'attachments-bucket',
-      'attachments/research.pdf',
-    );
-    expect(mockGenerateContent).toHaveBeenCalled();
-    expect(prisma.attachment.update).toHaveBeenCalledWith({
-      where: { id: 'attachment-2' },
-      data: { extracted_text: 'Extracted PDF text about the Alpha research plan.' },
-    });
-    expect(indexMemoryFromAttachment).toHaveBeenCalledWith(
+    expect(storageService.downloadFile).not.toHaveBeenCalled();
+    expect(mockGenerateContent).not.toHaveBeenCalled();
+    expect(prisma.attachment.update).not.toHaveBeenCalled();
+    expect(indexMemoryFromAttachment).not.toHaveBeenCalled();
+    expect(prisma.indexingOutbox.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
-        userId: 'user-1',
-        attachmentId: 'attachment-2',
-        diaryEntryId: 'diary-1',
-        extractedText: 'Extracted PDF text about the Alpha research plan.',
-        fileType: 'application/pdf',
+        where: {
+          job_type_source_type_source_id: {
+            job_type: 'index_memory',
+            source_type: 'attachment',
+            source_id: 'attachment-2',
+          },
+        },
       }),
     );
     expect(result).toMatchObject({
-      extractionStatus: 'extracted',
-      memoryIndexed: true,
-      memoryChunkCount: 1,
+      extractionStatus: 'pending',
+      memoryIndexed: false,
+      memoryIndexingStatus: 'queued',
+      memoryChunkCount: 0,
     });
   });
 
-  it('keeps a pending attachment when extraction fails instead of throwing a 500', async () => {
+  it('requeues a pending attachment without running extraction in the API request', async () => {
     const entryDate = new Date('2026-05-18T09:00:00.000Z');
     prisma.user.findUnique.mockResolvedValue({ id: 'user-1' });
     prisma.attachment.findFirst.mockResolvedValue({
@@ -274,21 +296,19 @@ describe('UploadController', () => {
         entry_date: entryDate,
       },
     });
-    storageService.downloadFile.mockResolvedValue(Buffer.from('image-data'));
-    mockGenerateContent.mockRejectedValue(new Error('Gemini extraction failed'));
-
     const result = await controller.processAttachmentNow(
       { user: { userId: 'supabase-user-1' } },
       'attachment-3',
     );
 
+    expect(storageService.downloadFile).not.toHaveBeenCalled();
     expect(prisma.attachment.update).not.toHaveBeenCalled();
     expect(indexMemoryFromAttachment).not.toHaveBeenCalled();
     expect(result).toMatchObject({
       extractionStatus: 'pending',
       memoryIndexed: false,
+      memoryIndexingStatus: 'queued',
       memoryChunkCount: 0,
-      processingError: 'Gemini extraction failed',
       attachment: {
         id: 'attachment-3',
         extractedText: null,

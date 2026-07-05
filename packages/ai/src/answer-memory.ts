@@ -2,10 +2,11 @@ import { SchemaType, type ResponseSchema } from "@google/generative-ai";
 import { z } from "zod";
 import { generateGeminiJsonWithMeta, type GeminiTokenUsage } from "./gemini-json.ts";
 import {
-  retrieveMemory,
+  retrieveMemoryWithEmbedding,
   type MemorySearchHit,
   type RetrievalFilters,
 } from "./retrieval.ts";
+import { createDefaultEmbeddingProvider } from "./embedding.ts";
 import type { MemoryDbClient } from "./types.ts";
 
 const MIN_TOP_SIMILARITY = Number(
@@ -154,9 +155,19 @@ export async function answerMemory(
     maxDistance: options.maxDistance ?? DEFAULT_MAX_DISTANCE,
   };
 
-  // ── Embed + Retrieve (timed together since retrieveMemory embeds internally) ──
+  // ── Embed + Retrieve ─────────────────────────────────────────────────────
+  const embedStart = performance.now();
+  const embedding = await createDefaultEmbeddingProvider().embedQuery(normalizedQuestion);
+  const embedMs = performance.now() - embedStart;
+
   const retrieveStart = performance.now();
-  const chunks = await retrieveMemory(normalizedQuestion, userId, dbClient, appliedFilters);
+  const chunks = await retrieveMemoryWithEmbedding(
+    normalizedQuestion,
+    userId,
+    dbClient,
+    embedding,
+    appliedFilters,
+  );
   const retrieveMs = performance.now() - retrieveStart;
 
   const fastPathResult = answerSingleDayFastPath(
@@ -174,8 +185,7 @@ export async function answerMemory(
   // Patch analytics timing: answerFromChunks already set generateMs,
   // but we need to fill in embed/retrieve timings and total.
   if (result.analytics) {
-    // embed is included in retrieve for this code path
-    result.analytics.timing.embedMs = 0;
+    result.analytics.timing.embedMs = Math.round(embedMs);
     result.analytics.timing.retrieveMs = Math.round(retrieveMs);
     result.analytics.timing.totalMs = Math.round(performance.now() - totalStart);
   }

@@ -5,12 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { indexMemoryFromDiary } from '@second-brain/ai';
-import {
-  deleteMemoryChunksForSource,
-  insertMemoryChunks,
-  pruneMemoryChunksForSource,
-} from '@second-brain/db';
+import { deleteMemoryChunksForSource } from '@second-brain/db';
 import { PrismaService } from '../../prisma/prisma.service'; // Adjust path based on your setup
 import { CreateDiaryDto } from './dto/create-diary.dto';
 
@@ -26,33 +21,31 @@ export class DiaryService {
 
     if (!user) throw new NotFoundException('User not found');
 
-    const entry = await this.prisma.diaryEntry.create({
-      data: {
-        raw_text: `${dto.title}\n\n${dto.content}`,
-        user_id: user.id,
-        status: 'published',
-        ...(dto.entryDate ? { entry_date: new Date(dto.entryDate) } : {}),
-      },
+    const entry = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.diaryEntry.create({
+        data: {
+          raw_text: `${dto.title}\n\n${dto.content}`,
+          user_id: user.id,
+          status: 'published',
+          ...(dto.entryDate ? { entry_date: new Date(dto.entryDate) } : {}),
+        },
+      });
+
+      await this.enqueueIndexingJob(tx, {
+        userId: user.id,
+        sourceType: 'diary',
+        sourceId: created.id,
+        payload: { sourceTitle: dto.title },
+      });
+
+      return created;
     });
 
-    try {
-      const indexingResult = await this.indexDiaryEntry(
-        user.id,
-        entry,
-        dto.title,
-      );
-
-      return {
-        ...this.toClientEntry(entry),
-        memoryIndexed: true,
-        memoryChunkCount: indexingResult.chunkCount,
-      };
-    } catch (error) {
-      console.error('Failed to index diary entry into memory chunks:', error);
-      throw new InternalServerErrorException(
-        'Diary entry was saved, but memory indexing failed.',
-      );
-    }
+    return {
+      ...this.toClientEntry(entry),
+      memoryIndexed: false,
+      memoryIndexingStatus: 'queued',
+    };
   }
 
   async findAll(userId: string) {
@@ -97,46 +90,43 @@ export class DiaryService {
     const rawText = this.buildRawText(title, content);
     const entryDate = dto.entryDate ? new Date(dto.entryDate) : undefined;
 
-    const entry = await this.prisma.diaryEntry.update({
-      where: { id },
-      data: {
-        raw_text: rawText,
-        ...(entryDate ? { entry_date: entryDate } : {}),
-      },
+    const entry = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.diaryEntry.update({
+        where: { id },
+        data: {
+          raw_text: rawText,
+          ...(entryDate ? { entry_date: entryDate } : {}),
+        },
+      });
+
+      await this.enqueueIndexingJob(tx, {
+        userId: user.id,
+        sourceType: 'diary',
+        sourceId: updated.id,
+        payload: { sourceTitle: title },
+      });
+
+      return updated;
     });
 
-    try {
-      const indexingResult = await this.indexDiaryEntry(user.id, entry, title);
-
-      return {
-        ...this.toClientEntry(entry),
-        memoryIndexed: true,
-        memoryChunkCount: indexingResult.chunkCount,
-      };
-    } catch (error) {
-      await this.prisma.diaryEntry
-        .update({
-          where: { id },
-          data: {
-            raw_text: existingEntry.raw_text,
-            entry_date: existingEntry.entry_date,
-          },
-        })
-        .catch((rollbackError) => {
-          console.error('Failed to rollback diary update:', rollbackError);
-        });
-
-      console.error('Failed to re-index updated diary entry:', error);
-      throw new InternalServerErrorException(
-        'Diary update was rolled back because memory re-indexing failed.',
-      );
-    }
+    return {
+      ...this.toClientEntry(entry),
+      memoryIndexed: false,
+      memoryIndexingStatus: 'queued',
+    };
   }
 
   async remove(userId: string, id: string) {
     const { user } = await this.findOwnedEntry(userId, id);
 
     return this.prisma.$transaction(async (tx) => {
+      await tx.indexingOutbox.deleteMany({
+        where: {
+          source_type: 'diary',
+          source_id: id,
+        },
+      });
+
       await deleteMemoryChunksForSource(tx as any, {
         userId: user.id,
         sourceType: 'diary',
@@ -144,6 +134,44 @@ export class DiaryService {
       });
 
       return tx.diaryEntry.delete({ where: { id } });
+    });
+  }
+
+  private async enqueueIndexingJob(
+    tx: any,
+    input: {
+      userId: string;
+      sourceType: 'diary' | 'attachment' | 'summary';
+      sourceId: string;
+      payload?: Record<string, unknown>;
+    },
+  ) {
+    return tx.indexingOutbox.upsert({
+      where: {
+        job_type_source_type_source_id: {
+          job_type: 'index_memory',
+          source_type: input.sourceType,
+          source_id: input.sourceId,
+        },
+      },
+      update: {
+        user_id: input.userId,
+        status: 'pending',
+        retry_count: 0,
+        error: null,
+        payload: input.payload ?? {},
+        run_after: new Date(),
+        locked_at: null,
+        processed_at: null,
+      },
+      create: {
+        user_id: input.userId,
+        job_type: 'index_memory',
+        source_type: input.sourceType,
+        source_id: input.sourceId,
+        status: 'pending',
+        payload: input.payload ?? {},
+      },
     });
   }
 
@@ -162,40 +190,6 @@ export class DiaryService {
     if (!entry) throw new NotFoundException('Diary entry not found');
 
     return { user, entry };
-  }
-
-  private async indexDiaryEntry(
-    userId: string,
-    entry: { id: string; raw_text: string; entry_date: Date },
-    sourceTitle: string,
-  ) {
-    const indexingResult = await indexMemoryFromDiary({
-      userId,
-      diaryId: entry.id,
-      rawText: entry.raw_text,
-      entryDate: entry.entry_date,
-      sourceTitle,
-      insertChunks: (chunks) =>
-        this.prisma.$transaction(async (tx) => {
-          await insertMemoryChunks(tx as any, chunks);
-          await pruneMemoryChunksForSource(tx as any, {
-            userId,
-            sourceType: 'diary',
-            sourceId: entry.id,
-            keepChunkCount: chunks.length,
-          });
-        }),
-    });
-
-    if (indexingResult.chunkCount === 0) {
-      await deleteMemoryChunksForSource(this.prisma as any, {
-        userId,
-        sourceType: 'diary',
-        sourceId: entry.id,
-      });
-    }
-
-    return indexingResult;
   }
 
   private buildRawText(title: string, content: string) {

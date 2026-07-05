@@ -1,4 +1,11 @@
-import { Controller, Post, Body, UseGuards, Req } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { PrismaService } from '../../prisma/prisma.service';
 
@@ -11,34 +18,42 @@ export class AuthController {
   @Post('sync')
   async syncSupabaseUser(
     @Req() req: { user: { userId: string; email: string } },
-    @Body() body: { google_access_token?: string, google_refresh_token?: string, display_name?: string }
+    @Body()
+    body: {
+      display_name?: string;
+      google_access_token?: unknown;
+      google_refresh_token?: unknown;
+    } = {},
   ) {
+    if ('google_access_token' in body || 'google_refresh_token' in body) {
+      throw new BadRequestException(
+        'Google OAuth tokens must be synced through the server-side OAuth flow.',
+      );
+    }
+
     const supabaseId = req.user.userId;
     const email = req.user.email;
-    const { google_access_token, google_refresh_token, display_name } = body;
-    const hasGoogleToken = Boolean(google_access_token || google_refresh_token);
+    const { display_name } = body;
 
     const user = await this.prisma.user.upsert({
       where: {
-        email: email
+        supabaseId,
       },
       update: {
-        supabaseId: supabaseId,
-        ...(google_access_token && { google_access_token }),
-        ...(google_refresh_token && { google_refresh_token }),
-        ...(hasGoogleToken && { google_connected: true }),
-        display_name: display_name,
+        email,
+        display_name,
       },
       create: {
-        email: email,
-        supabaseId: supabaseId,
-        google_access_token: google_access_token,
-        google_refresh_token: google_refresh_token,
-        google_connected: hasGoogleToken,
-        display_name: display_name,
+        email,
+        supabaseId,
+        display_name,
       },
     });
 
-    return { message: 'User synced successfully.', userId: user.id };
+    return {
+      message: 'User synced successfully.',
+      userId: user.id,
+      googleConnected: user.google_connected,
+    };
   }
 }

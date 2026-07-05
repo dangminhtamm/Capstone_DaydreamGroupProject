@@ -23,6 +23,10 @@ describe('DiaryService', () => {
       update: jest.fn(),
       delete: jest.fn(),
     },
+    indexingOutbox: {
+      upsert: jest.fn(),
+      deleteMany: jest.fn(),
+    },
     $transaction: jest.fn((fn: any) => fn(prisma)),
   };
 
@@ -33,7 +37,7 @@ describe('DiaryService', () => {
     service = new DiaryService(prisma as any);
   });
 
-  it('creates a diary for the authenticated user and indexes memory', async () => {
+  it('creates a diary for the authenticated user and queues memory indexing', async () => {
     const entryDate = new Date('2026-05-18T09:00:00.000Z');
     prisma.user.findUnique.mockResolvedValue({ id: 'user-1' });
     prisma.diaryEntry.create.mockResolvedValue({
@@ -61,8 +65,20 @@ describe('DiaryService', () => {
       id: 'diary-1',
       title: 'Title',
       content: 'Content',
-      memoryIndexed: true,
+      memoryIndexed: false,
+      memoryIndexingStatus: 'queued',
     });
+    expect(prisma.indexingOutbox.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          job_type_source_type_source_id: {
+            job_type: 'index_memory',
+            source_type: 'diary',
+            source_id: 'diary-1',
+          },
+        },
+      }),
+    );
   });
 
   it('stores an explicit diary entry date when provided', async () => {

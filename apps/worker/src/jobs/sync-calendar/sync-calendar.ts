@@ -1,8 +1,6 @@
 import { prisma } from '../../lib/prisma';
 import { google, calendar_v3 } from 'googleapis';
 import * as cron from 'node-cron';
-import { indexMemoryFromCalendar } from '@second-brain/ai';
-import { insertMemoryChunks, pruneMemoryChunksForSource } from '@second-brain/db';
 
 export class SyncCalendarJob {
 
@@ -24,7 +22,7 @@ export class SyncCalendarJob {
 
   // Core logic to sync events for a specific user
   static async syncEventsForUser(user: any) {
-    if (!user.google_access_token) {
+    if (!user.google_access_token && !user.google_refresh_token) {
       console.log(`[Worker - Calendar Sync] Skipping User ${user.id}: No Google token found.`);
       return;
     }
@@ -69,62 +67,50 @@ export class SyncCalendarJob {
 
       const rawEvents = response.data.items || [];
 
-      const upsertPromises = rawEvents.map((event) => {
-        const normalizedData = this.normalizeEvent(event, user.id);
+      const syncedEvents = await prisma.$transaction(async (tx) => {
+        const events = [];
 
-        return prisma.calendarEvent.upsert({
-          where: {
-            user_id_external_id: {
-              user_id: normalizedData.user_id,
-              external_id: normalizedData.external_id,
+        for (const event of rawEvents) {
+          const normalizedData = this.normalizeEvent(event, user.id);
+          const syncedEvent = await tx.calendarEvent.upsert({
+            where: {
+              user_id_external_id: {
+                user_id: normalizedData.user_id,
+                external_id: normalizedData.external_id,
+              },
             },
-          },
-          update: {
-            title: normalizedData.title,
-            description: normalizedData.description,
-            start_time: normalizedData.start_time,
-            end_time: normalizedData.end_time,
-            html_link: normalizedData.html_link,
-          },
-          create: {
-            external_id: normalizedData.external_id,
-            user_id: normalizedData.user_id,
-            title: normalizedData.title,
-            description: normalizedData.description,
-            start_time: normalizedData.start_time,
-            end_time: normalizedData.end_time,
-            html_link: normalizedData.html_link,
-          },
-        });
-      });
+            update: {
+              title: normalizedData.title,
+              description: normalizedData.description,
+              start_time: normalizedData.start_time,
+              end_time: normalizedData.end_time,
+              html_link: normalizedData.html_link,
+            },
+            create: {
+              external_id: normalizedData.external_id,
+              user_id: normalizedData.user_id,
+              title: normalizedData.title,
+              description: normalizedData.description,
+              start_time: normalizedData.start_time,
+              end_time: normalizedData.end_time,
+              html_link: normalizedData.html_link,
+            },
+          });
 
-      const syncedEvents = await Promise.all(upsertPromises);
-      const indexingResult = await indexMemoryFromCalendar({
-        userId: user.id,
-        events: syncedEvents.map((event) => ({
-          eventId: event.id,
-          externalId: event.external_id,
-          title: event.title,
-          description: event.description,
-          startTime: event.start_time,
-          endTime: event.end_time,
-          htmlLink: event.html_link,
-        })),
-        insertChunks: (chunks) =>
-          prisma.$transaction(async (tx: any) => {
-            await insertMemoryChunks(tx, chunks);
-            if (chunks.length > 0) {
-              await pruneMemoryChunksForSource(tx, {
-                userId: chunks[0].userId,
-                sourceType: chunks[0].sourceType,
-                sourceId: chunks[0].sourceId,
-                keepChunkCount: chunks.length,
-              });
-            }
-          }),
+          await this.enqueueCalendarIndexingJob(tx, {
+            userId: user.id,
+            calendarEventId: syncedEvent.id,
+            externalId: syncedEvent.external_id,
+            title: syncedEvent.title,
+          });
+
+          events.push(syncedEvent);
+        }
+
+        return events;
       });
       console.log(
-        `[Worker - Calendar Sync] Success: Synced ${rawEvents.length} events and indexed ${indexingResult.totalChunkCount} chunks for User ${user.id}`,
+        `[Worker - Calendar Sync] Success: Synced ${rawEvents.length} events and queued ${syncedEvents.length} indexing jobs for User ${user.id}`,
       );
 
     } catch (error: any) {
@@ -141,8 +127,11 @@ export class SyncCalendarJob {
       // Only fetch users who have connected their Google account
       const usersToSync = await prisma.user.findMany({
         where: {
-          google_access_token: { not: null }
-        }
+          OR: [
+            { google_access_token: { not: null } },
+            { google_refresh_token: { not: null } },
+          ],
+        },
       });
 
       console.log(`[Worker - Calendar Sync] Found ${usersToSync.length} eligible users for sync.`);
@@ -153,5 +142,49 @@ export class SyncCalendarJob {
     });
 
     console.log('Background Worker for Auto-Sync Calendar started.');
+  }
+
+  private static async enqueueCalendarIndexingJob(
+    tx: any,
+    input: {
+      userId: string;
+      calendarEventId: string;
+      externalId: string;
+      title: string;
+    },
+  ) {
+    return tx.indexingOutbox.upsert({
+      where: {
+        job_type_source_type_source_id: {
+          job_type: 'index_memory',
+          source_type: 'calendar',
+          source_id: input.calendarEventId,
+        },
+      },
+      update: {
+        user_id: input.userId,
+        status: 'pending',
+        retry_count: 0,
+        error: null,
+        payload: {
+          externalId: input.externalId,
+          sourceTitle: input.title,
+        },
+        run_after: new Date(),
+        locked_at: null,
+        processed_at: null,
+      },
+      create: {
+        user_id: input.userId,
+        job_type: 'index_memory',
+        source_type: 'calendar',
+        source_id: input.calendarEventId,
+        status: 'pending',
+        payload: {
+          externalId: input.externalId,
+          sourceTitle: input.title,
+        },
+      },
+    });
   }
 }

@@ -1,4 +1,5 @@
 // apps/worker/src/index.ts
+import './env';
 
 // 1. Import all background jobs with a single line
 import {

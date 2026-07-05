@@ -1,5 +1,6 @@
 // apps/api/src/storage/storage.service.ts
 import { Injectable } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 @Injectable()
@@ -15,7 +16,7 @@ export class StorageService {
 
   async uploadFile(file: Express.Multer.File, bucket: string) {
     const safeName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');
-    const filePath = `attachments/${Date.now()}-${safeName}`;
+    const filePath = `attachments/${randomUUID()}-${safeName}`;
 
     const { data, error } = await this.supabase.storage
       .from(bucket)
@@ -46,5 +47,10 @@ export class StorageService {
     if (!data) throw new Error(`File not found in storage: ${path}`);
 
     return Buffer.from(await data.arrayBuffer());
+  }
+
+  async deleteFile(bucket: string, path: string) {
+    const { error } = await this.supabase.storage.from(bucket).remove([path]);
+    if (error) throw error;
   }
 }

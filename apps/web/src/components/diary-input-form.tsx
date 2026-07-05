@@ -319,11 +319,33 @@ export function DiaryInputForm() {
       return `Indexed ${response.memoryChunkCount} memory chunks`;
     }
 
+    if (response.memoryIndexingStatus === "queued" || response.memoryIndexingStatus === "pending") {
+      return response.extractionStatus === "extracted"
+        ? "Text extracted; queued for memory indexing"
+        : "Saved; queued for text extraction and memory indexing";
+    }
+
+    if (response.memoryIndexingStatus === "processing") {
+      return response.extractionStatus === "extracted"
+        ? "Text extracted; indexing in progress"
+        : "Text extraction in progress";
+    }
+
+    if (response.memoryIndexingStatus === "failed") {
+      return "Attachment indexing failed; try processing it again";
+    }
+
     if (response.extractionStatus === "pending") {
       return "Saved; extraction pending";
     }
 
-    return "Extracted text but no memory chunks were created";
+    return "Text extracted; waiting for memory indexing";
+  }
+
+  function getAttachmentStatus(response: AttachmentUploadResponse): AttachmentStatus {
+    if (response.processingError || response.memoryIndexingStatus === "failed") return "error";
+    if (response.memoryIndexed || response.memoryIndexingStatus === "succeeded") return "indexed";
+    return "pending";
   }
 
   async function handleCopilotAction(action: string) {
@@ -409,22 +431,15 @@ export function DiaryInputForm() {
           const uploadResult = await uploadDiaryAttachment(diaryEntry.id, item.file, accessToken);
           updateAttachmentItem(item.id, {
             attachmentId: uploadResult.attachment.id,
-            status: uploadResult.extractionStatus === "pending" ? "extracting" : "indexed",
-            message:
-              uploadResult.extractionStatus === "pending"
-                ? "Extracting text with AI"
-                : getAttachmentMessage(uploadResult),
+            status: getAttachmentStatus(uploadResult),
+            message: getAttachmentMessage(uploadResult),
             memoryChunkCount: uploadResult.memoryChunkCount,
           });
 
           if (uploadResult.extractionStatus === "pending") {
             const processResult = await processDiaryAttachment(uploadResult.attachment.id, accessToken);
             updateAttachmentItem(item.id, {
-              status: processResult.processingError
-                ? "pending"
-                : processResult.memoryIndexed
-                  ? "indexed"
-                  : "pending",
+              status: getAttachmentStatus(processResult),
               message: getAttachmentMessage(processResult),
               memoryChunkCount: processResult.memoryChunkCount,
             });

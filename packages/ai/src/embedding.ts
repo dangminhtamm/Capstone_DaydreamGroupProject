@@ -44,10 +44,12 @@ export interface AdvancedEmbeddingProvider extends EmbeddingProvider {
 
 export class GeminiEmbeddingProvider implements AdvancedEmbeddingProvider {
   private ai: GoogleGenerativeAI;
+  private model: ReturnType<GoogleGenerativeAI["getGenerativeModel"]>;
   readonly dimension = DEFAULT_EMBEDDING_DIMENSION;
 
   // In-memory LRU cache for query embeddings — avoids re-embedding identical questions
   private queryCache = new Map<string, number[]>();
+  private queryInFlight = new Map<string, Promise<number[]>>();
   private readonly queryCacheMaxSize = Number(process.env.EMBEDDING_CACHE_SIZE ?? 150);
 
   constructor(apiKey?: string) {
@@ -60,6 +62,9 @@ export class GeminiEmbeddingProvider implements AdvancedEmbeddingProvider {
     }
 
     this.ai = new GoogleGenerativeAI(key);
+    this.model = this.ai.getGenerativeModel({
+      model: GEMINI_EMBEDDING_MODEL,
+    });
   }
 
   async embedDocument(text: string): Promise<number[]> {
@@ -76,7 +81,18 @@ export class GeminiEmbeddingProvider implements AdvancedEmbeddingProvider {
       return cached;
     }
 
-    const embedding = await this.embed(text, "RETRIEVAL_QUERY");
+    const inFlight = this.queryInFlight.get(cacheKey);
+    if (inFlight) return inFlight;
+
+    const embeddingPromise = this.embed(text, "RETRIEVAL_QUERY");
+    this.queryInFlight.set(cacheKey, embeddingPromise);
+
+    let embedding: number[];
+    try {
+      embedding = await embeddingPromise;
+    } finally {
+      this.queryInFlight.delete(cacheKey);
+    }
 
     // Evict oldest entry if at capacity
     if (this.queryCache.size >= this.queryCacheMaxSize) {
@@ -95,12 +111,8 @@ export class GeminiEmbeddingProvider implements AdvancedEmbeddingProvider {
       throw new Error("Cannot embed empty text.");
     }
 
-    const model = this.ai.getGenerativeModel({
-      model: GEMINI_EMBEDDING_MODEL,
-    });
-
     const result = await retry(async () =>
-      model.embedContent({
+      this.model.embedContent({
         content: {
           role: "user",
           parts: [{ text }],

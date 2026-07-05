@@ -47,6 +47,11 @@ export {
   type IndexMemoryFromAttachmentResult,
 } from "./attachment-indexer.ts";
 export {
+  indexMemoryFromSummary,
+  type IndexMemoryFromSummaryInput,
+  type IndexMemoryFromSummaryResult,
+} from "./summary-indexer.ts";
+export {
   DEFAULT_EMBEDDING_DIMENSION,
   DEFAULT_EMBEDDING_PROVIDER,
   GEMINI_EMBEDDING_MODEL,
