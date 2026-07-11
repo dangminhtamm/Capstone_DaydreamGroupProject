@@ -689,9 +689,9 @@ function importantTokens(value: string): string[] {
     .filter((token) => token.length >= 3 && !stopwords.has(token));
 }
 
-export function inferRetrievalFilters(question: string): RetrievalFilters {
+export function inferRetrievalFilters(question: string, now = new Date()): RetrievalFilters {
   const normalized = normalizeForIntent(question);
-  const temporalFilters = inferTemporalFilters(normalized);
+  const temporalFilters = inferTemporalFilters(normalized, now);
 
   if (
     includesAny(normalized, [
@@ -779,12 +779,26 @@ function inferTemporalFilters(normalizedQuestion: string, now = new Date()): Ret
     return dateRange(today, addDays(today, 1));
   }
 
+  if (includesAny(normalizedQuestion, ["tomorrow", "ngay mai", "ngày mai"])) {
+    const start = addDays(today, 1);
+    return dateRange(start, addDays(start, 1));
+  }
+
   if (includesAny(normalizedQuestion, ["yesterday", "hom qua", "hôm qua"])) {
+    return dateRange(addDays(today, -1), today);
+  }
+
+  if (includesAny(normalizedQuestion, ["previous day", "hom truoc", "hôm trước"])) {
     return dateRange(addDays(today, -1), today);
   }
 
   if (includesAny(normalizedQuestion, ["this week", "tuan nay", "tuần này"])) {
     const start = startOfUtcWeek(today);
+    return dateRange(start, addDays(start, 7));
+  }
+
+  if (includesAny(normalizedQuestion, ["next week", "following week", "tuan sau", "tuần sau"])) {
+    const start = addDays(startOfUtcWeek(today), 7);
     return dateRange(start, addDays(start, 7));
   }
 
@@ -795,6 +809,11 @@ function inferTemporalFilters(normalizedQuestion: string, now = new Date()): Ret
 
   if (includesAny(normalizedQuestion, ["this month", "thang nay", "tháng này"])) {
     const start = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
+    return dateRange(start, new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 1)));
+  }
+
+  if (includesAny(normalizedQuestion, ["next month", "following month", "thang sau", "tháng sau"])) {
+    const start = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 1));
     return dateRange(start, new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 1)));
   }
 

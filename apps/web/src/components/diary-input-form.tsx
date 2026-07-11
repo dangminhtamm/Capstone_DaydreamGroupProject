@@ -296,14 +296,16 @@ export function DiaryInputForm() {
 
   function handleAttachmentSelection(event: React.ChangeEvent<HTMLInputElement>) {
     const selectedFiles = Array.from(event.target.files ?? []);
-    setAttachmentItems(
-      selectedFiles.map((file) => ({
-        id: `${file.name}-${file.size}-${file.lastModified}`,
+    setAttachmentItems((current) => [
+      ...current,
+      ...selectedFiles.map((file) => ({
+        id: `${file.name}-${file.size}-${file.lastModified}-${crypto.randomUUID()}`,
         file,
-        status: "queued",
+        status: "queued" as const,
         message: "Ready to attach",
       })),
-    );
+    ]);
+    event.target.value = "";
   }
 
   function removeAttachment(id: string) {
@@ -421,6 +423,8 @@ export function DiaryInputForm() {
       const diaryEntry = await createDiaryEntry(payload, accessToken);
 
       const queuedAttachments = attachmentItems.filter((item) => item.status === "queued");
+      let attachmentHadErrors = false;
+
       for (const item of queuedAttachments) {
         try {
           updateAttachmentItem(item.id, {
@@ -445,6 +449,7 @@ export function DiaryInputForm() {
             });
           }
         } catch (attachmentError) {
+          attachmentHadErrors = true;
           updateAttachmentItem(item.id, {
             status: "error",
             message: attachmentError instanceof Error ? attachmentError.message : "Attachment upload failed",
@@ -452,8 +457,13 @@ export function DiaryInputForm() {
         }
       }
 
-      setState("success");
       setDraft(initialDraft);
+      if (attachmentHadErrors) {
+        setState("error");
+        setErrorMessage("Diary saved, but one or more attachments failed. Check the file status above.");
+      } else {
+        setState("success");
+      }
     } catch (error) {
       setState("error");
       setErrorMessage(error instanceof Error ? error.message : "Failed to save diary entry");

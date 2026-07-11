@@ -48,7 +48,7 @@ export class DiaryService {
     };
   }
 
-  async findAll(userId: string) {
+  async findAll(userId: string, options: { limit?: number } = {}) {
     const user = await this.prisma.user.findUnique({
       where: { supabaseId: userId },
       select: { id: true },
@@ -58,7 +58,16 @@ export class DiaryService {
 
     const entries = await this.prisma.diaryEntry.findMany({
       where: { user_id: user.id },
+      select: {
+        id: true,
+        raw_text: true,
+        status: true,
+        entry_date: true,
+        created_at: true,
+        updated_at: true,
+      },
       orderBy: { created_at: 'desc' },
+      take: Math.min(Math.max(options.limit ?? 100, 1), 200),
     });
 
     return entries.map((entry) => this.toClientEntry(entry));
@@ -146,7 +155,7 @@ export class DiaryService {
       payload?: Record<string, unknown>;
     },
   ) {
-    return tx.indexingOutbox.upsert({
+    const job = await tx.indexingOutbox.upsert({
       where: {
         job_type_source_type_source_id: {
           job_type: 'index_memory',
@@ -172,6 +181,19 @@ export class DiaryService {
         status: 'pending',
         payload: input.payload ?? {},
       },
+    });
+
+    await this.expireSearchCache(tx, input.userId);
+    return job;
+  }
+
+  private async expireSearchCache(tx: any, userId: string) {
+    await tx.searchHistory?.updateMany?.({
+      where: {
+        user_id: userId,
+        expires_at: { gt: new Date() },
+      },
+      data: { expires_at: new Date() },
     });
   }
 

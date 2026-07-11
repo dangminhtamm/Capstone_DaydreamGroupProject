@@ -446,43 +446,6 @@ export default function SearchPage() {
             ) : null}
           </div>
 
-          {result ? (
-            <div className={`mb-4 rounded-2xl border p-3 ${
-              result.debugTrace
-                ? "border-sky-200 bg-sky-50/80 dark:border-sky-800 dark:bg-sky-950/30"
-                : "border-amber-200 bg-amber-50/80 dark:border-amber-800 dark:bg-amber-950/30"
-            }`}>
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className={`text-sm font-bold ${
-                  result.debugTrace
-                    ? "text-sky-900 dark:text-sky-200"
-                    : "text-amber-900 dark:text-amber-200"
-                }`}>
-                  Memory Debug
-                </p>
-                {result.debugTrace ? (
-                  <div className="flex flex-wrap gap-2 text-[11px] font-semibold text-sky-700 dark:text-sky-300">
-                    <span className="rounded-full bg-white/80 px-2 py-0.5 dark:bg-slate-900/70">status: {result.debugTrace.status}</span>
-                    <span className="rounded-full bg-white/80 px-2 py-0.5 dark:bg-slate-900/70">chunks: {result.debugTrace.chunksRetrieved}</span>
-                  </div>
-                ) : (
-                  <span className="rounded-full bg-white/80 px-2 py-0.5 text-[11px] font-semibold text-amber-700 dark:bg-slate-900/70 dark:text-amber-300">
-                    debugTrace missing
-                  </span>
-                )}
-              </div>
-              <p className={`mt-2 text-xs leading-5 ${
-                result.debugTrace
-                  ? "text-sky-800 dark:text-sky-300"
-                  : "text-amber-800 dark:text-amber-300"
-              }`}>
-                {result.debugTrace
-                  ? result.debugTrace.reason
-                  : "Frontend đã nhận answer nhưng API chưa trả debugTrace. Restart API/dev server rồi hỏi lại để thấy pipeline chi tiết."}
-              </p>
-            </div>
-          ) : null}
-
           {isSearching ? (
             <div className="space-y-4">
               <div className="flex items-center gap-3 rounded-2xl border border-indigo-100 bg-indigo-50/60 px-4 py-3 dark:border-indigo-800 dark:bg-indigo-900/30">

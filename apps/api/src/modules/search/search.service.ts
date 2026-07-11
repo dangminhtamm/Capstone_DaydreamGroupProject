@@ -1,6 +1,12 @@
 import { Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { answerMemory } from '@second-brain/ai';
-import { saveSearchHistory, getUserSearchHistory, deleteSearchHistoryItem, clearUserSearchHistory } from '@second-brain/db';
+import {
+  saveSearchHistory,
+  findCachedAnswer,
+  getUserSearchHistory,
+  deleteSearchHistoryItem,
+  clearUserSearchHistory,
+} from '@second-brain/db';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SearchQueryDto } from './dto/search-query.dto';
 
@@ -18,10 +24,33 @@ export class SearchService {
       throw new NotFoundException('User not found');
     }
 
+    const normalizedQuestion = queryDto.question.trim();
     const lang = queryDto.responseLanguage ?? 'en';
 
     // ── Live search ──
     try {
+      if (this.canUseExactAnswerCache(queryDto)) {
+        const cached = await findCachedAnswer(
+          this.prisma,
+          user.id,
+          normalizedQuestion,
+          lang,
+        );
+
+        if (cached) {
+          return {
+            answer: cached.answer,
+            confidence: cached.confidence,
+            sources: this.parseJsonArray(cached.sources_json),
+            noMemory: false,
+            suggestions: [],
+            analytics: this.parseJsonObject(cached.analytics_json),
+            debugTrace: null,
+            cached: true,
+          };
+        }
+      }
+
       const filters: {
         chunkType?: string;
         sourceType?: string;
@@ -33,7 +62,7 @@ export class SearchService {
       if (queryDto.startDate) filters.startDate = new Date(queryDto.startDate);
       if (queryDto.endDate) filters.endDate = new Date(queryDto.endDate);
 
-      const result = await answerMemory(queryDto.question, user.id, this.prisma, {
+      const result = await answerMemory(normalizedQuestion, user.id, this.prisma, {
         limit: queryDto.limit ?? 8,
         maxDistance: queryDto.maxDistance,
         responseLanguage: lang,
@@ -47,14 +76,14 @@ export class SearchService {
         noMemory: result.noMemory ?? false,
         suggestions: result.suggestions ?? [],
         analytics: result.analytics ?? null,
-        debugTrace: result.debugTrace ?? null,
+        debugTrace: this.debugTraceEnabled() ? (result.debugTrace ?? null) : null,
         cached: false,
       };
 
       // ── Persist to search history (async, non-blocking) ──
       saveSearchHistory(this.prisma, {
         userId: user.id,
-        question: queryDto.question,
+        question: normalizedQuestion,
         answer: result.answer,
         confidence: result.confidence,
         sourcesJson: result.citations?.length ? JSON.stringify(result.citations) : null,
@@ -109,5 +138,42 @@ export class SearchService {
     }
 
     return clearUserSearchHistory(this.prisma, user.id);
+  }
+
+  private canUseExactAnswerCache(queryDto: SearchQueryDto) {
+    return !(
+      queryDto.chunkType ||
+      queryDto.sourceType ||
+      queryDto.startDate ||
+      queryDto.endDate ||
+      queryDto.limit ||
+      queryDto.maxDistance
+    );
+  }
+
+  private debugTraceEnabled() {
+    return process.env.MEMORY_DEBUG_TRACE === 'true';
+  }
+
+  private parseJsonArray(value: string | null | undefined) {
+    if (!value) return [];
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  private parseJsonObject(value: string | null | undefined) {
+    if (!value) return null;
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? parsed
+        : null;
+    } catch {
+      return null;
+    }
   }
 }

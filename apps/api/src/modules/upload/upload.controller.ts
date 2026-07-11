@@ -168,7 +168,6 @@ export class UploadController {
 
     return {
       message: 'Upload successful',
-      url: uploadedFile.url,
       extractionStatus: extractedText ? 'extracted' : 'pending',
       memoryIndexed: false,
       memoryIndexingStatus: 'queued',
@@ -176,9 +175,7 @@ export class UploadController {
       attachment: {
         id: attachment.id,
         diaryEntryId: attachment.diary_entry_id,
-        storagePath: attachment.storage_path,
         fileType: attachment.file_type,
-        extractedText: attachment.extracted_text,
         createdAt: attachment.created_at.toISOString(),
       },
     };
@@ -227,9 +224,7 @@ export class UploadController {
       attachment: {
         id: attachment.id,
         diaryEntryId: attachment.diary_entry.id,
-        storagePath: attachment.storage_path,
         fileType: attachment.file_type,
-        extractedText: attachment.extracted_text,
         createdAt: attachment.created_at.toISOString(),
       },
     };
@@ -252,7 +247,7 @@ export class UploadController {
       originalName?: string;
     },
   ) {
-    return tx.indexingOutbox.upsert({
+    const job = await tx.indexingOutbox.upsert({
       where: {
         job_type_source_type_source_id: {
           job_type: 'index_memory',
@@ -278,6 +273,19 @@ export class UploadController {
         status: 'pending',
         payload: { originalName: input.originalName },
       },
+    });
+
+    await this.expireSearchCache(tx, input.userId);
+    return job;
+  }
+
+  private async expireSearchCache(tx: any, userId: string) {
+    await tx.searchHistory?.updateMany?.({
+      where: {
+        user_id: userId,
+        expires_at: { gt: new Date() },
+      },
+      data: { expires_at: new Date() },
     });
   }
 
@@ -313,10 +321,8 @@ export class UploadController {
     return {
       id: attachment.id,
       diaryEntryId: attachment.diary_entry_id,
-      storagePath: attachment.storage_path,
       fileType: attachment.file_type,
       extractionStatus: attachment.extracted_text ? 'extracted' : 'pending',
-      extractedText: attachment.extracted_text,
       createdAt: attachment.created_at.toISOString(),
       entryDate: attachment.diary_entry?.entry_date.toISOString(),
     };

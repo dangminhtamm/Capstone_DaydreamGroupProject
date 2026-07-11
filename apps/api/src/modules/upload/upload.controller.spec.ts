@@ -311,9 +311,10 @@ describe('UploadController', () => {
       memoryChunkCount: 0,
       attachment: {
         id: 'attachment-3',
-        extractedText: null,
       },
     });
+    expect(result.attachment).not.toHaveProperty('storagePath');
+    expect(result.attachment).not.toHaveProperty('extractedText');
   });
 });
 

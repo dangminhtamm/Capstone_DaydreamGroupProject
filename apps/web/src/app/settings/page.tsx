@@ -144,9 +144,10 @@ export default function SettingsPage() {
     setIsLoadingSystemStatus(true);
     setSystemStatusMsg(null);
     try {
+      const token = getAccessToken();
       const [health, indexing] = await Promise.all([
-        getSystemHealth(),
-        isAuthenticated ? getIndexingStatus(getAccessToken()) : Promise.resolve(null),
+        isAuthenticated ? getSystemHealth(token) : Promise.resolve(null),
+        isAuthenticated ? getIndexingStatus(token) : Promise.resolve(null),
       ]);
 
       setSystemHealth(health);
@@ -315,11 +316,11 @@ export default function SettingsPage() {
     }
   };
 
-  const handleSyncCalendar = async () => {
+  const handleSyncCalendar = async (limit?: number) => {
     setIsSyncingCalendar(true);
     setCalendarMsg(null);
     try {
-      const result = await syncGoogleCalendar(getAccessToken());
+      const result = await syncGoogleCalendar(getAccessToken(), limit);
       setCalendarMsg({
         type: "success",
         text: `Calendar synced: ${result.syncedCount} events, ${result.queuedIndexingJobs ?? 0} queued for memory indexing.`,
@@ -603,11 +604,19 @@ export default function SettingsPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={handleSyncCalendar}
+                  onClick={() => void handleSyncCalendar()}
                   disabled={!calendarStatus?.connected || isSyncingCalendar}
                   className="cursor-pointer rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600"
                 >
                   {isSyncingCalendar ? "Syncing..." : "Sync Now"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleSyncCalendar(3)}
+                  disabled={!calendarStatus?.connected || isSyncingCalendar}
+                  className="cursor-pointer rounded-xl border border-sky-200 bg-sky-50 px-4 py-2.5 text-sm font-semibold text-sky-700 transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-200 dark:hover:bg-sky-900/50"
+                >
+                  {isSyncingCalendar ? "Syncing..." : "Sync Demo (3)"}
                 </button>
               </div>
 

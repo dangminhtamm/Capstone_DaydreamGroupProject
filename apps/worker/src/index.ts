@@ -26,6 +26,7 @@ try {
 
     // Universal Data Ingestion
     DataIngestionJob.startCron();
+    DataIngestionJob.startRealtimeListener();
 
     // Data Summarization Pipeline
     SummaryPipelineJob.startCron();

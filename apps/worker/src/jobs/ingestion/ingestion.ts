@@ -10,6 +10,7 @@ import {
   insertMemoryChunks,
   pruneMemoryChunksForSource,
 } from '@second-brain/db';
+import { Client } from 'pg';
 import { createClient } from '@supabase/supabase-js';
 import * as cron from 'node-cron';
 import { prisma } from '../../lib/prisma';
@@ -37,12 +38,27 @@ type IndexingBatchResult = {
 };
 
 export class DataIngestionJob {
+  private static listenerClient: Client | null = null;
+  private static listenerStarted = false;
+  private static drainInFlight = false;
+  private static drainRequested = false;
+
   private static getSupabaseClient() {
     const supabaseUrl = process.env.SUPABASE_URL;
-    const supabaseKey = process.env.SUPABASE_SERVICE_KEY;
+    const supabaseKey =
+      process.env.SUPABASE_SERVICE_ROLE_KEY ??
+      process.env.SUPABASE_SECRET_KEY ??
+      process.env.SECRET_KEY ??
+      process.env.SUPABASE_SERVICE_KEY;
 
     if (!supabaseUrl || !supabaseKey) {
-      throw new Error('Supabase URL and Service Key must be set in environment variables.');
+      throw new Error('Supabase URL and a server-side Supabase key must be set in environment variables.');
+    }
+
+    if (supabaseKey.startsWith('sb_publishable')) {
+      throw new Error(
+        'Attachment worker is using a publishable Supabase key. Set SUPABASE_SERVICE_ROLE_KEY, SUPABASE_SECRET_KEY, or SECRET_KEY to a server-side key.',
+      );
     }
 
     return createClient(supabaseUrl, supabaseKey);
@@ -402,8 +418,11 @@ Return only the extracted text or factual description.
   private static async markJobFailed(job: IndexingOutboxJob, error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     const retryCount = job.retry_count + 1;
-    const exhausted = retryCount >= job.max_retries;
-    const delayMs = Math.min(60_000 * 2 ** Math.max(0, retryCount - 1), 30 * 60_000);
+    const permanent = isPermanentIndexingError(message);
+    const exhausted = permanent || retryCount >= job.max_retries;
+    const baseDelayMs = Math.min(60_000 * 2 ** Math.max(0, retryCount - 1), 30 * 60_000);
+    const jitterMs = Math.floor(Math.random() * 15_000);
+    const delayMs = permanent ? 0 : baseDelayMs + jitterMs;
 
     await prisma.indexingOutbox.update({
       where: { id: job.id },
@@ -446,6 +465,87 @@ Return only the extracted text or factual description.
     });
     console.log('Background Worker for Indexing Outbox started.');
   }
+
+  static startRealtimeListener() {
+    if (this.listenerStarted) return;
+    this.listenerStarted = true;
+
+    void this.connectRealtimeListener();
+  }
+
+  private static async connectRealtimeListener() {
+    const connectionString = process.env.DIRECT_URL || process.env.DATABASE_URL;
+
+    if (!connectionString) {
+      console.warn(
+        '[Worker - Ingestion] DIRECT_URL/DATABASE_URL is missing; realtime indexing listener disabled.',
+      );
+      return;
+    }
+
+    const client = new Client({
+      connectionString,
+      application_name: 'second-brain-indexing-listener',
+    });
+    this.listenerClient = client;
+
+    client.on('notification', (message) => {
+      if (message.channel !== 'indexing_outbox_jobs') return;
+      this.requestImmediateDrain(message.payload);
+    });
+
+    client.on('error', (error) => {
+      console.error('[Worker - Ingestion] Realtime listener error:', error.message);
+    });
+
+    client.on('end', () => {
+      if (!this.listenerStarted) return;
+      console.warn('[Worker - Ingestion] Realtime listener disconnected; reconnecting soon.');
+      this.listenerClient = null;
+      setTimeout(() => void this.connectRealtimeListener(), 5_000).unref?.();
+    });
+
+    try {
+      await client.connect();
+      await client.query('LISTEN indexing_outbox_jobs');
+      console.log('[Worker - Ingestion] Realtime indexing listener is active.');
+      this.requestImmediateDrain('startup');
+    } catch (error) {
+      console.error(
+        '[Worker - Ingestion] Could not start realtime indexing listener:',
+        error instanceof Error ? error.message : String(error),
+      );
+      await client.end().catch(() => undefined);
+      setTimeout(() => void this.connectRealtimeListener(), 10_000).unref?.();
+    }
+  }
+
+  private static requestImmediateDrain(reason?: string) {
+    this.drainRequested = true;
+    void this.drainSoon(reason);
+  }
+
+  private static async drainSoon(reason?: string) {
+    if (this.drainInFlight) return;
+    this.drainInFlight = true;
+
+    try {
+      while (this.drainRequested) {
+        this.drainRequested = false;
+        console.log(
+          `[Worker - Ingestion] Processing indexing jobs immediately${reason ? ` (${reason})` : ''}.`,
+        );
+        await this.processPendingIndexingJobs();
+      }
+    } catch (error) {
+      console.error(
+        '[Worker - Ingestion] Immediate indexing drain failed:',
+        error instanceof Error ? error.message : String(error),
+      );
+    } finally {
+      this.drainInFlight = false;
+    }
+  }
 }
 
 function isSupportedSourceType(sourceType: string): sourceType is SourceType {
@@ -467,4 +567,15 @@ function deriveTitle(rawText: string) {
   const firstLine = rawText.trim().split(/\r?\n/)[0]?.trim();
   if (!firstLine) return 'Diary entry';
   return firstLine.length <= 80 ? firstLine : `${firstLine.slice(0, 77)}...`;
+}
+
+function isPermanentIndexingError(message: string) {
+  const normalized = message.toLowerCase();
+  return [
+    'gemini_api_key is missing',
+    'publishable supabase key',
+    'server-side supabase key',
+    'unsupported indexing source type',
+    'bucket not found',
+  ].some((needle) => normalized.includes(needle));
 }

@@ -234,7 +234,7 @@ export class CalendarService {
         };
     }
 
-    async syncGoogleEvents(supabaseId: string) {
+    async syncGoogleEvents(supabaseId: string, options: { limit?: number } = {}) {
         const user = await this.prisma.user.findUnique({
             where: { supabaseId },
         });
@@ -267,11 +267,13 @@ export class CalendarService {
             const timeMax = new Date();
             timeMax.setDate(timeMax.getDate() + 60);
 
+            const maxResults = Math.min(Math.max(options.limit ?? 250, 1), 250);
+
             const response = await calendar.events.list({
                 calendarId: 'primary',
                 timeMin: timeMin.toISOString(),
                 timeMax: timeMax.toISOString(),
-                maxResults: 250,
+                maxResults,
                 singleEvents: true,
                 orderBy: 'startTime',
             });
@@ -370,7 +372,7 @@ export class CalendarService {
             title: string;
         },
     ) {
-        return tx.indexingOutbox.upsert({
+        const job = await tx.indexingOutbox.upsert({
             where: {
                 job_type_source_type_source_id: {
                     job_type: 'index_memory',
@@ -402,6 +404,19 @@ export class CalendarService {
                     sourceTitle: input.title,
                 },
             },
+        });
+
+        await this.expireSearchCache(tx, input.userId);
+        return job;
+    }
+
+    private async expireSearchCache(tx: any, userId: string) {
+        await tx.searchHistory?.updateMany?.({
+            where: {
+                user_id: userId,
+                expires_at: { gt: new Date() },
+            },
+            data: { expires_at: new Date() },
         });
     }
 }

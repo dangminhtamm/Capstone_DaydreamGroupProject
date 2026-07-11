@@ -115,9 +115,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     await supabase.auth.signOut({ scope: 'local' }).catch(() => undefined);
 
-    const redirectUrl = typeof window !== 'undefined' 
-      ? `${window.location.origin}/` 
-      : 'http://localhost:3000/';
+    const redirectUrl = typeof window !== 'undefined'
+      ? `${window.location.origin}/auth/callback`
+      : 'http://localhost:3000/auth/callback';
 
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',

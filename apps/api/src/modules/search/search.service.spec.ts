@@ -1,6 +1,6 @@
 import { InternalServerErrorException } from '@nestjs/common';
 import { answerMemory } from '@second-brain/ai';
-import { saveSearchHistory } from '@second-brain/db';
+import { findCachedAnswer, saveSearchHistory } from '@second-brain/db';
 import { SearchService } from './search.service';
 
 jest.mock('@second-brain/ai', () => ({
@@ -10,6 +10,7 @@ jest.mock('@second-brain/ai', () => ({
 
 jest.mock('@second-brain/db', () => ({
   saveSearchHistory: jest.fn(),
+  findCachedAnswer: jest.fn(),
   getUserSearchHistory: jest.fn(),
   deleteSearchHistoryItem: jest.fn(),
   clearUserSearchHistory: jest.fn(),
@@ -27,6 +28,7 @@ describe('SearchService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     (saveSearchHistory as jest.Mock).mockResolvedValue(undefined);
+    (findCachedAnswer as jest.Mock).mockResolvedValue(null);
     service = new SearchService(prisma as any);
   });
 
@@ -63,6 +65,63 @@ describe('SearchService', () => {
         tokenCount: 42,
       }),
     );
+  });
+
+  it('returns cached answers for unfiltered repeat questions', async () => {
+    prisma.user.findUnique.mockResolvedValue({ id: 'user-1' });
+    (findCachedAnswer as jest.Mock).mockResolvedValue({
+      answer: 'Cached answer',
+      confidence: 'medium',
+      sources_json: JSON.stringify([{ marker: 'S1', quote: 'cached source' }]),
+      analytics_json: JSON.stringify({ tokenUsage: { totalTokens: 99 } }),
+    });
+
+    const result = await service.answerQuestion('supabase-user-1', {
+      question: '  What did I work on?  ',
+      responseLanguage: 'en',
+    });
+
+    expect(findCachedAnswer).toHaveBeenCalledWith(
+      prisma,
+      'user-1',
+      'What did I work on?',
+      'en',
+    );
+    expect(answerMemory).not.toHaveBeenCalled();
+    expect(saveSearchHistory).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      answer: 'Cached answer',
+      confidence: 'medium',
+      cached: true,
+    });
+    expect(result.sources).toHaveLength(1);
+  });
+
+  it('bypasses answer cache when retrieval filters are present', async () => {
+    prisma.user.findUnique.mockResolvedValue({ id: 'user-1' });
+    (findCachedAnswer as jest.Mock).mockResolvedValue({
+      answer: 'Cached answer',
+      confidence: 'medium',
+    });
+    (answerMemory as jest.Mock).mockResolvedValue({
+      answer: 'Fresh filtered answer',
+      confidence: 'high',
+      citations: [],
+      analytics: { tokenUsage: { totalTokens: 7 } },
+    });
+
+    const result = await service.answerQuestion('supabase-user-1', {
+      question: 'What happened today?',
+      responseLanguage: 'en',
+      sourceType: 'diary',
+    });
+
+    expect(findCachedAnswer).not.toHaveBeenCalled();
+    expect(answerMemory).toHaveBeenCalled();
+    expect(result).toMatchObject({
+      answer: 'Fresh filtered answer',
+      cached: false,
+    });
   });
 
   it('throws a stable HTTP error when AI search fails', async () => {

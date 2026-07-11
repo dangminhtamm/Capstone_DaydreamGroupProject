@@ -159,9 +159,19 @@ export class HealthService {
   }
 
   private getEnvironmentStatus() {
+    const supabaseServerKey =
+      process.env.SUPABASE_SERVICE_ROLE_KEY ??
+      process.env.SUPABASE_SECRET_KEY ??
+      process.env.SECRET_KEY ??
+      process.env.SUPABASE_SERVICE_KEY;
+    const supabaseServerKeyIsPublishable = supabaseServerKey?.startsWith('sb_publishable') ?? false;
+
     return {
       databaseConfigured: hasRealValue(process.env.DATABASE_URL),
-      supabaseConfigured: hasRealValue(process.env.SUPABASE_URL) && hasRealValue(process.env.SUPABASE_SERVICE_KEY),
+      supabaseConfigured:
+        hasRealValue(process.env.SUPABASE_URL) &&
+        hasRealValue(supabaseServerKey) &&
+        !supabaseServerKeyIsPublishable,
       geminiConfigured: hasRealValue(process.env.GEMINI_API_KEY),
       googleOAuthConfigured: hasRealValue(process.env.GOOGLE_CLIENT_ID) && hasRealValue(process.env.GOOGLE_CLIENT_SECRET),
     };

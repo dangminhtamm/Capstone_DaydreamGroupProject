@@ -45,8 +45,10 @@ export class CalendarController {
 
     @UseGuards(JwtAuthGuard)
     @Post('sync')
-    async syncEvents(@Req() req) {
-        return await this.calendarService.syncGoogleEvents(req.user.userId);
+    async syncEvents(@Req() req, @Query('limit') limit?: string) {
+        return await this.calendarService.syncGoogleEvents(req.user.userId, {
+            limit: this.parseEventLimit(limit),
+        });
     }
 
     @UseGuards(JwtAuthGuard)
@@ -59,5 +61,14 @@ export class CalendarController {
             count: events.length,
             events: events,
         };
+    }
+
+    private parseEventLimit(value?: string) {
+        if (!value) return undefined;
+
+        const parsed = Number.parseInt(value, 10);
+        if (!Number.isFinite(parsed)) return undefined;
+
+        return Math.min(Math.max(parsed, 1), 250);
     }
 }

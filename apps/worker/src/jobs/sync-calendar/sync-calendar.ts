@@ -3,6 +3,17 @@ import { google, calendar_v3 } from 'googleapis';
 import * as cron from 'node-cron';
 
 export class SyncCalendarJob {
+  private static getApiBaseUrl() {
+    return process.env.API_PUBLIC_URL || process.env.API_URL || 'http://localhost:3001';
+  }
+
+  private static getRedirectUri() {
+    return (
+      process.env.GOOGLE_REDIRECT_URI ||
+      `${this.getApiBaseUrl().replace(/\/$/, '')}/api/calendar/oauth/callback`
+    );
+  }
+
 
   // Helper to normalize Google Calendar data to our Schema
   private static normalizeEvent(googleEvent: calendar_v3.Schema$Event, userId: string) {
@@ -31,7 +42,8 @@ export class SyncCalendarJob {
 
     const oauth2Client = new google.auth.OAuth2(
       process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET
+      process.env.GOOGLE_CLIENT_SECRET,
+      this.getRedirectUri(),
     );
 
     oauth2Client.setCredentials({

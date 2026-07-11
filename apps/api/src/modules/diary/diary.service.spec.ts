@@ -140,7 +140,16 @@ describe('DiaryService', () => {
 
     expect(prisma.diaryEntry.findMany).toHaveBeenCalledWith({
       where: { user_id: 'user-1' },
+      select: {
+        id: true,
+        raw_text: true,
+        status: true,
+        entry_date: true,
+        created_at: true,
+        updated_at: true,
+      },
       orderBy: { created_at: 'desc' },
+      take: 100,
     });
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({ id: 'diary-1', title: 'Title' });
