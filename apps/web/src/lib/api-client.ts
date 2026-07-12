@@ -45,6 +45,21 @@ async function authFetch(
   return response;
 }
 
+async function readApiError(response: Response, fallback: string) {
+  const error = await response.json().catch(() => ({ message: fallback }));
+  const message = error?.message;
+
+  if (Array.isArray(message)) {
+    return message.join(', ');
+  }
+
+  if (typeof message === 'string' && message.trim()) {
+    return message;
+  }
+
+  return fallback || `HTTP ${response.status}`;
+}
+
 // Diary API functions
 export async function createDiaryEntry(
   payload: CreateDiaryPayload,
@@ -64,9 +79,11 @@ export async function createDiaryEntry(
 }
 
 export async function getDiaryEntries(
-  accessToken: string | null
+  accessToken: string | null,
+  limit = 100,
 ): Promise<DiaryEntry[]> {
-  const response = await authFetch('/api/diary', {
+  const query = new URLSearchParams({ limit: String(limit) });
+  const response = await authFetch(`/api/diary?${query}`, {
     method: 'GET',
   }, accessToken);
 
@@ -152,17 +169,15 @@ export async function copilotDiaryText(
 
 export type AttachmentUploadResponse = {
   message: string;
-  url?: string;
   extractionStatus: 'extracted' | 'pending' | 'empty';
   memoryIndexed: boolean;
+  memoryIndexingStatus?: 'queued' | 'pending' | 'processing' | 'succeeded' | 'failed';
   memoryChunkCount: number;
   processingError?: string;
   attachment: {
     id: string;
     diaryEntryId: string;
-    storagePath: string;
     fileType: string;
-    extractedText?: string | null;
     createdAt: string;
   };
 };
@@ -182,8 +197,7 @@ export async function uploadDiaryAttachment(
   }, accessToken);
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Failed to upload attachment' }));
-    throw new Error(error.message || `HTTP ${response.status}`);
+    throw new Error(await readApiError(response, 'Failed to upload attachment'));
   }
 
   return response.json();
@@ -198,8 +212,7 @@ export async function processDiaryAttachment(
   }, accessToken);
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Failed to process attachment' }));
-    throw new Error(error.message || `HTTP ${response.status}`);
+    throw new Error(await readApiError(response, 'Failed to process attachment'));
   }
 
   return response.json();
@@ -287,6 +300,192 @@ export async function generateSummary(
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ message: 'Failed to generate summary' }));
+    throw new Error(error.message || `HTTP ${response.status}`);
+  }
+
+  return response.json();
+}
+
+// Calendar API functions
+export type CalendarConnectionStatus = {
+  connected: boolean;
+  eventCount: number;
+  lastSyncedAt: string | null;
+};
+
+export type CalendarEventRecord = {
+  id: string;
+  title: string;
+  description: string | null;
+  startTime: string;
+  endTime: string;
+  htmlLink: string | null;
+};
+
+export type CalendarSyncResponse = {
+  message: string;
+  syncedCount: number;
+  queuedIndexingJobs?: number;
+  memoryIndexingStatus?: 'queued' | 'succeeded' | 'failed';
+};
+
+export async function getCalendarStatus(
+  accessToken: string | null,
+): Promise<CalendarConnectionStatus> {
+  const response = await authFetch('/api/calendar/status', {
+    method: 'GET',
+  }, accessToken);
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ message: 'Failed to fetch calendar status' }));
+    throw new Error(error.message || `HTTP ${response.status}`);
+  }
+
+  return response.json();
+}
+
+export async function getCalendarEvents(
+  accessToken: string | null,
+): Promise<CalendarEventRecord[]> {
+  const response = await authFetch('/api/calendar/events', {
+    method: 'GET',
+  }, accessToken);
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ message: 'Failed to fetch calendar events' }));
+    throw new Error(error.message || `HTTP ${response.status}`);
+  }
+
+  const data = await response.json() as {
+    events?: Array<{
+      id: string;
+      title: string;
+      description?: string | null;
+      start_time: string;
+      end_time: string;
+      html_link?: string | null;
+    }>;
+  };
+
+  return (data.events ?? []).map((event) => ({
+    id: event.id,
+    title: event.title,
+    description: event.description ?? null,
+    startTime: event.start_time,
+    endTime: event.end_time,
+    htmlLink: event.html_link ?? null,
+  }));
+}
+
+export async function getGoogleCalendarConnectUrl(
+  accessToken: string | null,
+): Promise<string> {
+  const response = await authFetch('/api/calendar/connect', {
+    method: 'GET',
+  }, accessToken);
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ message: 'Failed to start Google Calendar connection' }));
+    throw new Error(error.message || `HTTP ${response.status}`);
+  }
+
+  const data = await response.json() as { url?: string };
+  if (!data.url) {
+    throw new Error('Backend did not return a Google Calendar connect URL');
+  }
+
+  return data.url;
+}
+
+export async function syncGoogleCalendar(
+  accessToken: string | null,
+  limit?: number,
+): Promise<CalendarSyncResponse> {
+  const query = limit ? `?${new URLSearchParams({ limit: String(limit) })}` : '';
+  const response = await authFetch(`/api/calendar/sync${query}`, {
+    method: 'POST',
+  }, accessToken);
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ message: 'Failed to sync Google Calendar' }));
+    throw new Error(error.message || `HTTP ${response.status}`);
+  }
+
+  return response.json();
+}
+
+// System health and indexing status
+export type SystemHealth = {
+  status: 'ok' | 'degraded';
+  checkedAt: string;
+  database: {
+    ok: boolean;
+    detail?: string;
+  };
+  environment: {
+    databaseConfigured: boolean;
+    supabaseConfigured: boolean;
+    geminiConfigured: boolean;
+    googleOAuthConfigured: boolean;
+  };
+  schema: {
+    tables: Record<string, { ok: boolean; required: boolean; detail?: string }>;
+    indexes: Record<string, { ok: boolean; required: boolean; detail?: string }>;
+  };
+  indexingOutbox: {
+    available: boolean;
+    counts: Record<string, number>;
+    detail?: string;
+  };
+  warnings: string[];
+};
+
+export type IndexingJobStatus = {
+  id: string;
+  jobType: string;
+  sourceType: string;
+  sourceId: string;
+  status: string;
+  retryCount: number;
+  maxRetries: number;
+  error: string | null;
+  runAfter: string;
+  lockedAt: string | null;
+  processedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type IndexingStatus = {
+  available: boolean;
+  reason?: string;
+  counts: Record<string, number>;
+  staleProcessingCount: number;
+  recent: IndexingJobStatus[];
+};
+
+export async function getSystemHealth(accessToken: string | null): Promise<SystemHealth> {
+  const response = await authFetch('/api/health', {
+    method: 'GET',
+  }, accessToken);
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ message: 'Failed to fetch system health' }));
+    throw new Error(error.message || `HTTP ${response.status}`);
+  }
+
+  return response.json();
+}
+
+export async function getIndexingStatus(
+  accessToken: string | null,
+): Promise<IndexingStatus> {
+  const response = await authFetch('/api/indexing/status', {
+    method: 'GET',
+  }, accessToken);
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ message: 'Failed to fetch indexing status' }));
     throw new Error(error.message || `HTTP ${response.status}`);
   }
 

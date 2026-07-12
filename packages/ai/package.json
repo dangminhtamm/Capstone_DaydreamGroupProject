@@ -28,7 +28,8 @@
     "test:embedding": "node --env-file=.env --experimental-strip-types scripts/test-embedding.ts"
   },
   "devDependencies": {
-    "@types/node": "^25.6.0"
+    "@types/node": "^25.6.0",
+    "typescript": "^5.9.3"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

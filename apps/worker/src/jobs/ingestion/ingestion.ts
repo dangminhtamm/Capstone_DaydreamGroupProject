@@ -23,7 +23,7 @@ export class DataIngestionJob {
     if (!apiKey) throw new Error("GEMINI_API_KEY is missing in environment variables.");
 
     const ai = new GoogleGenerativeAI(apiKey);
-    const model = ai.getGenerativeModel({ model: process.env.GEMINI_VISION_MODEL ?? "gemini-1.5-flash" });
+    const model = ai.getGenerativeModel({ model: process.env.GEMINI_VISION_MODEL ?? "gemini-2.5-flash" });
 
     const prompt = `
       You are an AI assistant for a personal Second Brain system.

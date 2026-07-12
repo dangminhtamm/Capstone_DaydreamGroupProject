@@ -30,6 +30,7 @@ async function generateSummaryForUser(
     console.log(
       `[Worker - ${type} Summary] Existing summary found for ${userId}; skipping duplicate.`,
     );
+    await enqueueSummaryIndexingJob(userId, existing.id);
     return existing;
   }
 
@@ -42,14 +43,49 @@ async function generateSummaryForUser(
   }
 
   const content = await callAI(type, period, context.text);
-  return prisma.summary.upsert({
+  return prisma.$transaction(async (tx) => {
+    const summary = await tx.summary.upsert({
+      where: {
+        user_id_summary_type_period_start_period_end: summaryPeriodKey,
+      },
+      update: { content },
+      create: {
+        ...summaryPeriodKey,
+        content,
+      },
+    });
+
+    await enqueueSummaryIndexingJob(userId, summary.id, tx);
+    return summary;
+  });
+}
+
+async function enqueueSummaryIndexingJob(userId: string, summaryId: string, tx: any = prisma) {
+  return tx.indexingOutbox.upsert({
     where: {
-      user_id_summary_type_period_start_period_end: summaryPeriodKey,
+      job_type_source_type_source_id: {
+        job_type: 'index_memory',
+        source_type: 'summary',
+        source_id: summaryId,
+      },
     },
-    update: { content },
+    update: {
+      user_id: userId,
+      status: 'pending',
+      retry_count: 0,
+      error: null,
+      payload: {},
+      run_after: new Date(),
+      locked_at: null,
+      processed_at: null,
+    },
     create: {
-      ...summaryPeriodKey,
-      content,
+      user_id: userId,
+      job_type: 'index_memory',
+      source_type: 'summary',
+      source_id: summaryId,
+      status: 'pending',
+      payload: {},
     },
   });
 }

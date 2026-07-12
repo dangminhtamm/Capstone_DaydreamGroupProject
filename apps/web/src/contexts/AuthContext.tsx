@@ -19,7 +19,7 @@ type AuthContextType = {
   isLoading: boolean;
   isAuthenticated: boolean;
   configError: string | null;
-  signInWithGoogle: () => Promise<void>;
+  signInWithGoogle: () => Promise<{ error?: string }>;
   signUpWithEmail: (email: string, password: string, displayName: string) => Promise<{ error?: string }>;
   signInWithEmail: (email: string, password: string) => Promise<{ error?: string }>;
   resetPassword: (email: string) => Promise<{ error?: string }>;
@@ -46,7 +46,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(async ({ data: { session }, error }) => {
+      if (error) {
+        console.warn('[Auth] Session restore failed:', error.message);
+        await supabase.auth.signOut({ scope: 'local' }).catch(() => undefined);
+        setSession(null);
+        setUser(null);
+        setIsLoading(false);
+        return;
+      }
+
       setSession(session);
       setUser(session?.user ?? null);
       setIsLoading(false);
@@ -85,8 +94,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           Authorization: `Bearer ${jwt}`,
         },
         body: JSON.stringify({
-          google_access_token: session.provider_token,
-          google_refresh_token: session.provider_refresh_token,
           display_name: session.user.user_metadata?.full_name || session.user.user_metadata?.name,
         }),
       });
@@ -100,31 +107,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const signInWithGoogle = useCallback(async () => {
+  const signInWithGoogle = useCallback(async (): Promise<{ error?: string }> => {
     if (!supabase) {
       setConfigError('Cannot sign in: Supabase env vars missing');
-      return;
+      return { error: 'Cannot sign in: Supabase env vars missing' };
     }
 
-    const redirectUrl = typeof window !== 'undefined' 
-      ? `${window.location.origin}/` 
-      : 'http://localhost:3000/';
+    await supabase.auth.signOut({ scope: 'local' }).catch(() => undefined);
 
-    await supabase.auth.signInWithOAuth({
+    const redirectUrl = typeof window !== 'undefined'
+      ? `${window.location.origin}/auth/callback`
+      : 'http://localhost:3000/auth/callback';
+
+    const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
         redirectTo: redirectUrl,
-        queryParams: {
-          access_type: 'offline',
-          prompt: 'consent',
-        },
-        scopes: [
-          'https://www.googleapis.com/auth/userinfo.profile',
-          'https://www.googleapis.com/auth/userinfo.email',
-          'https://www.googleapis.com/auth/calendar.readonly',
-        ].join(' '),
       },
     });
+
+    if (error) {
+      return { error: error.message };
+    }
+
+    return {};
   }, []);
 
   const signUpWithEmail = useCallback(async (email: string, password: string, displayName: string): Promise<{ error?: string }> => {

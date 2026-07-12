@@ -296,14 +296,16 @@ export function DiaryInputForm() {
 
   function handleAttachmentSelection(event: React.ChangeEvent<HTMLInputElement>) {
     const selectedFiles = Array.from(event.target.files ?? []);
-    setAttachmentItems(
-      selectedFiles.map((file) => ({
-        id: `${file.name}-${file.size}-${file.lastModified}`,
+    setAttachmentItems((current) => [
+      ...current,
+      ...selectedFiles.map((file) => ({
+        id: `${file.name}-${file.size}-${file.lastModified}-${crypto.randomUUID()}`,
         file,
-        status: "queued",
+        status: "queued" as const,
         message: "Ready to attach",
       })),
-    );
+    ]);
+    event.target.value = "";
   }
 
   function removeAttachment(id: string) {
@@ -319,11 +321,33 @@ export function DiaryInputForm() {
       return `Indexed ${response.memoryChunkCount} memory chunks`;
     }
 
+    if (response.memoryIndexingStatus === "queued" || response.memoryIndexingStatus === "pending") {
+      return response.extractionStatus === "extracted"
+        ? "Text extracted; queued for memory indexing"
+        : "Saved; queued for text extraction and memory indexing";
+    }
+
+    if (response.memoryIndexingStatus === "processing") {
+      return response.extractionStatus === "extracted"
+        ? "Text extracted; indexing in progress"
+        : "Text extraction in progress";
+    }
+
+    if (response.memoryIndexingStatus === "failed") {
+      return "Attachment indexing failed; try processing it again";
+    }
+
     if (response.extractionStatus === "pending") {
       return "Saved; extraction pending";
     }
 
-    return "Extracted text but no memory chunks were created";
+    return "Text extracted; waiting for memory indexing";
+  }
+
+  function getAttachmentStatus(response: AttachmentUploadResponse): AttachmentStatus {
+    if (response.processingError || response.memoryIndexingStatus === "failed") return "error";
+    if (response.memoryIndexed || response.memoryIndexingStatus === "succeeded") return "indexed";
+    return "pending";
   }
 
   async function handleCopilotAction(action: string) {
@@ -399,6 +423,8 @@ export function DiaryInputForm() {
       const diaryEntry = await createDiaryEntry(payload, accessToken);
 
       const queuedAttachments = attachmentItems.filter((item) => item.status === "queued");
+      let attachmentHadErrors = false;
+
       for (const item of queuedAttachments) {
         try {
           updateAttachmentItem(item.id, {
@@ -409,27 +435,21 @@ export function DiaryInputForm() {
           const uploadResult = await uploadDiaryAttachment(diaryEntry.id, item.file, accessToken);
           updateAttachmentItem(item.id, {
             attachmentId: uploadResult.attachment.id,
-            status: uploadResult.extractionStatus === "pending" ? "extracting" : "indexed",
-            message:
-              uploadResult.extractionStatus === "pending"
-                ? "Extracting text with AI"
-                : getAttachmentMessage(uploadResult),
+            status: getAttachmentStatus(uploadResult),
+            message: getAttachmentMessage(uploadResult),
             memoryChunkCount: uploadResult.memoryChunkCount,
           });
 
           if (uploadResult.extractionStatus === "pending") {
             const processResult = await processDiaryAttachment(uploadResult.attachment.id, accessToken);
             updateAttachmentItem(item.id, {
-              status: processResult.processingError
-                ? "pending"
-                : processResult.memoryIndexed
-                  ? "indexed"
-                  : "pending",
+              status: getAttachmentStatus(processResult),
               message: getAttachmentMessage(processResult),
               memoryChunkCount: processResult.memoryChunkCount,
             });
           }
         } catch (attachmentError) {
+          attachmentHadErrors = true;
           updateAttachmentItem(item.id, {
             status: "error",
             message: attachmentError instanceof Error ? attachmentError.message : "Attachment upload failed",
@@ -437,8 +457,13 @@ export function DiaryInputForm() {
         }
       }
 
-      setState("success");
       setDraft(initialDraft);
+      if (attachmentHadErrors) {
+        setState("error");
+        setErrorMessage("Diary saved, but one or more attachments failed. Check the file status above.");
+      } else {
+        setState("success");
+      }
     } catch (error) {
       setState("error");
       setErrorMessage(error instanceof Error ? error.message : "Failed to save diary entry");

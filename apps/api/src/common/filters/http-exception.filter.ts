@@ -51,7 +51,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
 
     return {
       statusCode: status,
-      message: exception instanceof Error ? exception.message : 'Internal server error',
+      message: 'Internal server error',
       error: 'Internal Server Error',
       path,
     };

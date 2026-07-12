@@ -93,6 +93,15 @@ function getLocalDateInputValue(date = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
+function getLatestEntryDateInputValue(entries: DiaryEntry[]) {
+  const latest = [...entries].sort(
+    (first, second) =>
+      new Date(getEntryActivityDate(second)).getTime() - new Date(getEntryActivityDate(first)).getTime(),
+  )[0];
+
+  return latest ? getDateKey(getEntryActivityDate(latest)) : null;
+}
+
 function getWeekStart(date: Date) {
   const start = new Date(date);
   const day = start.getDay();
@@ -298,6 +307,10 @@ export function SummaryDashboard() {
           getSummaries(accessToken, { limit: 20 }),
         ]);
         setEntries(diaryData);
+        const latestEntryDate = getLatestEntryDateInputValue(diaryData);
+        if (latestEntryDate) {
+          setSummaryDate(latestEntryDate);
+        }
         setAiSummaries(summaryData);
         setState("success");
       } catch (error) {
@@ -353,7 +366,12 @@ export function SummaryDashboard() {
       ]);
       setGenerateMessage(`${summaryType[0].toUpperCase()}${summaryType.slice(1)} summary generated.`);
     } catch (error) {
-      setGenerateError(error instanceof Error ? error.message : "Failed to generate summary");
+      const message = error instanceof Error ? error.message : "Failed to generate summary";
+      setGenerateError(
+        message.includes("No diary, calendar, or lower-level summaries")
+          ? `${message} Try selecting a date that has diary entries or synced calendar events.`
+          : message,
+      );
     } finally {
       setIsGenerating(false);
     }
@@ -480,6 +498,9 @@ export function SummaryDashboard() {
             </div>
           </div>
         </div>
+        <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">
+          Generate uses the selected date as the anchor for the chosen daily, weekly, monthly, or yearly period.
+        </p>
         {generateMessage ? (
           <p className="mb-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300">
             {generateMessage}

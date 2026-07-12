@@ -1,10 +1,22 @@
 "use client";
 
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import Image from "next/image";
 import { DashboardShell } from "@/components/dashboard-shell";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
+import {
+  getCalendarEvents,
+  getCalendarStatus,
+  getIndexingStatus,
+  getGoogleCalendarConnectUrl,
+  getSystemHealth,
+  syncGoogleCalendar,
+  type CalendarConnectionStatus,
+  type CalendarEventRecord,
+  type IndexingStatus,
+  type SystemHealth,
+} from "@/lib/api-client";
 
 type TokenStats = {
   today: number;
@@ -52,7 +64,7 @@ function getPasswordStrength(pw: string): { score: number; label: string; color:
 }
 
 export default function SettingsPage() {
-  const { user, isAuthenticated, isLoading, supabase } = useAuth();
+  const { user, isAuthenticated, isLoading, supabase, getAccessToken } = useAuth();
   const { theme, resolvedTheme, setTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
 
@@ -61,6 +73,16 @@ export default function SettingsPage() {
   const [isUpdatingName, setIsUpdatingName] = useState(false);
   const [nameUpdateResult, setNameUpdateResult] = useState<"success" | "error" | null>(null);
   const [responseLang, setResponseLang] = useState<"en" | "vi">("en");
+  const [calendarStatus, setCalendarStatus] = useState<CalendarConnectionStatus | null>(null);
+  const [isLoadingCalendar, setIsLoadingCalendar] = useState(false);
+  const [isConnectingCalendar, setIsConnectingCalendar] = useState(false);
+  const [isSyncingCalendar, setIsSyncingCalendar] = useState(false);
+  const [calendarMsg, setCalendarMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [calendarEvents, setCalendarEvents] = useState<CalendarEventRecord[]>([]);
+  const [systemHealth, setSystemHealth] = useState<SystemHealth | null>(null);
+  const [indexingStatus, setIndexingStatus] = useState<IndexingStatus | null>(null);
+  const [isLoadingSystemStatus, setIsLoadingSystemStatus] = useState(false);
+  const [systemStatusMsg, setSystemStatusMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   // Avatar upload
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -93,6 +115,80 @@ export default function SettingsPage() {
   useEffect(() => {
     setDisplayNameEdit(displayName);
   }, [displayName]);
+
+  const refreshCalendarStatus = useCallback(async () => {
+    if (!isAuthenticated) return;
+
+    setIsLoadingCalendar(true);
+    try {
+      const token = getAccessToken();
+      const status = await getCalendarStatus(token);
+      const events = await getCalendarEvents(token);
+      setCalendarStatus(status);
+      setCalendarEvents(events);
+    } catch (error) {
+      setCalendarMsg({
+        type: "error",
+        text: error instanceof Error ? error.message : "Could not load Calendar status.",
+      });
+    } finally {
+      setIsLoadingCalendar(false);
+    }
+  }, [getAccessToken, isAuthenticated]);
+
+  useEffect(() => {
+    void refreshCalendarStatus();
+  }, [refreshCalendarStatus]);
+
+  const refreshSystemStatus = useCallback(async () => {
+    setIsLoadingSystemStatus(true);
+    setSystemStatusMsg(null);
+    try {
+      const token = getAccessToken();
+      const [health, indexing] = await Promise.all([
+        isAuthenticated ? getSystemHealth(token) : Promise.resolve(null),
+        isAuthenticated ? getIndexingStatus(token) : Promise.resolve(null),
+      ]);
+
+      setSystemHealth(health);
+      setIndexingStatus(indexing);
+    } catch (error) {
+      setSystemStatusMsg({
+        type: "error",
+        text: error instanceof Error ? error.message : "Could not load system health.",
+      });
+    } finally {
+      setIsLoadingSystemStatus(false);
+    }
+  }, [getAccessToken, isAuthenticated]);
+
+  useEffect(() => {
+    void refreshSystemStatus();
+  }, [refreshSystemStatus]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const params = new URLSearchParams(window.location.search);
+    const calendarResult = params.get("calendar");
+    if (!calendarResult) return;
+
+    if (calendarResult === "connected") {
+      setCalendarMsg({ type: "success", text: "Google Calendar connected." });
+      void refreshCalendarStatus();
+    } else {
+      const reason = params.get("reason");
+      setCalendarMsg({
+        type: "error",
+        text: reason ? `Google Calendar connection failed: ${reason}` : "Google Calendar connection failed.",
+      });
+    }
+
+    params.delete("calendar");
+    params.delete("reason");
+    const nextUrl = `${window.location.pathname}${params.toString() ? `?${params}` : ""}`;
+    window.history.replaceState({}, "", nextUrl);
+  }, [refreshCalendarStatus]);
 
   const handleUpdateDisplayName = async () => {
     if (!supabase || !displayNameEdit.trim()) return;
@@ -205,7 +301,71 @@ export default function SettingsPage() {
     setTokenStats({ today: 0, week: 0, month: 0, queriesToday: 0 });
   };
 
+  const handleConnectCalendar = async () => {
+    setIsConnectingCalendar(true);
+    setCalendarMsg(null);
+    try {
+      const url = await getGoogleCalendarConnectUrl(getAccessToken());
+      window.location.href = url;
+    } catch (error) {
+      setCalendarMsg({
+        type: "error",
+        text: error instanceof Error ? error.message : "Could not start Google Calendar connection.",
+      });
+      setIsConnectingCalendar(false);
+    }
+  };
+
+  const handleSyncCalendar = async (limit?: number) => {
+    setIsSyncingCalendar(true);
+    setCalendarMsg(null);
+    try {
+      const result = await syncGoogleCalendar(getAccessToken(), limit);
+      setCalendarMsg({
+        type: "success",
+        text: `Calendar synced: ${result.syncedCount} events, ${result.queuedIndexingJobs ?? 0} queued for memory indexing.`,
+      });
+      await refreshCalendarStatus();
+    } catch (error) {
+      setCalendarMsg({
+        type: "error",
+        text: error instanceof Error ? error.message : "Could not sync Google Calendar.",
+      });
+    } finally {
+      setIsSyncingCalendar(false);
+    }
+  };
+
   const hasNameChanged = useMemo(() => displayNameEdit.trim() !== displayName, [displayNameEdit, displayName]);
+  const calendarLastSynced = calendarStatus?.lastSyncedAt
+    ? new Date(calendarStatus.lastSyncedAt).toLocaleString()
+    : "Not synced yet";
+  const outboxCounts = systemHealth?.indexingOutbox.counts ?? {};
+  const userIndexingCounts = indexingStatus?.counts ?? {};
+  const environmentChecks: Array<[string, boolean | undefined]> = [
+    ["Database URL", systemHealth?.environment.databaseConfigured],
+    ["Supabase service", systemHealth?.environment.supabaseConfigured],
+    ["Gemini API", systemHealth?.environment.geminiConfigured],
+    ["Google OAuth", systemHealth?.environment.googleOAuthConfigured],
+  ];
+  const schemaChecks = Object.entries({
+    ...(systemHealth?.schema.tables ?? {}),
+    ...(systemHealth?.schema.indexes ?? {}),
+  });
+  const formatCounts = (counts: Record<string, number>) => {
+    const entries = Object.entries(counts);
+    if (entries.length === 0) return "0 jobs";
+    return entries.map(([status, count]) => `${status}: ${count}`).join(" · ");
+  };
+  const formatCalendarEventTime = (event: CalendarEventRecord) => {
+    const start = new Date(event.startTime);
+    const end = new Date(event.endTime);
+
+    return `${start.toLocaleString()} - ${end.toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    })}`;
+  };
 
   return (
     <DashboardShell
@@ -395,6 +555,282 @@ export default function SettingsPage() {
               </a>
             </div>
           )}
+        </section>
+
+        {/* ─── Integrations ─── */}
+        <section className="rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white via-white to-sky-50/30 p-6 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:from-slate-800 dark:via-slate-800 dark:to-sky-950/20 dark:shadow-slate-900/40">
+          <div className="mb-5">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-600 dark:text-sky-400">Integrations</p>
+            <h3 className="mt-2 text-2xl font-bold tracking-tight text-slate-950 dark:text-slate-100">Google Calendar</h3>
+          </div>
+
+          {isAuthenticated ? (
+            <div className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800/60">
+                  <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Connection</p>
+                  <p className={`mt-1 text-lg font-bold ${calendarStatus?.connected ? "text-emerald-600 dark:text-emerald-400" : "text-slate-900 dark:text-slate-100"}`}>
+                    {isLoadingCalendar ? "Checking..." : calendarStatus?.connected ? "Connected" : "Not connected"}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800/60">
+                  <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Events in DB</p>
+                  <p className="mt-1 text-lg font-bold text-slate-900 dark:text-slate-100">
+                    {calendarStatus?.eventCount ?? 0}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800/60">
+                  <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Last Sync</p>
+                  <p className="mt-1 truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
+                    {calendarLastSynced}
+                  </p>
+                </div>
+              </div>
+
+              {calendarMsg && (
+                <p className={`text-sm font-medium ${calendarMsg.type === "success" ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+                  {calendarMsg.text}
+                </p>
+              )}
+
+              <div className="flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={handleConnectCalendar}
+                  disabled={isConnectingCalendar}
+                  className="cursor-pointer rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isConnectingCalendar ? "Connecting..." : calendarStatus?.connected ? "Reconnect Calendar" : "Connect Calendar"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleSyncCalendar()}
+                  disabled={!calendarStatus?.connected || isSyncingCalendar}
+                  className="cursor-pointer rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600"
+                >
+                  {isSyncingCalendar ? "Syncing..." : "Sync Now"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleSyncCalendar(3)}
+                  disabled={!calendarStatus?.connected || isSyncingCalendar}
+                  className="cursor-pointer rounded-xl border border-sky-200 bg-sky-50 px-4 py-2.5 text-sm font-semibold text-sky-700 transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-200 dark:hover:bg-sky-900/50"
+                >
+                  {isSyncingCalendar ? "Syncing..." : "Sync Demo (3)"}
+                </button>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800/60">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">Synced Events</p>
+                  <button
+                    type="button"
+                    onClick={() => void refreshCalendarStatus()}
+                    disabled={isLoadingCalendar}
+                    className="cursor-pointer text-xs font-semibold text-sky-600 transition hover:text-sky-700 disabled:cursor-not-allowed disabled:opacity-50 dark:text-sky-400 dark:hover:text-sky-300"
+                  >
+                    {isLoadingCalendar ? "Refreshing..." : "Refresh"}
+                  </button>
+                </div>
+
+                {calendarEvents.length > 0 ? (
+                  <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+                    {calendarEvents.map((event) => (
+                      <div
+                        key={event.id}
+                        className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5 dark:border-slate-700 dark:bg-slate-900/40"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
+                              {event.title}
+                            </p>
+                            <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                              {formatCalendarEventTime(event)}
+                            </p>
+                          </div>
+                          {event.htmlLink && (
+                            <a
+                              href={event.htmlLink}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="shrink-0 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                            >
+                              Open
+                            </a>
+                          )}
+                        </div>
+                        {event.description && (
+                          <p className="mt-2 line-clamp-2 text-xs leading-5 text-slate-600 dark:text-slate-400">
+                            {event.description}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-dashed border-slate-200 px-4 py-6 text-center dark:border-slate-700">
+                    <p className="text-sm font-medium text-slate-600 dark:text-slate-300">
+                      {calendarStatus?.connected ? "No synced events yet." : "Connect Calendar to load events."}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-dashed border-slate-300 p-6 text-center dark:border-slate-600">
+              <p className="text-sm font-medium text-slate-900 dark:text-slate-200">Sign in to connect Google Calendar.</p>
+            </div>
+          )}
+        </section>
+
+        {/* ─── System Health ─── */}
+        <section className="rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white via-white to-cyan-50/30 p-6 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:from-slate-800 dark:via-slate-800 dark:to-cyan-950/20 dark:shadow-slate-900/40">
+          <div className="mb-5 flex items-start justify-between gap-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-600 dark:text-cyan-400">System</p>
+              <h3 className="mt-2 text-2xl font-bold tracking-tight text-slate-950 dark:text-slate-100">Health & Indexing</h3>
+            </div>
+            <button
+              type="button"
+              onClick={() => void refreshSystemStatus()}
+              disabled={isLoadingSystemStatus}
+              className="cursor-pointer rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600"
+            >
+              {isLoadingSystemStatus ? "Checking..." : "Refresh"}
+            </button>
+          </div>
+
+          {systemStatusMsg && (
+            <p className={`mb-4 text-sm font-medium ${systemStatusMsg.type === "success" ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+              {systemStatusMsg.text}
+            </p>
+          )}
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800/60">
+              <p className="text-xs font-medium text-slate-500 dark:text-slate-400">API Health</p>
+              <p className={`mt-1 text-lg font-bold ${systemHealth?.status === "ok" ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}`}>
+                {systemHealth ? systemHealth.status.toUpperCase() : isLoadingSystemStatus ? "CHECKING" : "UNKNOWN"}
+              </p>
+              {systemHealth?.checkedAt && (
+                <p className="mt-1 truncate text-xs text-slate-400 dark:text-slate-500">
+                  {new Date(systemHealth.checkedAt).toLocaleString()}
+                </p>
+              )}
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800/60">
+              <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Database</p>
+              <p className={`mt-1 text-lg font-bold ${systemHealth?.database.ok ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+                {systemHealth?.database.ok ? "Connected" : "Needs attention"}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800/60">
+              <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Outbox</p>
+              <p className={`mt-1 text-lg font-bold ${systemHealth?.indexingOutbox.available ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+                {systemHealth?.indexingOutbox.available ? "Available" : "Unavailable"}
+              </p>
+              <p className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">{formatCounts(outboxCounts)}</p>
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800/60">
+              <p className="mb-3 text-sm font-semibold text-slate-700 dark:text-slate-300">Environment</p>
+              <div className="grid gap-2 text-sm">
+                {environmentChecks.map(([label, ok]) => (
+                  <div key={label} className="flex items-center justify-between gap-3">
+                    <span className="text-slate-600 dark:text-slate-400">{label}</span>
+                    <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${ok ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300" : "bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300"}`}>
+                      {ok ? "Configured" : "Missing"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800/60">
+              <p className="mb-3 text-sm font-semibold text-slate-700 dark:text-slate-300">Schema</p>
+              <div className="grid gap-2 text-sm">
+                {schemaChecks.map(([name, check]) => (
+                  <div key={name} className="flex items-center justify-between gap-3">
+                    <span className="min-w-0 truncate text-slate-600 dark:text-slate-400">{name}</span>
+                    <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold ${check.ok ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300" : "bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300"}`}>
+                      {check.ok ? "OK" : "Missing"}
+                    </span>
+                  </div>
+                ))}
+                {!systemHealth && (
+                  <p className="text-sm text-slate-500 dark:text-slate-400">No health check loaded yet.</p>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {systemHealth?.warnings.length ? (
+            <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/50 dark:bg-amber-950/20">
+              <p className="mb-2 text-sm font-semibold text-amber-800 dark:text-amber-300">Warnings</p>
+              <div className="space-y-1">
+                {systemHealth.warnings.map((warning) => (
+                  <p key={warning} className="text-sm text-amber-700 dark:text-amber-300">{warning}</p>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800/60">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">Your Indexing Jobs</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">{formatCounts(userIndexingCounts)}</p>
+            </div>
+
+            {!isAuthenticated ? (
+              <div className="rounded-xl border border-dashed border-slate-200 px-4 py-6 text-center dark:border-slate-700">
+                <p className="text-sm font-medium text-slate-600 dark:text-slate-300">Sign in to inspect your indexing jobs.</p>
+              </div>
+            ) : indexingStatus && !indexingStatus.available ? (
+              <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 dark:border-rose-900/50 dark:bg-rose-950/20">
+                <p className="text-sm font-medium text-rose-700 dark:text-rose-300">{indexingStatus.reason}</p>
+              </div>
+            ) : indexingStatus?.recent.length ? (
+              <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
+                {indexingStatus.recent.map((job) => (
+                  <div key={job.id} className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5 dark:border-slate-700 dark:bg-slate-900/40">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
+                          {job.sourceType} · {job.jobType}
+                        </p>
+                        <p className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">
+                          {job.sourceId} · updated {new Date(job.updatedAt).toLocaleString()}
+                        </p>
+                      </div>
+                      <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold ${job.status === "completed" || job.status === "succeeded" ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300" : job.status === "failed" ? "bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300" : "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"}`}>
+                        {job.status}
+                      </span>
+                    </div>
+                    {job.error && (
+                      <p className="mt-2 line-clamp-2 text-xs leading-5 text-rose-600 dark:text-rose-300">{job.error}</p>
+                    )}
+                    <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                      retries {job.retryCount}/{job.maxRetries}
+                      {job.lockedAt ? ` · locked ${new Date(job.lockedAt).toLocaleString()}` : ""}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-xl border border-dashed border-slate-200 px-4 py-6 text-center dark:border-slate-700">
+                <p className="text-sm font-medium text-slate-600 dark:text-slate-300">No indexing jobs found for your account.</p>
+              </div>
+            )}
+
+            {indexingStatus?.staleProcessingCount ? (
+              <p className="mt-3 text-sm font-medium text-amber-600 dark:text-amber-400">
+                {indexingStatus.staleProcessingCount} processing jobs have been locked for more than 10 minutes.
+              </p>
+            ) : null}
+          </div>
         </section>
 
         {/* ─── Appearance ─── */}

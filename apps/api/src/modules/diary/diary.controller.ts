@@ -8,6 +8,7 @@ import {
   Delete,
   UseGuards,
   Request,
+  Query,
 } from '@nestjs/common';
 import { DiaryService } from './diary.service';
 import { CreateDiaryDto } from './dto/create-diary.dto';
@@ -33,8 +34,10 @@ export class DiaryController {
   }
 
   @Get()
-  findAll(@Request() req) {
-    return this.diaryService.findAll(req.user.userId);
+  findAll(@Request() req, @Query('limit') limit?: string) {
+    return this.diaryService.findAll(req.user.userId, {
+      limit: this.parseLimit(limit),
+    });
   }
 
   @Get(':id')
@@ -54,5 +57,14 @@ export class DiaryController {
   @Delete(':id')
   remove(@Request() req, @Param('id') id: string) {
     return this.diaryService.remove(req.user.userId, id);
+  }
+
+  private parseLimit(value?: string) {
+    if (!value) return undefined;
+
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isFinite(parsed)) return undefined;
+
+    return Math.min(Math.max(parsed, 1), 200);
   }
 }
