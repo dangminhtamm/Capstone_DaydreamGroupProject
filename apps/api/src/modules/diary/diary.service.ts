@@ -66,6 +66,7 @@ export class DiaryService {
     const entries = await this.prisma.diaryEntry.findMany({
       where: { user_id: user.id },
       orderBy: { created_at: 'desc' },
+      include: { attachments: true },
     });
 
     return entries.map((entry) => this.toClientEntry(entry));
@@ -81,6 +82,7 @@ export class DiaryService {
 
     const entry = await this.prisma.diaryEntry.findFirst({
       where: { id, user_id: user.id },
+      include: { attachments: true },
     });
     if (!entry) throw new NotFoundException('Diary entry not found');
     return this.toClientEntry(entry);
@@ -202,7 +204,7 @@ export class DiaryService {
     return `${title.trim()}\n\n${content.trim()}`;
   }
 
-  private toClientEntry(entry: { id: string; raw_text: string; status: string; created_at: Date; updated_at: Date; entry_date?: Date }) {
+  private toClientEntry(entry: { id: string; raw_text: string; status: string; created_at: Date; updated_at: Date; entry_date?: Date; attachments?: { id: string; storage_path: string; file_type: string }[] }) {
     const trimmedText = entry.raw_text.trim();
     
     let title = 'Untitled';
@@ -232,10 +234,17 @@ export class DiaryService {
       }
     }
 
+    // Build public URLs for attachments
+    const supabaseUrl = process.env.SUPABASE_URL || '';
+    const attachmentUrls = (entry.attachments ?? []).map(
+      (a) => `${supabaseUrl}/storage/v1/object/public/attachments-bucket/${a.storage_path}`,
+    );
+
     return {
       id: entry.id,
       title: title || 'Untitled',
       content: content || trimmedText || 'No content',
+      attachments: attachmentUrls,
       status: entry.status,
       entryDate: entry.entry_date?.toISOString(),
       createdAt: entry.created_at.toISOString(),
