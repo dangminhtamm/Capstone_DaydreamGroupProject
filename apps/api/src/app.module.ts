@@ -15,6 +15,10 @@ import { JwtAuthGuard } from './modules/auth/jwt-auth.guard';
 import { PrismaService } from './prisma/prisma.service';
 import { SearchController } from './modules/search/search.controller';
 import { SearchService } from './modules/search/search.service';
+import { HealthController } from './modules/health/health.controller';
+import { HealthService } from './modules/health/health.service';
+import { IndexingController } from './modules/indexing/indexing.controller';
+import { IndexingService } from './modules/indexing/indexing.service';
 
 @Module({
   imports: [
@@ -31,6 +35,8 @@ import { SearchService } from './modules/search/search.service';
     UploadController,
     SummaryController,
     SearchController,
+    HealthController,
+    IndexingController,
   ],
   providers: [
     AppService,
@@ -40,6 +46,8 @@ import { SearchService } from './modules/search/search.service';
     StorageService,
     SummaryService,
     SearchService,
+    HealthService,
+    IndexingService,
   ],
 })
 export class AppModule {}

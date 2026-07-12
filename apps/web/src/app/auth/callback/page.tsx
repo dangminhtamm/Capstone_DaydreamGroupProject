@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -10,6 +10,7 @@ function CallbackContent() {
   const { supabase } = useAuth();
   const [status, setStatus] = useState<"processing" | "success" | "error">("processing");
   const [message, setMessage] = useState("Processing your authentication...");
+  const hasProcessedCallback = useRef(false);
 
   useEffect(() => {
     if (!supabase) {
@@ -19,7 +20,27 @@ function CallbackContent() {
     }
 
     const handleCallback = async () => {
+      if (hasProcessedCallback.current) return;
+      hasProcessedCallback.current = true;
+
       try {
+        const authError = searchParams.get("error_description") || searchParams.get("error");
+        if (authError) {
+          setStatus("error");
+          setMessage(authError);
+          return;
+        }
+
+        const code = searchParams.get("code");
+        if (code) {
+          const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+          if (exchangeError) {
+            setStatus("error");
+            setMessage(exchangeError.message);
+            return;
+          }
+        }
+
         const { data, error } = await supabase.auth.getSession();
 
         if (error) {

@@ -2,6 +2,8 @@
 import { Prisma } from "@second-brain/db";
 import { createDefaultEmbeddingProvider } from "./embedding.ts";
 
+type PrismaSql = ReturnType<typeof Prisma.sql>;
+
 export interface RetrievalFilters {
   chunkType?: string;
   chunkTypes?: string[];
@@ -74,7 +76,7 @@ export async function retrieveMemoryWithEmbedding(
   const preferredSourceTypes = normalizeStringList(filters.preferredSourceTypes);
   const preferredChunkTypes = normalizeStringList(filters.preferredChunkTypes);
 
-  const conditions: Prisma.Sql[] = [Prisma.sql`user_id = ${userId}`];
+  const conditions: PrismaSql[] = [Prisma.sql`user_id = ${userId}`];
 
   if (filters.chunkType) {
     conditions.push(Prisma.sql`chunk_type = ${filters.chunkType}`);
@@ -123,9 +125,8 @@ export async function retrieveMemoryWithEmbedding(
   let rawResults: MemorySearchHit[] = [];
   try {
     rawResults = await dbClient.$transaction(async (tx: any) => {
-      await tx.$executeRawUnsafe("SET LOCAL hnsw.ef_search = 80");
       await tx.$executeRawUnsafe(
-        "SET LOCAL hnsw.iterative_scan = strict_order",
+        "SELECT set_config('hnsw.ef_search', '80', true), set_config('hnsw.iterative_scan', 'strict_order', true)",
       );
 
       return tx.$queryRaw<MemorySearchHit[]>`
@@ -283,12 +284,12 @@ export async function retrieveMemoryWithEmbedding(
 
 async function retrieveTemporalFallback(
   dbClient: any,
-  whereClause: Prisma.Sql,
+  whereClause: PrismaSql,
   vectorString: string,
   limit: number,
   boosts: {
-    sourceTypeBoost: Prisma.Sql;
-    chunkTypeBoost: Prisma.Sql;
+    sourceTypeBoost: PrismaSql;
+    chunkTypeBoost: PrismaSql;
   },
 ): Promise<MemorySearchHit[]> {
   return dbClient.$queryRaw<MemorySearchHit[]>`

@@ -1,122 +1,46 @@
 // apps/api/src/storage/storage.service.ts
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, InternalServerErrorException } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-const ATTACHMENT_BUCKET = 'attachments-bucket';
-
 @Injectable()
-export class StorageService implements OnModuleInit {
-  private readonly logger = new Logger(StorageService.name);
-  private supabase: SupabaseClient;
-  private bucketReady = new Map<string, boolean>();
+export class StorageService {
+  private supabase?: SupabaseClient;
 
-  constructor() {
+  private getSupabaseClient() {
+    if (this.supabase) {
+      return this.supabase;
+    }
+
+    const supabaseUrl = process.env.SUPABASE_URL;
     const supabaseKey =
-      process.env.SUPABASE_SERVICE_KEY ||
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+      process.env.SUPABASE_SERVICE_ROLE_KEY ??
+      process.env.SUPABASE_SECRET_KEY ??
+      process.env.SECRET_KEY ??
+      process.env.SUPABASE_SERVICE_KEY;
 
-    if (!process.env.SUPABASE_URL || !supabaseKey) {
-      this.logger.error(
-        'Missing SUPABASE_URL or SUPABASE_SERVICE_KEY / NEXT_PUBLIC_SUPABASE_ANON_KEY',
+    if (!supabaseUrl || !supabaseKey) {
+      throw new InternalServerErrorException(
+        'Attachment storage is not configured. Set SUPABASE_URL and a server-side Supabase key.',
       );
     }
 
-    this.supabase = createClient(
-      process.env.SUPABASE_URL!,
-      supabaseKey!,
-    );
-  }
-
-  async onModuleInit() {
-    // Pre-warm the default bucket on startup so uploads don't fail.
-    // If this fails (e.g. anon key lacks admin rights), we log a warning
-    // but don't crash — the bucket may already exist or be created manually.
-    try {
-      await this.ensureBucketExists(ATTACHMENT_BUCKET);
-    } catch {
-      this.logger.warn(
-        `Could not auto-create bucket "${ATTACHMENT_BUCKET}" on startup. ` +
-          'Please create it manually in the Supabase Dashboard → Storage, ' +
-          'or set SUPABASE_SERVICE_KEY to your service_role key.',
+    if (supabaseKey.startsWith('sb_publishable')) {
+      throw new InternalServerErrorException(
+        'Attachment storage is using a publishable Supabase key. Set SUPABASE_SERVICE_ROLE_KEY, SUPABASE_SECRET_KEY, or SECRET_KEY to a server-side key.',
       );
     }
-  }
 
-  /**
-   * Ensures the given Supabase Storage bucket exists.
-   * Creates it (public, 5 MB file limit) if it doesn't.
-   * Caches the result so only one RPC is made per bucket name.
-   */
-  private async ensureBucketExists(bucket: string): Promise<void> {
-    if (this.bucketReady.get(bucket)) return;
-
-    try {
-      const { error } = await this.supabase.storage.getBucket(bucket);
-
-      if (!error) {
-        // Bucket exists
-        this.logger.log(`Bucket "${bucket}" already exists.`);
-        this.bucketReady.set(bucket, true);
-        return;
-      }
-
-      if (!error.message?.toLowerCase().includes('not found')) {
-        // Permission or network error on getBucket — assume bucket exists
-        // (anon key can't call getBucket but can still upload to existing buckets)
-        this.logger.warn(
-          `Cannot verify bucket "${bucket}" (${error.message}). Assuming it exists.`,
-        );
-        this.bucketReady.set(bucket, true);
-        return;
-      }
-
-      // Bucket genuinely not found — try to create it
-      this.logger.log(`Bucket "${bucket}" not found — creating it now…`);
-      const { error: createError } = await this.supabase.storage.createBucket(
-        bucket,
-        {
-          public: true,
-          fileSizeLimit: 5 * 1024 * 1024, // 5 MB
-          allowedMimeTypes: [
-            'image/png',
-            'image/jpeg',
-            'application/pdf',
-            'application/msword',
-            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            'text/plain',
-          ],
-        },
-      );
-
-      if (createError) {
-        this.logger.warn(
-          `Could not create bucket "${bucket}": ${createError.message}. ` +
-            'Create it manually in Supabase Dashboard → Storage.',
-        );
-        // Still mark as "ready" so we attempt the upload anyway
-        this.bucketReady.set(bucket, true);
-        return;
-      }
-
-      this.logger.log(`Bucket "${bucket}" created successfully.`);
-      this.bucketReady.set(bucket, true);
-    } catch (err) {
-      this.logger.warn(
-        `ensureBucketExists("${bucket}") failed: ${err instanceof Error ? err.message : err}. Proceeding anyway.`,
-      );
-      // Mark as ready so the next upload attempt goes directly to Supabase
-      this.bucketReady.set(bucket, true);
-    }
+    this.supabase = createClient(supabaseUrl, supabaseKey);
+    return this.supabase;
   }
 
   async uploadFile(file: Express.Multer.File, bucket: string) {
-    // Guarantee the bucket is there before writing
-    await this.ensureBucketExists(bucket);
-
+    const supabase = this.getSupabaseClient();
     const safeName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');
-    const filePath = `attachments/${Date.now()}-${safeName}`;
+    const filePath = `attachments/${randomUUID()}-${safeName}`;
 
-    const { data, error } = await this.supabase.storage
+    const { data, error } = await supabase.storage
       .from(bucket)
       .upload(filePath, file.buffer, {
         contentType: file.mimetype,
@@ -125,21 +49,14 @@ export class StorageService implements OnModuleInit {
 
     if (error) throw error;
 
-    // Get the public URL to store in your database via Prisma
-    const { data: urlData } = this.supabase.storage
-      .from(bucket)
-      .getPublicUrl(filePath);
-
     return {
       path: data.path,
-      url: urlData.publicUrl,
     };
   }
 
   async downloadFile(bucket: string, path: string) {
-    await this.ensureBucketExists(bucket);
-
-    const { data, error } = await this.supabase.storage
+    const supabase = this.getSupabaseClient();
+    const { data, error } = await supabase.storage
       .from(bucket)
       .download(path);
 
@@ -147,5 +64,11 @@ export class StorageService implements OnModuleInit {
     if (!data) throw new Error(`File not found in storage: ${path}`);
 
     return Buffer.from(await data.arrayBuffer());
+  }
+
+  async deleteFile(bucket: string, path: string) {
+    const supabase = this.getSupabaseClient();
+    const { error } = await supabase.storage.from(bucket).remove([path]);
+    if (error) throw error;
   }
 }

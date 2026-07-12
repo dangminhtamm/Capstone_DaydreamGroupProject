@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { BrainLogo } from "@/components/brain-logo";
@@ -9,6 +10,17 @@ export default function Home() {
   const { user, isAuthenticated, isLoading, signInWithGoogle } = useAuth();
   const { resolvedTheme, toggleTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
+  const [authError, setAuthError] = useState("");
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const errorDescription = params.get("error_description");
+    const errorCode = params.get("error_code");
+
+    if (errorDescription) {
+      setAuthError(errorCode ? `${errorCode}: ${errorDescription}` : errorDescription);
+    }
+  }, []);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-indigo-50 dark:from-slate-950 dark:via-slate-900 dark:to-indigo-950/40">
@@ -69,6 +81,12 @@ export default function Home() {
 
       {/* Hero Section */}
       <main className="mx-auto max-w-5xl px-6 py-20">
+        {authError && (
+          <div className="mx-auto mb-8 max-w-2xl rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-700 dark:bg-rose-900/20 dark:text-rose-300">
+            {authError}
+          </div>
+        )}
+
         <div className="text-center">
           <h1 className="text-5xl font-bold text-slate-900 leading-tight dark:text-slate-100">
             Your Personal

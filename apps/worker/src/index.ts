@@ -1,4 +1,5 @@
 // apps/worker/src/index.ts
+import './env';
 
 // 1. Import all background jobs with a single line
 import {
@@ -25,6 +26,7 @@ try {
 
     // Universal Data Ingestion
     DataIngestionJob.startCron();
+    DataIngestionJob.startRealtimeListener();
 
     // Data Summarization Pipeline
     SummaryPipelineJob.startCron();

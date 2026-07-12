@@ -14,15 +14,32 @@ export interface InsertChunkPayload {
   embedding: number[];
 }
 
-export async function insertMemoryChunks(chunks: InsertChunkPayload[]) {
+type PrismaLike = {
+  $executeRaw: (...args: any[]) => Promise<unknown>;
+  $transaction?: (queries: Promise<unknown>[]) => Promise<unknown>;
+};
+
+export async function insertMemoryChunks(
+  chunks: InsertChunkPayload[],
+): Promise<void>;
+export async function insertMemoryChunks(
+  client: PrismaLike,
+  chunks: InsertChunkPayload[],
+): Promise<void>;
+export async function insertMemoryChunks(
+  clientOrChunks: PrismaLike | InsertChunkPayload[],
+  maybeChunks?: InsertChunkPayload[],
+) {
+  const client = Array.isArray(clientOrChunks) ? prisma : clientOrChunks;
+  const chunks = maybeChunks ?? (clientOrChunks as InsertChunkPayload[]);
+
   if (!chunks || chunks.length === 0) return;
 
-  return await prisma.$transaction(
-    chunks.map((chunk) => {
+  const queries = chunks.map((chunk) => {
       const vectorString = toVectorLiteral(chunk.embedding);
       const metadataJson = JSON.stringify(chunk.metadata ?? {});
 
-      return prisma.$executeRaw`
+      return client.$executeRaw`
         INSERT INTO memory_chunks (
           user_id, 
           source_type, 
@@ -59,6 +76,12 @@ export async function insertMemoryChunks(chunks: InsertChunkPayload[]) {
           embedding = EXCLUDED.embedding,
           updated_at = now();
       `;
-    })
-  );
+  });
+
+  if (client.$transaction) {
+    await client.$transaction(queries);
+    return;
+  }
+
+  await Promise.all(queries);
 }

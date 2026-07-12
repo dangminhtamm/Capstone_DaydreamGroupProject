@@ -118,6 +118,61 @@ test("inferRetrievalFilters parses relative temporal ranges", () => {
   assert.ok(filters.endDate.getTime() > filters.startDate.getTime());
 });
 
+test("inferRetrievalFilters parses tomorrow and ngày mai", () => {
+  const now = new Date("2026-07-11T15:30:00.000Z");
+  const englishFilters = inferRetrievalFilters("What do I have tomorrow?", now);
+  const vietnameseFilters = inferRetrievalFilters("Ngày mai tôi có lịch gì?", now);
+
+  assert.ok(englishFilters.startDate instanceof Date);
+  assert.equal(englishFilters.startDate.toISOString(), "2026-07-12T00:00:00.000Z");
+  assert.ok(englishFilters.endDate instanceof Date);
+  assert.equal(englishFilters.endDate.toISOString(), "2026-07-12T23:59:59.999Z");
+  assert.deepEqual(vietnameseFilters.preferredSourceTypes, ["calendar"]);
+  assert.ok(vietnameseFilters.startDate instanceof Date);
+  assert.equal(vietnameseFilters.startDate.toISOString(), "2026-07-12T00:00:00.000Z");
+});
+
+test("inferRetrievalFilters parses hôm trước as the previous day", () => {
+  const filters = inferRetrievalFilters(
+    "Hôm trước tôi đã viết gì trong nhật ký?",
+    new Date("2026-07-11T15:30:00.000Z"),
+  );
+
+  assert.ok(filters.startDate instanceof Date);
+  assert.equal(filters.startDate.toISOString(), "2026-07-10T00:00:00.000Z");
+  assert.ok(filters.endDate instanceof Date);
+  assert.equal(filters.endDate.toISOString(), "2026-07-10T23:59:59.999Z");
+  assert.deepEqual(filters.preferredSourceTypes, ["diary"]);
+});
+
+test("inferRetrievalFilters parses next week and tuần sau", () => {
+  const now = new Date("2026-07-11T15:30:00.000Z");
+  const englishFilters = inferRetrievalFilters("What events are scheduled next week?", now);
+  const vietnameseFilters = inferRetrievalFilters("Tuần sau tôi có lịch gì?", now);
+
+  assert.ok(englishFilters.startDate instanceof Date);
+  assert.equal(englishFilters.startDate.toISOString(), "2026-07-13T00:00:00.000Z");
+  assert.ok(englishFilters.endDate instanceof Date);
+  assert.equal(englishFilters.endDate.toISOString(), "2026-07-19T23:59:59.999Z");
+  assert.deepEqual(vietnameseFilters.preferredSourceTypes, ["calendar"]);
+  assert.ok(vietnameseFilters.startDate instanceof Date);
+  assert.equal(vietnameseFilters.startDate.toISOString(), "2026-07-13T00:00:00.000Z");
+});
+
+test("inferRetrievalFilters parses next month and tháng sau", () => {
+  const now = new Date("2026-07-11T15:30:00.000Z");
+  const englishFilters = inferRetrievalFilters("What meetings are next month?", now);
+  const vietnameseFilters = inferRetrievalFilters("Tháng sau tôi có sự kiện gì?", now);
+
+  assert.ok(englishFilters.startDate instanceof Date);
+  assert.equal(englishFilters.startDate.toISOString(), "2026-08-01T00:00:00.000Z");
+  assert.ok(englishFilters.endDate instanceof Date);
+  assert.equal(englishFilters.endDate.toISOString(), "2026-08-31T23:59:59.999Z");
+  assert.deepEqual(vietnameseFilters.preferredSourceTypes, ["calendar"]);
+  assert.ok(vietnameseFilters.startDate instanceof Date);
+  assert.equal(vietnameseFilters.startDate.toISOString(), "2026-08-01T00:00:00.000Z");
+});
+
 test("inferRetrievalFilters parses explicit month intent", () => {
   const filters = inferRetrievalFilters("What happened last March?");
 

@@ -1,30 +1,227 @@
 import { NotFoundException } from '@nestjs/common';
 import { CalendarService } from './calendar.service';
 
-jest.mock('@second-brain/ai', () => ({
-  indexMemoryFromCalendar: jest.fn(),
+const mockGenerateAuthUrl = jest.fn((args: { state: string }) => {
+  return `https://accounts.google.com/o/oauth2/v2/auth?state=${encodeURIComponent(args.state)}`;
+});
+const mockGetToken = jest.fn(async () => ({
+  tokens: {
+    access_token: 'google-access-token',
+    refresh_token: 'google-refresh-token',
+  },
 }));
+const mockCalendarEventsList = jest.fn();
 
-jest.mock('@second-brain/db', () => ({
-  insertMemoryChunks: jest.fn(),
-  pruneMemoryChunksForSource: jest.fn(),
+jest.mock('googleapis', () => ({
+  google: {
+    auth: {
+      OAuth2: jest.fn().mockImplementation(() => ({
+        generateAuthUrl: mockGenerateAuthUrl,
+        getToken: mockGetToken,
+        setCredentials: jest.fn(),
+        on: jest.fn(),
+      })),
+    },
+    calendar: jest.fn().mockImplementation(() => ({
+      events: {
+        list: mockCalendarEventsList,
+      },
+    })),
+  },
 }));
 
 describe('CalendarService', () => {
   const prisma = {
     user: {
       findUnique: jest.fn(),
+      upsert: jest.fn(),
+      update: jest.fn(),
     },
     calendarEvent: {
+      count: jest.fn(),
+      findFirst: jest.fn(),
       findMany: jest.fn(),
+      upsert: jest.fn(),
     },
+    indexingOutbox: {
+      upsert: jest.fn(),
+    },
+    $transaction: jest.fn(async (callback: any) => callback(prisma)),
   };
 
   let service: CalendarService;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    process.env.GOOGLE_CLIENT_ID = 'google-client-id';
+    process.env.GOOGLE_CLIENT_SECRET = 'google-client-secret';
+    process.env.GOOGLE_OAUTH_STATE_SECRET = 'state-secret';
+    process.env.FRONTEND_URL = 'http://localhost:3000';
+    mockCalendarEventsList.mockReset();
     service = new CalendarService(prisma as any);
+  });
+
+  it('creates a server-side Google OAuth URL with signed state', async () => {
+    prisma.user.upsert.mockResolvedValue({ id: 'user-1' });
+
+    const url = await service.createGoogleConnectUrl({
+      supabaseId: 'supabase-user-1',
+      email: 'user@example.com',
+    });
+
+    expect(prisma.user.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { supabaseId: 'supabase-user-1' },
+      }),
+    );
+    expect(mockGenerateAuthUrl).toHaveBeenCalledWith(
+      expect.objectContaining({
+        access_type: 'offline',
+        prompt: 'consent',
+        scope: ['https://www.googleapis.com/auth/calendar.readonly'],
+      }),
+    );
+    expect(url).toContain('state=');
+  });
+
+  it('stores Google OAuth tokens on callback and redirects back to settings', async () => {
+    prisma.user.upsert.mockResolvedValue({ id: 'user-1' });
+    prisma.user.update.mockResolvedValue({ id: 'user-1' });
+    const connectUrl = await service.createGoogleConnectUrl({
+      supabaseId: 'supabase-user-1',
+      email: 'user@example.com',
+    });
+    const state = new URL(connectUrl).searchParams.get('state') ?? '';
+
+    const redirectUrl = await service.handleGoogleOAuthCallback({
+      code: 'oauth-code',
+      state,
+    });
+
+    expect(mockGetToken).toHaveBeenCalledWith('oauth-code');
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: { supabaseId: 'supabase-user-1' },
+      data: {
+        google_connected: true,
+        google_access_token: 'google-access-token',
+        google_refresh_token: 'google-refresh-token',
+      },
+    });
+    expect(redirectUrl).toBe('http://localhost:3000/settings?calendar=connected');
+  });
+
+  it('returns calendar connection status without exposing tokens', async () => {
+    prisma.user.upsert.mockResolvedValue({
+      id: 'user-1',
+      google_connected: true,
+      google_access_token: 'access-token',
+      google_refresh_token: 'refresh-token',
+    });
+    prisma.calendarEvent.count.mockResolvedValue(3);
+    prisma.calendarEvent.findFirst.mockResolvedValue({
+      updated_at: new Date('2026-05-18T12:00:00.000Z'),
+    });
+
+    const status = await service.getConnectionStatus({
+      supabaseId: 'supabase-user-1',
+      email: 'user@example.com',
+    });
+
+    expect(status).toEqual({
+      connected: true,
+      eventCount: 3,
+      lastSyncedAt: new Date('2026-05-18T12:00:00.000Z'),
+    });
+    expect(prisma.user.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { supabaseId: 'supabase-user-1' },
+      }),
+    );
+    expect(status).not.toHaveProperty('google_access_token');
+  });
+
+  it('syncs events and queues calendar indexing when only a refresh token is stored', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'user-1',
+      supabaseId: 'supabase-user-1',
+      google_access_token: null,
+      google_refresh_token: 'refresh-token',
+    });
+    prisma.user.update.mockResolvedValue({ id: 'user-1' });
+    mockCalendarEventsList.mockResolvedValue({
+      data: {
+        items: [
+          {
+            id: 'google-event-1',
+            summary: 'Capstone Mentor Review',
+            description: 'Review AI memory and Calendar demo.',
+            start: { dateTime: '2026-05-18T10:00:00.000Z' },
+            end: { dateTime: '2026-05-18T11:00:00.000Z' },
+            htmlLink: 'https://calendar.google.com/event-1',
+          },
+        ],
+      },
+    });
+    prisma.calendarEvent.upsert.mockResolvedValue({
+      id: 'calendar-event-1',
+      external_id: 'google-event-1',
+      title: 'Capstone Mentor Review',
+      description: 'Review AI memory and Calendar demo.',
+      start_time: new Date('2026-05-18T10:00:00.000Z'),
+      end_time: new Date('2026-05-18T11:00:00.000Z'),
+      html_link: 'https://calendar.google.com/event-1',
+    });
+    prisma.indexingOutbox.upsert.mockResolvedValue({
+      id: 'indexing-job-1',
+      source_type: 'calendar',
+      source_id: 'calendar-event-1',
+      status: 'pending',
+    });
+
+    const result = await service.syncGoogleEvents('supabase-user-1');
+
+    expect(mockCalendarEventsList).toHaveBeenCalled();
+    expect(prisma.calendarEvent.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          user_id_external_id: {
+            user_id: 'user-1',
+            external_id: 'google-event-1',
+          },
+        },
+      }),
+    );
+    expect(prisma.indexingOutbox.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          job_type_source_type_source_id: {
+            job_type: 'index_memory',
+            source_type: 'calendar',
+            source_id: 'calendar-event-1',
+          },
+        },
+        update: expect.objectContaining({
+          user_id: 'user-1',
+          status: 'pending',
+          retry_count: 0,
+          error: null,
+        }),
+        create: expect.objectContaining({
+          user_id: 'user-1',
+          job_type: 'index_memory',
+          source_type: 'calendar',
+          source_id: 'calendar-event-1',
+          status: 'pending',
+        }),
+      }),
+    );
+    expect(result).toEqual(
+      expect.objectContaining({
+        syncedCount: 1,
+        queuedIndexingJobs: 1,
+        memoryIndexingStatus: 'queued',
+      }),
+    );
   });
 
   it('returns only calendar events owned by the authenticated user', async () => {

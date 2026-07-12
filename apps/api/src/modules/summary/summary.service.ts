@@ -24,12 +24,19 @@ type GenerateSummaryInput = {
   force?: boolean;
 };
 
+type AuthenticatedUserInput = {
+  supabaseId: string;
+  email: string;
+};
+
 @Injectable()
 export class SummaryService {
+  private _geminiClient: GoogleGenerativeAI | null = null;
+
   constructor(private prisma: PrismaService) {}
 
   async findAll(
-    supabaseUserId: string,
+    authUser: AuthenticatedUserInput | string,
     options: {
       type?: string;
       startDate?: string;
@@ -37,7 +44,7 @@ export class SummaryService {
       limit?: number;
     },
   ) {
-    const user = await this.findUserOrThrow(supabaseUserId);
+    const user = await this.findOrCreateUser(authUser);
 
     const summaries = await this.prisma.summary.findMany({
       where: {
@@ -62,8 +69,8 @@ export class SummaryService {
     };
   }
 
-  async findOne(supabaseUserId: string, summaryId: string) {
-    const user = await this.findUserOrThrow(supabaseUserId);
+  async findOne(authUser: AuthenticatedUserInput | string, summaryId: string) {
+    const user = await this.findOrCreateUser(authUser);
 
     const summary = await this.prisma.summary.findFirst({
       where: {
@@ -79,8 +86,8 @@ export class SummaryService {
     return this.toClientSummary(summary);
   }
 
-  async generateSummary(supabaseUserId: string, dto: CreateSummaryDto) {
-    const user = await this.findUserOrThrow(supabaseUserId);
+  async generateSummary(authUser: AuthenticatedUserInput | string, dto: CreateSummaryDto) {
+    const user = await this.findOrCreateUser(authUser);
     return this.generateSummaryForUserId(user.id, dto);
   }
 
@@ -102,9 +109,15 @@ export class SummaryService {
     });
 
     if (existing && !input.force) {
+      await this.enqueueSummaryIndexingJob(this.prisma, {
+        userId,
+        summaryId: existing.id,
+      });
+
       return {
         generated: false,
         summary: this.toClientSummary(existing),
+        memoryIndexingStatus: 'queued',
       };
     }
 
@@ -116,34 +129,105 @@ export class SummaryService {
     }
 
     const content = await this.generateAiSummary(input.type, period, context.text);
-    const summary = await this.prisma.summary.upsert({
-      where: {
-        user_id_summary_type_period_start_period_end: summaryPeriodKey,
-      },
-      update: { content },
-      create: {
-        ...summaryPeriodKey,
-        content,
-      },
+    const summary = await this.prisma.$transaction(async (tx) => {
+      const savedSummary = await tx.summary.upsert({
+        where: {
+          user_id_summary_type_period_start_period_end: summaryPeriodKey,
+        },
+        update: { content },
+        create: {
+          ...summaryPeriodKey,
+          content,
+        },
+      });
+
+      await this.enqueueSummaryIndexingJob(tx, {
+        userId,
+        summaryId: savedSummary.id,
+      });
+
+      return savedSummary;
     });
 
     return {
       generated: true,
       summary: this.toClientSummary(summary),
+      memoryIndexingStatus: 'queued',
     };
   }
 
-  private async findUserOrThrow(supabaseUserId: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { supabaseId: supabaseUserId },
-      select: { id: true },
-    });
+  private async findOrCreateUser(authUser: AuthenticatedUserInput | string) {
+    if (typeof authUser === 'string') {
+      const user = await this.prisma.user.findUnique({
+        where: { supabaseId: authUser },
+        select: { id: true },
+      });
 
-    if (!user) {
-      throw new NotFoundException('User not found');
+      if (!user) {
+        throw new NotFoundException('User not found');
+      }
+
+      return user;
     }
 
-    return user;
+    return this.prisma.user.upsert({
+      where: { supabaseId: authUser.supabaseId },
+      update: { email: authUser.email },
+      create: {
+        supabaseId: authUser.supabaseId,
+        email: authUser.email,
+      },
+      select: { id: true },
+    });
+  }
+
+  private async enqueueSummaryIndexingJob(
+    tx: any,
+    input: {
+      userId: string;
+      summaryId: string;
+    },
+  ) {
+    const job = await tx.indexingOutbox.upsert({
+      where: {
+        job_type_source_type_source_id: {
+          job_type: 'index_memory',
+          source_type: 'summary',
+          source_id: input.summaryId,
+        },
+      },
+      update: {
+        user_id: input.userId,
+        status: 'pending',
+        retry_count: 0,
+        error: null,
+        payload: {},
+        run_after: new Date(),
+        locked_at: null,
+        processed_at: null,
+      },
+      create: {
+        user_id: input.userId,
+        job_type: 'index_memory',
+        source_type: 'summary',
+        source_id: input.summaryId,
+        status: 'pending',
+        payload: {},
+      },
+    });
+
+    await this.expireSearchCache(tx, input.userId);
+    return job;
+  }
+
+  private async expireSearchCache(tx: any, userId: string) {
+    await tx.searchHistory?.updateMany?.({
+      where: {
+        user_id: userId,
+        expires_at: { gt: new Date() },
+      },
+      data: { expires_at: new Date() },
+    });
   }
 
   private async buildSummaryContext(
@@ -220,6 +304,7 @@ export class SummaryService {
     userId: string,
     period: { start: Date; end: Date },
   ) {
+    const itemLimit = this.getSummaryContextItemLimit();
     const [diaries, events] = await Promise.all([
       this.prisma.diaryEntry.findMany({
         where: {
@@ -227,6 +312,7 @@ export class SummaryService {
           entry_date: { gte: period.start, lte: period.end },
         },
         orderBy: { entry_date: 'asc' },
+        take: itemLimit,
       }),
       this.prisma.calendarEvent.findMany({
         where: {
@@ -234,6 +320,7 @@ export class SummaryService {
           start_time: { gte: period.start, lte: period.end },
         },
         orderBy: { start_time: 'asc' },
+        take: itemLimit,
       }),
     ]);
 
@@ -264,7 +351,7 @@ export class SummaryService {
 
     return {
       hasContent: sections.length > 0,
-      text: sections.join('\n\n'),
+      text: this.truncateSummaryContext(sections.join('\n\n')),
     };
   }
 
@@ -278,8 +365,7 @@ export class SummaryService {
       throw new InternalServerErrorException('GEMINI_API_KEY is not configured.');
     }
 
-    const ai = new GoogleGenerativeAI(apiKey);
-    const model = ai.getGenerativeModel({
+    const model = this.getGeminiClient(apiKey).getGenerativeModel({
       model: process.env.GEMINI_SUMMARY_MODEL ?? process.env.GEMINI_ANSWER_MODEL ?? 'gemini-2.5-flash',
     });
 
@@ -292,6 +378,29 @@ export class SummaryService {
     }
 
     return text;
+  }
+
+  private getGeminiClient(apiKey: string) {
+    if (!this._geminiClient) {
+      this._geminiClient = new GoogleGenerativeAI(apiKey);
+    }
+
+    return this._geminiClient;
+  }
+
+  private getSummaryContextItemLimit() {
+    const configured = Number(process.env.SUMMARY_CONTEXT_ITEM_LIMIT ?? 80);
+    if (!Number.isFinite(configured)) return 80;
+    return Math.min(Math.max(Math.floor(configured), 10), 200);
+  }
+
+  private truncateSummaryContext(context: string) {
+    const maxChars = Number(process.env.SUMMARY_CONTEXT_MAX_CHARS ?? 24_000);
+    if (!Number.isFinite(maxChars) || maxChars <= 0 || context.length <= maxChars) {
+      return context;
+    }
+
+    return `${context.slice(0, maxChars)}\n\n[Context truncated to keep the summary request within budget.]`;
   }
 
   private toClientSummary(summary: SummaryRecord) {

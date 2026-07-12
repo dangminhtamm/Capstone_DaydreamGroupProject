@@ -23,6 +23,10 @@ describe('DiaryService', () => {
       update: jest.fn(),
       delete: jest.fn(),
     },
+    indexingOutbox: {
+      upsert: jest.fn(),
+      deleteMany: jest.fn(),
+    },
     $transaction: jest.fn((fn: any) => fn(prisma)),
   };
 
@@ -33,7 +37,7 @@ describe('DiaryService', () => {
     service = new DiaryService(prisma as any);
   });
 
-  it('creates a diary for the authenticated user and indexes memory', async () => {
+  it('creates a diary for the authenticated user and queues memory indexing', async () => {
     const entryDate = new Date('2026-05-18T09:00:00.000Z');
     prisma.user.findUnique.mockResolvedValue({ id: 'user-1' });
     prisma.diaryEntry.create.mockResolvedValue({
@@ -61,7 +65,52 @@ describe('DiaryService', () => {
       id: 'diary-1',
       title: 'Title',
       content: 'Content',
-      memoryIndexed: true,
+      memoryIndexed: false,
+      memoryIndexingStatus: 'queued',
+    });
+    expect(prisma.indexingOutbox.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          job_type_source_type_source_id: {
+            job_type: 'index_memory',
+            source_type: 'diary',
+            source_id: 'diary-1',
+          },
+        },
+      }),
+    );
+  });
+
+  it('stores an explicit diary entry date when provided', async () => {
+    const createdAt = new Date('2026-05-18T09:00:00.000Z');
+    const explicitEntryDate = '2026-05-12T12:00:00.000Z';
+    prisma.user.findUnique.mockResolvedValue({ id: 'user-1' });
+    prisma.diaryEntry.create.mockResolvedValue({
+      id: 'diary-2',
+      raw_text: 'Backdated\n\nContent',
+      status: 'published',
+      created_at: createdAt,
+      updated_at: createdAt,
+      entry_date: new Date(explicitEntryDate),
+    });
+
+    const result = await service.create('supabase-user-1', {
+      title: 'Backdated',
+      content: 'Content',
+      entryDate: explicitEntryDate,
+    });
+
+    expect(prisma.diaryEntry.create).toHaveBeenCalledWith({
+      data: {
+        raw_text: 'Backdated\n\nContent',
+        user_id: 'user-1',
+        status: 'published',
+        entry_date: new Date(explicitEntryDate),
+      },
+    });
+    expect(result).toMatchObject({
+      id: 'diary-2',
+      entryDate: explicitEntryDate,
     });
   });
 
@@ -124,7 +173,16 @@ describe('DiaryService', () => {
 
     expect(prisma.diaryEntry.findMany).toHaveBeenCalledWith({
       where: { user_id: 'user-1' },
+      select: {
+        id: true,
+        raw_text: true,
+        status: true,
+        entry_date: true,
+        created_at: true,
+        updated_at: true,
+      },
       orderBy: { created_at: 'desc' },
+      take: 100,
     });
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({ id: 'diary-1', title: 'Title' });
