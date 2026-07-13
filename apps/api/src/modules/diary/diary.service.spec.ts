@@ -25,16 +25,24 @@ describe('DiaryService', () => {
     },
     indexingOutbox: {
       upsert: jest.fn(),
+      findMany: jest.fn(),
       deleteMany: jest.fn(),
     },
     $transaction: jest.fn((fn: any) => fn(prisma)),
+  };
+  const storageService = {
+    createSignedUrl: jest.fn(),
   };
 
   let service: DiaryService;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    service = new DiaryService(prisma as any);
+    storageService.createSignedUrl.mockImplementation(
+      async (_bucket: string, path: string) => `https://storage.local/${path}`,
+    );
+    prisma.indexingOutbox.findMany.mockResolvedValue([]);
+    service = new DiaryService(prisma as any, storageService as any);
   });
 
   it('creates a diary for the authenticated user and queues memory indexing', async () => {
@@ -180,12 +188,80 @@ describe('DiaryService', () => {
         entry_date: true,
         created_at: true,
         updated_at: true,
+        attachments: {
+          select: {
+            id: true,
+            storage_path: true,
+            file_type: true,
+            extracted_text: true,
+            created_at: true,
+          },
+          orderBy: { created_at: 'asc' },
+        },
+        calendar_events: {
+          select: {
+            id: true,
+            title: true,
+            start_time: true,
+            end_time: true,
+            html_link: true,
+          },
+          orderBy: { start_time: 'asc' },
+        },
       },
       orderBy: { created_at: 'desc' },
       take: 100,
     });
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({ id: 'diary-1', title: 'Title' });
+  });
+
+  it('returns signed attachment urls without exposing storage paths', async () => {
+    const createdAt = new Date('2026-05-18T09:00:00.000Z');
+    prisma.user.findUnique.mockResolvedValue({ id: 'user-1' });
+    prisma.diaryEntry.findMany.mockResolvedValue([
+      {
+        id: 'diary-1',
+        raw_text: 'Title\n\nContent',
+        status: 'published',
+        created_at: createdAt,
+        updated_at: createdAt,
+        attachments: [
+          {
+            id: 'attachment-1',
+            storage_path: 'attachments/user-1/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa-file.pdf',
+            file_type: 'application/pdf',
+            extracted_text: 'Extracted text',
+            created_at: createdAt,
+          },
+        ],
+      },
+    ]);
+    prisma.indexingOutbox.findMany.mockResolvedValue([
+      {
+        source_id: 'attachment-1',
+        status: 'succeeded',
+        error: null,
+        retry_count: 0,
+        updated_at: createdAt,
+      },
+    ]);
+
+    const result = await service.findAll('supabase-user-1');
+
+    expect(storageService.createSignedUrl).toHaveBeenCalledWith(
+      'attachments-bucket',
+      'attachments/user-1/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa-file.pdf',
+    );
+    expect(result[0].attachments).toEqual([
+      expect.objectContaining({
+        id: 'attachment-1',
+        fileName: 'file.pdf',
+        signedUrl: 'https://storage.local/attachments/user-1/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa-file.pdf',
+        extractionStatus: 'extracted',
+        indexingStatus: 'succeeded',
+      }),
+    ]);
   });
 
   describe('toClientEntry robust parsing fallbacks', () => {

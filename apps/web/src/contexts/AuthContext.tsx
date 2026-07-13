@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient, type Session, type User, type SupabaseClient } from '@supabase/supabase-js';
+import { getAuthCallbackUrl, syncSessionWithBackend } from '@/lib/auth-flow';
 
 // Initialize Supabase client
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -70,7 +71,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         // Sync with backend on sign in (non-blocking, skip if backend unavailable)
         if (event === 'SIGNED_IN' && session) {
-          syncWithBackend(session).catch(() => {
+          syncSessionWithBackend(session).catch(() => {
             // Silently ignore - backend may not be running
           });
         }
@@ -82,31 +83,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const syncWithBackend = async (session: Session) => {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
-    const jwt = session.access_token;
-
-    try {
-      const response = await fetch(`${apiUrl}/api/auth/sync`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${jwt}`,
-        },
-        body: JSON.stringify({
-          display_name: session.user.user_metadata?.full_name || session.user.user_metadata?.name,
-        }),
-      });
-
-      if (!response.ok) {
-        console.warn('[Auth] Backend sync failed:', response.status);
-      }
-    } catch {
-      // Expected when API server is not running during development
-      console.warn('[Auth] Could not reach API server for sync — is the API running?');
-    }
-  };
-
   const signInWithGoogle = useCallback(async (): Promise<{ error?: string }> => {
     if (!supabase) {
       setConfigError('Cannot sign in: Supabase env vars missing');
@@ -115,14 +91,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     await supabase.auth.signOut({ scope: 'local' }).catch(() => undefined);
 
-    const redirectUrl = typeof window !== 'undefined'
-      ? `${window.location.origin}/auth/callback`
-      : 'http://localhost:3000/auth/callback';
-
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: redirectUrl,
+        redirectTo: getAuthCallbackUrl(),
       },
     });
 
@@ -136,15 +108,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signUpWithEmail = useCallback(async (email: string, password: string, displayName: string): Promise<{ error?: string }> => {
     if (!supabase) return { error: 'Supabase not configured' };
 
-    const redirectUrl = typeof window !== 'undefined'
-      ? `${window.location.origin}/auth/callback`
-      : 'http://localhost:3000/auth/callback';
-
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
-        emailRedirectTo: redirectUrl,
+        emailRedirectTo: getAuthCallbackUrl(),
         data: {
           full_name: displayName,
         },
@@ -175,12 +143,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const resetPassword = useCallback(async (email: string): Promise<{ error?: string }> => {
     if (!supabase) return { error: 'Supabase not configured' };
 
-    const redirectUrl = typeof window !== 'undefined'
-      ? `${window.location.origin}/auth/callback?type=recovery`
-      : 'http://localhost:3000/auth/callback?type=recovery';
-
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: redirectUrl,
+      redirectTo: getAuthCallbackUrl('recovery'),
     });
 
     if (error) return { error: error.message };

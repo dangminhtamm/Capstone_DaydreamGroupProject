@@ -768,27 +768,42 @@ export default function SearchPage() {
         {result?.sources.length ? (
           <div className="grid gap-4 md:grid-cols-2">
             {result.sources.map((source) => (
-              <article key={`${source.marker}-${source.chunkId}`} className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-indigo-200 hover:shadow-md dark:border-slate-700 dark:from-slate-800 dark:to-slate-800/50 dark:hover:border-indigo-500/50">
-                <div className="mb-3 flex items-center justify-between gap-3">
-                  <span className="rounded-full bg-indigo-100 px-3 py-1 text-xs font-bold text-indigo-700 ring-1 ring-indigo-200 dark:bg-indigo-900/40 dark:text-indigo-400 dark:ring-indigo-700">
-                    [{source.marker}]
+              <article
+                key={`${source.marker}-${source.chunkId}`}
+                className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-indigo-200 hover:shadow-md dark:border-slate-700 dark:bg-slate-800/80 dark:hover:border-indigo-500/50"
+              >
+                <div className="mb-3 flex flex-wrap items-center gap-2">
+                  <span className="rounded-lg bg-indigo-600 px-2.5 py-1 text-xs font-bold text-white shadow-sm">
+                    {source.marker}
                   </span>
-                  <span className="text-xs text-slate-500 dark:text-slate-400">
+                  <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold capitalize text-slate-700 dark:bg-slate-700 dark:text-slate-200">
+                    {source.sourceType}
+                  </span>
+                  <span className="rounded-full bg-sky-50 px-2.5 py-1 text-xs font-semibold text-sky-700 ring-1 ring-sky-100 dark:bg-sky-900/30 dark:text-sky-300 dark:ring-sky-800">
+                    {source.chunkType.replaceAll("_", " ")}
+                  </span>
+                  <span className="ml-auto text-xs font-medium text-slate-500 dark:text-slate-400">
                     {new Date(source.occurredAt).toLocaleDateString()}
                   </span>
                 </div>
 
-                <p className="text-sm font-semibold text-slate-900 dark:text-slate-200">
-                  {source.sourceTitle || `${source.sourceType} • ${source.chunkType}`}
+                <p className="text-sm font-semibold leading-6 text-slate-950 dark:text-slate-100">
+                  {source.sourceTitle || "Untitled memory"}
                 </p>
-                {source.claim ? <p className="mt-2 text-sm text-slate-700 dark:text-slate-300">{source.claim}</p> : null}
-                <blockquote className="mt-3 rounded-r-xl border-l-4 border-indigo-200 bg-white px-3 py-2 text-sm italic text-slate-600 dark:border-indigo-700 dark:bg-slate-700/50 dark:text-slate-400">
-                  &ldquo;{source.quote}&rdquo;
+                {source.claim ? (
+                  <p className="mt-2 rounded-xl bg-indigo-50 px-3 py-2 text-sm leading-6 text-indigo-950 dark:bg-indigo-950/30 dark:text-indigo-200">
+                    {source.claim}
+                  </p>
+                ) : null}
+                <blockquote className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm leading-6 text-slate-700 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-300">
+                  {source.quote}
                 </blockquote>
-                <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-500 dark:text-slate-400">
-                  <span className="rounded-full bg-slate-100 px-2 py-1 dark:bg-slate-700">type: {source.sourceType}</span>
-                  <span className="rounded-full bg-slate-100 px-2 py-1 dark:bg-slate-700">
-                    similarity: {Math.round(source.similarity * 100)}%
+                <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                  <span className="rounded-full bg-slate-100 px-2.5 py-1 font-medium dark:bg-slate-700">
+                    source id: {source.sourceId.slice(0, 8)}
+                  </span>
+                  <span className="rounded-full bg-emerald-50 px-2.5 py-1 font-semibold text-emerald-700 ring-1 ring-emerald-100 dark:bg-emerald-900/30 dark:text-emerald-300 dark:ring-emerald-800">
+                    match {Math.round(source.similarity * 100)}%
                   </span>
                 </div>
               </article>

@@ -364,7 +364,11 @@ export function SummaryDashboard() {
         response.summary,
         ...current.filter((summary) => summary.id !== response.summary.id),
       ]);
-      setGenerateMessage(`${summaryType[0].toUpperCase()}${summaryType.slice(1)} summary generated.`);
+      setGenerateMessage(
+        response.memoryIndexingStatus === "queued"
+          ? `${summaryType[0].toUpperCase()}${summaryType.slice(1)} summary generated and queued for memory indexing.`
+          : `${summaryType[0].toUpperCase()}${summaryType.slice(1)} summary generated.`,
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to generate summary";
       setGenerateError(
@@ -460,6 +464,23 @@ export function SummaryDashboard() {
           tone="bg-amber-500"
         />
       </section>
+
+      {!sortedEntries.length ? (
+        <section className="rounded-3xl border border-dashed border-indigo-200 bg-indigo-50/50 p-6 text-center dark:border-indigo-800 dark:bg-indigo-950/20">
+          <p className="text-base font-semibold text-indigo-950 dark:text-indigo-200">
+            No diary activity to summarize yet
+          </p>
+          <p className="mx-auto mt-2 max-w-2xl text-sm leading-6 text-indigo-700/80 dark:text-indigo-300/80">
+            Add a few diary entries or sync Calendar events first. Daily summaries use raw activity, while weekly and monthly summaries become stronger after lower-level summaries exist.
+          </p>
+          <a
+            href="/diary"
+            className="mt-4 inline-flex rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700"
+          >
+            Write first diary entry
+          </a>
+        </section>
+      ) : null}
 
       <section className="rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white to-slate-50/50 p-6 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:from-slate-800 dark:to-slate-800/50 dark:shadow-slate-900/40">
         <div className="mb-5 flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">

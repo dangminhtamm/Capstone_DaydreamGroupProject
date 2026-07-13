@@ -5,18 +5,19 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { indexMemoryFromDiary } from '@second-brain/ai';
 import {
   deleteMemoryChunksForSource,
-  insertMemoryChunks,
-  pruneMemoryChunksForSource,
 } from '@second-brain/db';
 import { PrismaService } from '../../prisma/prisma.service'; // Adjust path based on your setup
+import { StorageService } from '../../storage/storage.service';
 import { CreateDiaryDto } from './dto/create-diary.dto';
 
 @Injectable()
 export class DiaryService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private storageService: StorageService,
+  ) {}
 
   async create(userId: string, dto: CreateDiaryDto) {
     const user = await this.prisma.user.findUnique({
@@ -26,36 +27,35 @@ export class DiaryService {
 
     if (!user) throw new NotFoundException('User not found');
 
-    const entry = await this.prisma.diaryEntry.create({
-      data: {
-        raw_text: `${dto.title}\n\n${dto.content}`,
-        user_id: user.id,
-        status: 'published',
-        ...(dto.entryDate ? { entry_date: new Date(dto.entryDate) } : {}),
-      },
+    const entry = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.diaryEntry.create({
+        data: {
+          raw_text: `${dto.title}\n\n${dto.content}`,
+          user_id: user.id,
+          status: 'published',
+          ...(dto.entryDate ? { entry_date: new Date(dto.entryDate) } : {}),
+        },
+      });
+
+      await this.enqueueIndexingJob(tx, {
+        userId: user.id,
+        sourceType: 'diary',
+        sourceId: created.id,
+        payload: { sourceTitle: dto.title },
+      });
+
+      return created;
     });
 
-    try {
-      const indexingResult = await this.indexDiaryEntry(
-        user.id,
-        entry,
-        dto.title,
-      );
-
-      return {
-        ...this.toClientEntry(entry),
-        memoryIndexed: true,
-        memoryChunkCount: indexingResult.chunkCount,
-      };
-    } catch (error) {
-      console.error('Failed to index diary entry into memory chunks:', error);
-      throw new InternalServerErrorException(
-        'Diary entry was saved, but memory indexing failed.',
-      );
-    }
+    return {
+      ...(await this.toClientEntry(entry)),
+      memoryIndexed: false,
+      memoryIndexingStatus: 'queued',
+      memoryChunkCount: 0,
+    };
   }
 
-  async findAll(userId: string) {
+  async findAll(userId: string, options: { limit?: number } = {}) {
     const user = await this.prisma.user.findUnique({
       where: { supabaseId: userId },
       select: { id: true },
@@ -65,11 +65,39 @@ export class DiaryService {
 
     const entries = await this.prisma.diaryEntry.findMany({
       where: { user_id: user.id },
+      select: {
+        id: true,
+        raw_text: true,
+        status: true,
+        entry_date: true,
+        created_at: true,
+        updated_at: true,
+        attachments: {
+          select: {
+            id: true,
+            storage_path: true,
+            file_type: true,
+            extracted_text: true,
+            created_at: true,
+          },
+          orderBy: { created_at: 'asc' },
+        },
+        calendar_events: {
+          select: {
+            id: true,
+            title: true,
+            start_time: true,
+            end_time: true,
+            html_link: true,
+          },
+          orderBy: { start_time: 'asc' },
+        },
+      },
       orderBy: { created_at: 'desc' },
-      include: { attachments: true },
+      take: options.limit ?? 100,
     });
 
-    return entries.map((entry) => this.toClientEntry(entry));
+    return Promise.all(entries.map((entry) => this.toClientEntry(entry)));
   }
 
   async findOne(userId: string, id: string) {
@@ -82,7 +110,14 @@ export class DiaryService {
 
     const entry = await this.prisma.diaryEntry.findFirst({
       where: { id, user_id: user.id },
-      include: { attachments: true },
+      include: {
+        attachments: {
+          orderBy: { created_at: 'asc' },
+        },
+        calendar_events: {
+          orderBy: { start_time: 'asc' },
+        },
+      },
     });
     if (!entry) throw new NotFoundException('Diary entry not found');
     return this.toClientEntry(entry);
@@ -93,46 +128,37 @@ export class DiaryService {
       userId,
       id,
     );
-    const existingClientEntry = this.toClientEntry(existingEntry);
+    const existingClientEntry = await this.toClientEntry(existingEntry);
     const title = dto.title ?? existingClientEntry.title;
     const content = dto.content ?? existingClientEntry.content;
     const rawText = this.buildRawText(title, content);
     const entryDate = dto.entryDate ? new Date(dto.entryDate) : undefined;
 
-    const entry = await this.prisma.diaryEntry.update({
-      where: { id },
-      data: {
-        raw_text: rawText,
-        ...(entryDate ? { entry_date: entryDate } : {}),
-      },
+    const entry = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.diaryEntry.update({
+        where: { id },
+        data: {
+          raw_text: rawText,
+          ...(entryDate ? { entry_date: entryDate } : {}),
+        },
+      });
+
+      await this.enqueueIndexingJob(tx, {
+        userId: user.id,
+        sourceType: 'diary',
+        sourceId: id,
+        payload: { sourceTitle: title },
+      });
+
+      return updated;
     });
 
-    try {
-      const indexingResult = await this.indexDiaryEntry(user.id, entry, title);
-
-      return {
-        ...this.toClientEntry(entry),
-        memoryIndexed: true,
-        memoryChunkCount: indexingResult.chunkCount,
-      };
-    } catch (error) {
-      await this.prisma.diaryEntry
-        .update({
-          where: { id },
-          data: {
-            raw_text: existingEntry.raw_text,
-            entry_date: existingEntry.entry_date,
-          },
-        })
-        .catch((rollbackError) => {
-          console.error('Failed to rollback diary update:', rollbackError);
-        });
-
-      console.error('Failed to re-index updated diary entry:', error);
-      throw new InternalServerErrorException(
-        'Diary update was rolled back because memory re-indexing failed.',
-      );
-    }
+    return {
+      ...(await this.toClientEntry(entry)),
+      memoryIndexed: false,
+      memoryIndexingStatus: 'queued',
+      memoryChunkCount: 0,
+    };
   }
 
   async remove(userId: string, id: string) {
@@ -166,45 +192,80 @@ export class DiaryService {
     return { user, entry };
   }
 
-  private async indexDiaryEntry(
-    userId: string,
-    entry: { id: string; raw_text: string; entry_date: Date },
-    sourceTitle: string,
+  private async enqueueIndexingJob(
+    tx: any,
+    input: {
+      userId: string;
+      sourceType: 'diary';
+      sourceId: string;
+      payload?: Record<string, unknown>;
+    },
   ) {
-    const indexingResult = await indexMemoryFromDiary({
-      userId,
-      diaryId: entry.id,
-      rawText: entry.raw_text,
-      entryDate: entry.entry_date,
-      sourceTitle,
-      insertChunks: (chunks) =>
-        this.prisma.$transaction(async (tx) => {
-          await insertMemoryChunks(tx as any, chunks);
-          await pruneMemoryChunksForSource(tx as any, {
-            userId,
-            sourceType: 'diary',
-            sourceId: entry.id,
-            keepChunkCount: chunks.length,
-          });
-        }),
+    const job = await tx.indexingOutbox.upsert({
+      where: {
+        job_type_source_type_source_id: {
+          job_type: 'index_memory',
+          source_type: input.sourceType,
+          source_id: input.sourceId,
+        },
+      },
+      update: {
+        user_id: input.userId,
+        status: 'pending',
+        retry_count: 0,
+        error: null,
+        payload: input.payload ?? {},
+        run_after: new Date(),
+        locked_at: null,
+        processed_at: null,
+      },
+      create: {
+        user_id: input.userId,
+        job_type: 'index_memory',
+        source_type: input.sourceType,
+        source_id: input.sourceId,
+        status: 'pending',
+        payload: input.payload ?? {},
+      },
     });
 
-    if (indexingResult.chunkCount === 0) {
-      await deleteMemoryChunksForSource(this.prisma as any, {
-        userId,
-        sourceType: 'diary',
-        sourceId: entry.id,
-      });
-    }
+    await tx.searchHistory?.updateMany?.({
+      where: {
+        user_id: input.userId,
+        expires_at: { gt: new Date() },
+      },
+      data: { expires_at: new Date() },
+    });
 
-    return indexingResult;
+    return job;
   }
 
   private buildRawText(title: string, content: string) {
     return `${title.trim()}\n\n${content.trim()}`;
   }
 
-  private toClientEntry(entry: { id: string; raw_text: string; status: string; created_at: Date; updated_at: Date; entry_date?: Date; attachments?: { id: string; storage_path: string; file_type: string }[] }) {
+  private async toClientEntry(entry: {
+    id: string;
+    raw_text: string;
+    status: string;
+    created_at: Date;
+    updated_at: Date;
+    entry_date?: Date | null;
+    attachments?: {
+      id: string;
+      storage_path: string;
+      file_type: string;
+      extracted_text: string | null;
+      created_at: Date;
+    }[];
+    calendar_events?: {
+      id: string;
+      title: string;
+      start_time: Date;
+      end_time: Date;
+      html_link?: string | null;
+    }[];
+  }) {
     const trimmedText = entry.raw_text.trim();
     
     let title = 'Untitled';
@@ -234,22 +295,80 @@ export class DiaryService {
       }
     }
 
-    // Build public URLs for attachments
-    const supabaseUrl = process.env.SUPABASE_URL || '';
-    const attachmentUrls = (entry.attachments ?? []).map(
-      (a) => `${supabaseUrl}/storage/v1/object/public/attachments-bucket/${a.storage_path}`,
-    );
+    const attachments = await this.toClientAttachments(entry.attachments ?? []);
 
     return {
       id: entry.id,
       title: title || 'Untitled',
       content: content || trimmedText || 'No content',
-      attachments: attachmentUrls,
+      attachments,
+      calendarEvents: (entry.calendar_events ?? []).map((event) => ({
+        id: event.id,
+        title: event.title,
+        startTime: event.start_time.toISOString(),
+        endTime: event.end_time.toISOString(),
+        htmlLink: event.html_link ?? null,
+      })),
       status: entry.status,
       entryDate: entry.entry_date?.toISOString(),
       createdAt: entry.created_at.toISOString(),
       updatedAt: entry.updated_at.toISOString(),
     };
+  }
+
+  private async toClientAttachments(
+    attachments: Array<{
+      id: string;
+      storage_path: string;
+      file_type: string;
+      extracted_text: string | null;
+      created_at: Date;
+    }>,
+  ) {
+    if (!attachments.length) return [];
+
+    const jobs = await this.prisma.indexingOutbox.findMany({
+      where: {
+        job_type: 'index_memory',
+        source_type: 'attachment',
+        source_id: { in: attachments.map((attachment) => attachment.id) },
+      },
+      select: {
+        source_id: true,
+        status: true,
+        error: true,
+        retry_count: true,
+        updated_at: true,
+      },
+    });
+    const jobsBySourceId = new Map(jobs.map((job) => [job.source_id, job]));
+
+    return Promise.all(
+      attachments.map(async (attachment) => {
+        const signedUrl = await this.storageService
+          .createSignedUrl('attachments-bucket', attachment.storage_path)
+          .catch(() => undefined);
+        const job = jobsBySourceId.get(attachment.id);
+
+        return {
+          id: attachment.id,
+          fileType: attachment.file_type,
+          fileName: this.getStoredFileName(attachment.storage_path),
+          signedUrl,
+          extractionStatus: attachment.extracted_text ? 'extracted' : 'pending',
+          indexingStatus: job?.status ?? 'unknown',
+          indexingError: job?.error ?? null,
+          retryCount: job?.retry_count ?? 0,
+          updatedAt: (job?.updated_at ?? attachment.created_at).toISOString(),
+          createdAt: attachment.created_at.toISOString(),
+        };
+      }),
+    );
+  }
+
+  private getStoredFileName(storagePath: string) {
+    const storedName = storagePath.split('/').pop() ?? storagePath;
+    return storedName.replace(/^[0-9a-f-]{36}-/i, '');
   }
 
   // ---------------------------------------------------------------------------

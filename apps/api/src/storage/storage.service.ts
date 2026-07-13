@@ -35,10 +35,10 @@ export class StorageService {
     return this.supabase;
   }
 
-  async uploadFile(file: Express.Multer.File, bucket: string) {
+  async uploadFile(file: Express.Multer.File, bucket: string, userId: string) {
     const supabase = this.getSupabaseClient();
     const safeName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');
-    const filePath = `attachments/${randomUUID()}-${safeName}`;
+    const filePath = `attachments/${userId}/${randomUUID()}-${safeName}`;
 
     const { data, error } = await supabase.storage
       .from(bucket)
@@ -52,6 +52,16 @@ export class StorageService {
     return {
       path: data.path,
     };
+  }
+
+  async createSignedUrl(bucket: string, path: string, expiresInSeconds = 300) {
+    const supabase = this.getSupabaseClient();
+    const { data, error } = await supabase.storage
+      .from(bucket)
+      .createSignedUrl(path, expiresInSeconds);
+
+    if (error) throw error;
+    return data.signedUrl;
   }
 
   async downloadFile(bucket: string, path: string) {

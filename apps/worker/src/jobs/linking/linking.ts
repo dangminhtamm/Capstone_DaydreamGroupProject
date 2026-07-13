@@ -5,9 +5,10 @@ import { extractKeywords } from './linking-utils';
 export class SemanticLinkingJob {
   static async processDiaryLinking(diary: any) {
     try {
-      const startOfDay = new Date(diary.created_at);
+      const activityDate = diary.entry_date ?? diary.created_at;
+      const startOfDay = new Date(activityDate);
       startOfDay.setHours(0, 0, 0, 0);
-      const endOfDay = new Date(diary.created_at);
+      const endOfDay = new Date(activityDate);
       endOfDay.setHours(23, 59, 59, 999);
 
       const dailyEvents = await prisma.calendarEvent.findMany({
@@ -25,7 +26,7 @@ export class SemanticLinkingJob {
       for (const event of dailyEvents) {
         let matchScore = 0;
 
-        const timeDiffHours = Math.abs(diary.created_at.getTime() - event.end_time.getTime()) / (1000 * 60 * 60);
+        const timeDiffHours = Math.abs(new Date(activityDate).getTime() - event.end_time.getTime()) / (1000 * 60 * 60);
         if (timeDiffHours <= 1) matchScore += 50;
         else if (timeDiffHours <= 3) matchScore += 30;
         else if (timeDiffHours <= 12) matchScore += 10;

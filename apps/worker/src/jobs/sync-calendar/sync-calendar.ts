@@ -1,6 +1,7 @@
 import { prisma } from '../../lib/prisma';
 import { google, calendar_v3 } from 'googleapis';
 import * as cron from 'node-cron';
+import { decryptOAuthToken, encryptOAuthToken } from '../../lib/oauth-token-crypto';
 
 export class SyncCalendarJob {
   private static getApiBaseUrl() {
@@ -47,15 +48,15 @@ export class SyncCalendarJob {
     );
 
     oauth2Client.setCredentials({
-      access_token: user.google_access_token,
-      refresh_token: user.google_refresh_token,
+      access_token: decryptOAuthToken(user.google_access_token),
+      refresh_token: decryptOAuthToken(user.google_refresh_token),
     });
     oauth2Client.on('tokens', async (tokens) => {
       await prisma.user.update({
         where: { id: user.id },
         data: {
-          ...(tokens.access_token && { google_access_token: tokens.access_token }),
-          ...(tokens.refresh_token && { google_refresh_token: tokens.refresh_token }),
+          ...(tokens.access_token && { google_access_token: encryptOAuthToken(tokens.access_token) }),
+          ...(tokens.refresh_token && { google_refresh_token: encryptOAuthToken(tokens.refresh_token) }),
         },
       });
     });

@@ -31,6 +31,7 @@ jest.mock('googleapis', () => ({
 }));
 
 describe('CalendarService', () => {
+  const mockedGoogle = jest.requireMock('googleapis').google;
   const prisma = {
     user: {
       findUnique: jest.fn(),
@@ -43,9 +44,14 @@ describe('CalendarService', () => {
       findMany: jest.fn(),
       upsert: jest.fn(),
     },
+    diaryEntry: {
+      findMany: jest.fn(),
+      update: jest.fn(),
+    },
     indexingOutbox: {
       upsert: jest.fn(),
     },
+    $executeRaw: jest.fn(),
     $transaction: jest.fn(async (callback: any) => callback(prisma)),
   };
 
@@ -56,9 +62,29 @@ describe('CalendarService', () => {
     process.env.GOOGLE_CLIENT_ID = 'google-client-id';
     process.env.GOOGLE_CLIENT_SECRET = 'google-client-secret';
     process.env.GOOGLE_OAUTH_STATE_SECRET = 'state-secret';
+    process.env.GOOGLE_TOKEN_ENCRYPTION_KEY = 'test-token-encryption-key';
     process.env.FRONTEND_URL = 'http://localhost:3000';
+    delete process.env.GOOGLE_REDIRECT_URI;
+    delete process.env.GOOGLE_CALLBACK_URL;
     mockCalendarEventsList.mockReset();
+    prisma.diaryEntry.findMany.mockResolvedValue([]);
     service = new CalendarService(prisma as any);
+  });
+
+  it('accepts the legacy GOOGLE_CALLBACK_URL env var for local Calendar OAuth', async () => {
+    process.env.GOOGLE_CALLBACK_URL = 'http://localhost:3001/api/auth/google/callback';
+    prisma.user.upsert.mockResolvedValue({ id: 'user-1' });
+
+    await service.createGoogleConnectUrl({
+      supabaseId: 'supabase-user-1',
+      email: 'user@example.com',
+    });
+
+    expect(mockedGoogle.auth.OAuth2).toHaveBeenLastCalledWith(
+      'google-client-id',
+      'google-client-secret',
+      'http://localhost:3001/api/auth/google/callback',
+    );
   });
 
   it('creates a server-side Google OAuth URL with signed state', async () => {
@@ -103,10 +129,12 @@ describe('CalendarService', () => {
       where: { supabaseId: 'supabase-user-1' },
       data: {
         google_connected: true,
-        google_access_token: 'google-access-token',
-        google_refresh_token: 'google-refresh-token',
+        google_access_token: expect.stringMatching(/^enc:v1:/),
+        google_refresh_token: expect.stringMatching(/^enc:v1:/),
       },
     });
+    expect(prisma.user.update.mock.calls[0][0].data.google_access_token).not.toBe('google-access-token');
+    expect(prisma.user.update.mock.calls[0][0].data.google_refresh_token).not.toBe('google-refresh-token');
     expect(redirectUrl).toBe('http://localhost:3000/settings?calendar=connected');
   });
 
@@ -219,6 +247,8 @@ describe('CalendarService', () => {
       expect.objectContaining({
         syncedCount: 1,
         queuedIndexingJobs: 1,
+        linkedDiaryCount: 0,
+        linkedEventCount: 0,
         memoryIndexingStatus: 'queued',
       }),
     );

@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
+import { syncSessionWithBackend } from "@/lib/auth-flow";
 
 function CallbackContent() {
   const router = useRouter();
@@ -50,6 +51,13 @@ function CallbackContent() {
         }
 
         if (data.session) {
+          await syncSessionWithBackend(data.session).catch((syncError) => {
+            console.warn(
+              "[Auth] Backend sync after OAuth callback failed:",
+              syncError instanceof Error ? syncError.message : syncError,
+            );
+          });
+
           const type = searchParams.get("type");
 
           if (type === "recovery") {

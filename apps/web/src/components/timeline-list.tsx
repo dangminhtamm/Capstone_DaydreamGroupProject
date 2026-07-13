@@ -4,13 +4,14 @@ import { useMemo, useState } from "react";
 import { formatDateTime } from "@second-brain/shared";
 import { EditDiaryModal } from "./edit-diary-modal";
 import { ConfirmDialog } from "./confirm-dialog";
-import type { UpdateDiaryPayload } from "@/lib/api-client";
+import type { DiaryAttachment, DiaryCalendarEvent, UpdateDiaryPayload } from "@/lib/api-client";
 
 type DiaryEntry = {
   id: string;
   title: string;
   content: string;
-  attachments?: string[];
+  attachments?: Array<string | DiaryAttachment>;
+  calendarEvents?: DiaryCalendarEvent[];
   createdAt: Date | string;
   updatedAt?: Date | string;
 };
@@ -22,6 +23,50 @@ type TimelineListProps = {
 };
 
 const PAGE_SIZE = 5;
+
+function isAttachmentObject(value: string | DiaryAttachment): value is DiaryAttachment {
+  return typeof value === "object" && value !== null;
+}
+
+function getAttachmentHref(attachment: string | DiaryAttachment) {
+  return isAttachmentObject(attachment) ? attachment.signedUrl : attachment;
+}
+
+function getAttachmentLabel(attachment: string | DiaryAttachment, index: number) {
+  if (!isAttachmentObject(attachment)) return `File ${index + 1}`;
+  return attachment.fileName || `File ${index + 1}`;
+}
+
+function getAttachmentStatus(attachment: string | DiaryAttachment) {
+  if (!isAttachmentObject(attachment)) return "linked";
+  if (attachment.indexingStatus === "succeeded") return "indexed";
+  if (attachment.indexingStatus === "processing") return "processing";
+  if (attachment.indexingStatus === "retry") return "retry";
+  if (attachment.indexingStatus === "dead_letter" || attachment.indexingStatus === "failed") return "failed";
+  return attachment.extractionStatus === "extracted" ? "queued" : "extracting";
+}
+
+function getStatusClass(status: string) {
+  if (status === "indexed") {
+    return "bg-emerald-50 text-emerald-700 ring-emerald-100 dark:bg-emerald-900/30 dark:text-emerald-300 dark:ring-emerald-800";
+  }
+
+  if (status === "failed") {
+    return "bg-rose-50 text-rose-700 ring-rose-100 dark:bg-rose-900/30 dark:text-rose-300 dark:ring-rose-800";
+  }
+
+  if (status === "processing") {
+    return "bg-sky-50 text-sky-700 ring-sky-100 dark:bg-sky-900/30 dark:text-sky-300 dark:ring-sky-800";
+  }
+
+  return "bg-amber-50 text-amber-700 ring-amber-100 dark:bg-amber-900/30 dark:text-amber-300 dark:ring-amber-800";
+}
+
+function formatEventTime(event: DiaryCalendarEvent) {
+  const start = new Date(event.startTime);
+  const end = new Date(event.endTime);
+  return `${start.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} - ${end.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+}
 
 export function TimelineList({ entries, onUpdate, onDelete }: TimelineListProps) {
   const [currentPage, setCurrentPage] = useState(1);
@@ -176,25 +221,89 @@ export function TimelineList({ entries, onUpdate, onDelete }: TimelineListProps)
                 </p>
               </div>
 
+              {/* Linked calendar events */}
+              {entry.calendarEvents && entry.calendarEvents.length > 0 && (
+                <div className="mt-4 border-t border-slate-100 pt-4 dark:border-slate-700">
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                    Linked calendar events
+                  </p>
+                  <div className="grid gap-2">
+                    {entry.calendarEvents.map((event) => {
+                      const content = (
+                        <>
+                          <svg className="h-4 w-4 shrink-0 text-sky-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                          </svg>
+                          <span className="min-w-0 flex-1 truncate font-medium">{event.title}</span>
+                          <span className="shrink-0 text-slate-500 dark:text-slate-400">{formatEventTime(event)}</span>
+                        </>
+                      );
+
+                      return event.htmlLink ? (
+                        <a
+                          key={event.id}
+                          href={event.htmlLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-2 rounded-xl border border-sky-100 bg-sky-50 px-3 py-2 text-xs text-sky-800 transition hover:border-sky-200 hover:bg-sky-100 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-sky-200 dark:hover:bg-sky-900/40"
+                        >
+                          {content}
+                        </a>
+                      ) : (
+                        <div
+                          key={event.id}
+                          className="flex items-center gap-2 rounded-xl border border-sky-100 bg-sky-50 px-3 py-2 text-xs text-sky-800 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-sky-200"
+                        >
+                          {content}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               {/* Attachments */}
               {entry.attachments && entry.attachments.length > 0 && (
-                <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-700">
-                  <p className="text-xs text-slate-500 mb-2">Attachments:</p>
+                <div className="mt-4 border-t border-slate-100 pt-4 dark:border-slate-700">
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                    Attachments
+                  </p>
                   <div className="flex flex-wrap gap-2">
-                    {entry.attachments.map((url, i) => (
-                      <a
-                        key={i}
-                        href={url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 px-2 py-1 bg-slate-100 text-slate-600 text-xs rounded hover:bg-slate-200 transition-colors dark:bg-slate-700 dark:text-slate-400 dark:hover:bg-slate-600"
-                      >
-                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                        </svg>
-                        File {i + 1}
-                      </a>
-                    ))}
+                    {entry.attachments.map((attachment, i) => {
+                      const status = getAttachmentStatus(attachment);
+                      const href = getAttachmentHref(attachment);
+                      const label = getAttachmentLabel(attachment, i);
+                      const content = (
+                        <>
+                          <svg className="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                          </svg>
+                          <span className="max-w-[180px] truncate">{label}</span>
+                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ${getStatusClass(status)}`}>
+                            {status}
+                          </span>
+                        </>
+                      );
+
+                      return href ? (
+                        <a
+                          key={isAttachmentObject(attachment) ? attachment.id : `${attachment}-${i}`}
+                          href={href}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 rounded-xl bg-slate-100 px-2.5 py-1.5 text-xs text-slate-700 transition-colors hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600"
+                        >
+                          {content}
+                        </a>
+                      ) : (
+                        <span
+                          key={isAttachmentObject(attachment) ? attachment.id : i}
+                          className="inline-flex items-center gap-1.5 rounded-xl bg-slate-100 px-2.5 py-1.5 text-xs text-slate-700 dark:bg-slate-700 dark:text-slate-300"
+                        >
+                          {content}
+                        </span>
+                      );
+                    })}
                   </div>
                 </div>
               )}

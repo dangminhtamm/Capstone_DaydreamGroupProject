@@ -77,6 +77,137 @@ export class IndexingService {
     };
   }
 
+  async getDemoReadiness(authUser: AuthenticatedUserInput) {
+    const user = await this.findOrCreateUser(authUser);
+    const available = await this.outboxExists();
+    const counts = available ? await this.getCounts(user.id) : {};
+
+    const [
+      diaryEntries,
+      memoryChunks,
+      summaries,
+      calendarEvents,
+      linkedDiaries,
+      attachments,
+      extractedAttachments,
+    ] = await Promise.all([
+      this.prisma.diaryEntry.count({ where: { user_id: user.id } }),
+      this.prisma.memoryChunk.count({ where: { userId: user.id } }),
+      this.prisma.summary.count({ where: { user_id: user.id } }),
+      this.prisma.calendarEvent.count({ where: { user_id: user.id } }),
+      this.prisma.diaryEntry.count({
+        where: {
+          user_id: user.id,
+          calendar_events: { some: {} },
+        },
+      }),
+      this.prisma.attachment.count({
+        where: { diary_entry: { user_id: user.id } },
+      }),
+      this.prisma.attachment.count({
+        where: {
+          diary_entry: { user_id: user.id },
+          extracted_text: { not: null },
+        },
+      }),
+    ]);
+
+    const pendingOutbox =
+      (counts.pending ?? 0) + (counts.retry ?? 0) + (counts.processing ?? 0);
+    const failedOutbox = (counts.dead_letter ?? 0) + (counts.failed ?? 0);
+
+    const checks = [
+      {
+        id: 'diary_entries',
+        label: 'Diary entries',
+        ok: diaryEntries >= 7,
+        required: true,
+        detail: `${diaryEntries}/7 recommended entries`,
+      },
+      {
+        id: 'memory_chunks',
+        label: 'Memory chunks',
+        ok: memoryChunks > 0,
+        required: true,
+        detail: `${memoryChunks} indexed chunks`,
+      },
+      {
+        id: 'summaries',
+        label: 'AI summaries',
+        ok: summaries > 0,
+        required: true,
+        detail: `${summaries} summaries generated`,
+      },
+      {
+        id: 'calendar_events',
+        label: 'Calendar events',
+        ok: calendarEvents > 0,
+        required: true,
+        detail: `${calendarEvents} synced events`,
+      },
+      {
+        id: 'linked_calendar',
+        label: 'Diary-calendar linking',
+        ok: linkedDiaries > 0,
+        required: true,
+        detail: `${linkedDiaries} diary entries linked`,
+      },
+      {
+        id: 'attachments',
+        label: 'Attachment ingestion',
+        ok: attachments > 0 && extractedAttachments > 0,
+        required: false,
+        detail: `${extractedAttachments}/${attachments} attachments extracted`,
+      },
+      {
+        id: 'outbox_available',
+        label: 'Indexing outbox',
+        ok: available,
+        required: true,
+        detail: available ? 'Outbox table is available' : 'Outbox table is missing',
+      },
+      {
+        id: 'outbox_clean',
+        label: 'Outbox health',
+        ok: failedOutbox === 0,
+        required: true,
+        detail:
+          failedOutbox > 0
+            ? `${failedOutbox} failed/dead-letter jobs need attention`
+            : pendingOutbox > 0
+              ? `${pendingOutbox} jobs still pending or processing`
+              : 'No failed jobs',
+      },
+    ];
+
+    const ready = checks
+      .filter((check) => check.required)
+      .every((check) => check.ok);
+
+    return {
+      ready,
+      counts: {
+        diaryEntries,
+        memoryChunks,
+        summaries,
+        calendarEvents,
+        linkedDiaries,
+        attachments,
+        extractedAttachments,
+        pendingOutbox,
+        failedOutbox,
+      },
+      outbox: {
+        available,
+        counts,
+      },
+      checks,
+      nextActions: checks
+        .filter((check) => !check.ok)
+        .map((check) => this.nextActionForCheck(check.id)),
+    };
+  }
+
   private async findOrCreateUser(authUser: AuthenticatedUserInput) {
     return this.prisma.user.upsert({
       where: { supabaseId: authUser.supabaseId },
@@ -141,5 +272,20 @@ export class IndexingService {
       LIMIT 10`,
       userId,
     );
+  }
+
+  private nextActionForCheck(checkId: string) {
+    const actions: Record<string, string> = {
+      diary_entries: 'Create or seed at least 7 diary entries across different days.',
+      memory_chunks: 'Run the worker or drain indexing jobs so diary/calendar/attachment content becomes searchable.',
+      summaries: 'Generate one daily summary and one weekly summary from the Summary page.',
+      calendar_events: 'Connect Google Calendar, then run Sync Demo or Sync Now in Settings.',
+      linked_calendar: 'Make sure diary entry dates match synced Calendar events, then run Calendar sync/linking again.',
+      attachments: 'Upload one text/PDF/image attachment and let the worker extract/index it.',
+      outbox_available: 'Apply database migrations before relying on async indexing.',
+      outbox_clean: 'Inspect retry/dead-letter indexing jobs and requeue or fix the underlying error.',
+    };
+
+    return actions[checkId] ?? 'Review this readiness check before the demo.';
   }
 }

@@ -1,144 +1,512 @@
-import { prisma } from '../../lib/prisma';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { createClient } from '@supabase/supabase-js';
-import { indexMemoryFromAttachment } from '@second-brain/ai';
-import { insertMemoryChunks, pruneMemoryChunksForSource } from '@second-brain/db';
+import { Client as PgClient } from 'pg';
 import * as cron from 'node-cron';
+import {
+  deleteMemoryChunksForSource,
+  insertMemoryChunks,
+  pruneMemoryChunksForSource,
+} from '@second-brain/db';
+import {
+  indexMemoryFromAttachment,
+  indexMemoryFromCalendar,
+  indexMemoryFromDiary,
+  indexMemoryFromSummary,
+} from '@second-brain/ai';
+import { prisma } from '../../lib/prisma';
+
+type IndexingJob = {
+  id: string;
+  user_id: string;
+  job_type: string;
+  source_type: 'diary' | 'attachment' | 'calendar' | 'summary' | string;
+  source_id: string;
+  status: string;
+  retry_count: number;
+  max_retries: number;
+  error: string | null;
+  payload: Record<string, unknown> | null;
+  run_after: Date;
+  locked_at: Date | null;
+  processed_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+};
+
+type DrainResult = {
+  found: number;
+  claimed: number;
+  succeeded: number;
+  failed: number;
+  resetStale: number;
+};
+
+const ATTACHMENT_BUCKET = 'attachments-bucket';
 
 export class DataIngestionJob {
+  private static processing = false;
+  private static listenerStarted = false;
+
   private static getSupabaseClient() {
     const supabaseUrl = process.env.SUPABASE_URL;
     const supabaseKey = process.env.SUPABASE_SERVICE_KEY;
 
     if (!supabaseUrl || !supabaseKey) {
-      throw new Error("Supabase URL and Service Key must be set in environment variables.");
+      throw new Error('Supabase URL and Service Key must be set in environment variables.');
     }
 
     return createClient(supabaseUrl, supabaseKey);
   }
 
   private static async extractTextFromBlob(base64Data: string, mimeType: string): Promise<string> {
-    console.log(`[Worker - Ingestion] Calling Gemini to extract text (MIME: ${mimeType})...`);
     const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) throw new Error("GEMINI_API_KEY is missing in environment variables.");
+    if (!apiKey) throw new Error('GEMINI_API_KEY is missing in environment variables.');
 
     const ai = new GoogleGenerativeAI(apiKey);
-    const model = ai.getGenerativeModel({ model: process.env.GEMINI_VISION_MODEL ?? "gemini-2.5-flash" });
+    const model = ai.getGenerativeModel({
+      model: process.env.GEMINI_VISION_MODEL ?? 'gemini-2.5-flash',
+    });
 
     const prompt = `
-      You are an AI assistant for a personal Second Brain system.
-      Extract all readable text, transcripts, or meaningful textual content from this file.
-      If it is an image or document, transcribe the text as accurately as possible.
-      If it contains no text, provide a brief description of what the image/file contains.
-      Do not invent any details. Return only the extracted text or description.
-    `;
+You are an extraction engine for a personal Second Brain app.
+Extract all readable text, transcripts, headings, labels, and meaningful textual content from this attachment.
+For images with little or no visible text, provide a concise factual description of what is shown.
+Do not invent names, dates, or claims that are not visible in the file.
+Return only the extracted text or factual description.
+`.trim();
 
-    try {
-      const result = await model.generateContent([
-        prompt,
-        {
-          inlineData: {
-            data: base64Data,
-            mimeType: mimeType
-          }
-        }
-      ]);
-      const extractedText = result.response.text();
-      console.log(`[Worker - Ingestion] Text extraction successful.`);
-      return extractedText;
-    } catch (error: any) {
-      console.error(`[Worker - Ingestion] Gemini API Error:`, error.message);
-      throw error;
-    }
+    const result = await model.generateContent([
+      prompt,
+      {
+        inlineData: {
+          data: base64Data,
+          mimeType,
+        },
+      },
+    ]);
+
+    const extractedText = result.response.text().trim();
+    if (!extractedText) throw new Error('Attachment extraction returned empty text.');
+    return extractedText;
   }
 
   static async processPendingAttachments() {
-    console.log(`[Worker - Ingestion] Scanning for pending attachments...`);
+    return this.processPendingIndexingJobs();
+  }
 
-    try {
-      const pendingAttachments = await prisma.attachment.findMany({
-        where: { extracted_text: null },
-        include: {
-          diary_entry: true
-        },
-        take: 10 // Batch size to avoid timeouts
-      });
+  static async processPendingIndexingJobs(batchSize = 10): Promise<DrainResult> {
+    const resetStale = await this.resetStaleJobs();
+    const jobs = await this.claimJobs(batchSize);
+    const result: DrainResult = {
+      found: jobs.length,
+      claimed: jobs.length,
+      succeeded: 0,
+      failed: 0,
+      resetStale,
+    };
 
-      if (pendingAttachments.length === 0) {
-        console.log(`[Worker - Ingestion] No pending attachments found.`);
+    for (const job of jobs) {
+      try {
+        await this.processJob(job);
+        await this.markSucceeded(job.id);
+        result.succeeded += 1;
+      } catch (error) {
+        result.failed += 1;
+        await this.markFailed(job, error);
+      }
+    }
+
+    return result;
+  }
+
+  private static async claimJobs(batchSize: number) {
+    const safeBatchSize = Math.min(Math.max(Math.floor(batchSize), 1), 100);
+    return prisma.$queryRawUnsafe<IndexingJob[]>(
+      `
+      WITH candidates AS (
+        SELECT id
+        FROM indexing_outbox
+        WHERE job_type = 'index_memory'
+          AND status IN ('pending', 'retry')
+          AND run_after <= now()
+        ORDER BY run_after ASC, created_at ASC
+        LIMIT $1
+        FOR UPDATE SKIP LOCKED
+      )
+      UPDATE indexing_outbox AS job
+      SET status = 'processing',
+          locked_at = now(),
+          updated_at = now()
+      FROM candidates
+      WHERE job.id = candidates.id
+      RETURNING job.*
+      `,
+      safeBatchSize,
+    );
+  }
+
+  private static async resetStaleJobs() {
+    const rows = await prisma.$queryRawUnsafe<Array<{ id: string }>>(
+      `
+      UPDATE indexing_outbox
+      SET status = 'retry',
+          run_after = now(),
+          locked_at = NULL,
+          updated_at = now(),
+          error = COALESCE(error, 'Job lock expired and was requeued.')
+      WHERE status = 'processing'
+        AND locked_at < now() - interval '10 minutes'
+      RETURNING id
+      `,
+    );
+
+    return rows.length;
+  }
+
+  private static async processJob(job: IndexingJob) {
+    const sourceType = this.normalizeSourceType(job.source_type);
+
+    switch (sourceType) {
+      case 'diary':
+        await this.processDiary({ ...job, source_type: sourceType });
         return;
-      }
-
-      console.log(`[Worker - Ingestion] Found ${pendingAttachments.length} attachments to process.`);
-      const supabase = this.getSupabaseClient();
-
-      for (const attachment of pendingAttachments) {
-        console.log(`[Worker - Ingestion] Processing attachment ${attachment.id} for user ${attachment.diary_entry.user_id}`);
-
-        try {
-          // 1. Download file from Supabase Storage
-          const { data, error } = await supabase.storage
-            .from('attachments-bucket')
-            .download(attachment.storage_path);
-
-          if (error || !data) {
-            console.error(`[Worker - Ingestion] Failed to download ${attachment.storage_path}:`, error?.message);
-            continue;
-          }
-
-          // 2. Convert to base64
-          const arrayBuffer = await data.arrayBuffer();
-          const buffer = Buffer.from(arrayBuffer);
-          const base64Data = buffer.toString('base64');
-
-          // 3. Extract text using Gemini
-          const extractedText = await this.extractTextFromBlob(base64Data, attachment.file_type);
-
-          // 4. Update the Attachment record
-          await prisma.attachment.update({
-            where: { id: attachment.id },
-            data: { extracted_text: extractedText }
-          });
-
-          // 5. Index into MemoryChunks as an attachment source linked back to the diary.
-          if (extractedText && extractedText.trim().length > 0) {
-            const indexingResult = await indexMemoryFromAttachment({
-              userId: attachment.diary_entry.user_id,
-              attachmentId: attachment.id,
-              diaryEntryId: attachment.diary_entry_id,
-              extractedText,
-              occurredAt: attachment.diary_entry.entry_date,
-              sourceTitle: `Attachment: ${attachment.storage_path.split('/').pop()}`,
-              fileType: attachment.file_type,
-              insertChunks: (chunks) =>
-                prisma.$transaction(async (tx: any) => {
-                  await insertMemoryChunks(tx, chunks);
-                  await pruneMemoryChunksForSource(tx, {
-                    userId: attachment.diary_entry.user_id,
-                    sourceType: 'attachment',
-                    sourceId: attachment.id,
-                    keepChunkCount: chunks.length,
-                  });
-                }),
-            });
-            console.log(`[Worker - Ingestion] Successfully indexed ${indexingResult.chunkCount} chunks for attachment ${attachment.id}`);
-          }
-
-        } catch (innerError: any) {
-          console.error(`[Worker - Ingestion] Failed processing attachment ${attachment.id}:`, innerError.message);
-        }
-      }
-
-    } catch (error) {
-      console.error(`[Worker - Ingestion] Pipeline process error:`, error);
+      case 'attachment':
+        await this.processAttachment({ ...job, source_type: sourceType });
+        return;
+      case 'calendar':
+        await this.processCalendarEvent({ ...job, source_type: sourceType });
+        return;
+      case 'summary':
+        await this.processSummary({ ...job, source_type: sourceType });
+        return;
+      default:
+        throw new Error(`Unsupported indexing source_type: ${job.source_type}`);
     }
   }
 
-  static startCron() {
-    // Run every 2 minutes
-    cron.schedule('*/2 * * * *', async () => {
-      await this.processPendingAttachments();
+  private static normalizeSourceType(sourceType: string) {
+    const normalized = sourceType.trim().toLowerCase();
+    const aliases: Record<string, IndexingJob['source_type']> = {
+      diary_entry: 'diary',
+      diaryentry: 'diary',
+      journal: 'diary',
+      file: 'attachment',
+      upload: 'attachment',
+      calendar_event: 'calendar',
+      calendarevent: 'calendar',
+      google_calendar: 'calendar',
+      generated_summary: 'summary',
+    };
+
+    return aliases[normalized] ?? normalized;
+  }
+
+  private static async processDiary(job: IndexingJob) {
+    const diary = await prisma.diaryEntry.findFirst({
+      where: { id: job.source_id, user_id: job.user_id },
     });
-    console.log('Background Worker for Universal Data Ingestion Pipeline started.');
+
+    if (!diary) {
+      await deleteMemoryChunksForSource(prisma as any, {
+        userId: job.user_id,
+        sourceType: 'diary',
+        sourceId: job.source_id,
+      });
+      return;
+    }
+
+    const title =
+      typeof job.payload?.sourceTitle === 'string'
+        ? job.payload.sourceTitle
+        : diary.raw_text.split('\n')[0]?.trim() || 'Diary entry';
+
+    const indexingResult = await indexMemoryFromDiary({
+      userId: job.user_id,
+      diaryId: diary.id,
+      rawText: diary.raw_text,
+      entryDate: diary.entry_date,
+      sourceTitle: title,
+      insertChunks: (chunks) =>
+        prisma.$transaction(async (tx: any) => {
+          await insertMemoryChunks(tx, chunks);
+          await pruneMemoryChunksForSource(tx, {
+            userId: job.user_id,
+            sourceType: 'diary',
+            sourceId: diary.id,
+            keepChunkCount: chunks.length,
+          });
+        }),
+    });
+
+    if (indexingResult.chunkCount === 0) {
+      await deleteMemoryChunksForSource(prisma as any, {
+        userId: job.user_id,
+        sourceType: 'diary',
+        sourceId: diary.id,
+      });
+    }
+  }
+
+  private static async processAttachment(job: IndexingJob) {
+    const attachment = await prisma.attachment.findFirst({
+      where: {
+        id: job.source_id,
+        diary_entry: { user_id: job.user_id },
+      },
+      include: {
+        diary_entry: {
+          select: {
+            id: true,
+            user_id: true,
+            entry_date: true,
+          },
+        },
+      },
+    });
+
+    if (!attachment) {
+      await deleteMemoryChunksForSource(prisma as any, {
+        userId: job.user_id,
+        sourceType: 'attachment',
+        sourceId: job.source_id,
+      });
+      return;
+    }
+
+    let extractedText = attachment.extracted_text?.trim() ?? '';
+    if (!extractedText) {
+      const supabase = this.getSupabaseClient();
+      const { data, error } = await supabase.storage
+        .from(ATTACHMENT_BUCKET)
+        .download(attachment.storage_path);
+
+      if (error || !data) {
+        throw new Error(error?.message ?? `File not found in storage: ${attachment.storage_path}`);
+      }
+
+      const base64Data = Buffer.from(await data.arrayBuffer()).toString('base64');
+      extractedText = await this.extractTextFromBlob(base64Data, attachment.file_type);
+      await prisma.attachment.update({
+        where: { id: attachment.id },
+        data: { extracted_text: extractedText },
+      });
+    }
+
+    const indexingResult = await indexMemoryFromAttachment({
+      userId: job.user_id,
+      attachmentId: attachment.id,
+      diaryEntryId: attachment.diary_entry.id,
+      extractedText,
+      occurredAt: attachment.diary_entry.entry_date,
+      sourceTitle:
+        typeof job.payload?.sourceTitle === 'string'
+          ? job.payload.sourceTitle
+          : attachment.storage_path.split('/').pop(),
+      fileType: attachment.file_type,
+      insertChunks: (chunks) =>
+        prisma.$transaction(async (tx: any) => {
+          await insertMemoryChunks(tx, chunks);
+          await pruneMemoryChunksForSource(tx, {
+            userId: job.user_id,
+            sourceType: 'attachment',
+            sourceId: attachment.id,
+            keepChunkCount: chunks.length,
+          });
+        }),
+    });
+
+    if (indexingResult.chunkCount === 0) {
+      await deleteMemoryChunksForSource(prisma as any, {
+        userId: job.user_id,
+        sourceType: 'attachment',
+        sourceId: attachment.id,
+      });
+    }
+  }
+
+  private static async processCalendarEvent(job: IndexingJob) {
+    const event = await prisma.calendarEvent.findFirst({
+      where: { id: job.source_id, user_id: job.user_id },
+    });
+
+    if (!event) {
+      await deleteMemoryChunksForSource(prisma as any, {
+        userId: job.user_id,
+        sourceType: 'calendar',
+        sourceId: job.source_id,
+      });
+      return;
+    }
+
+    const result = await indexMemoryFromCalendar({
+      userId: job.user_id,
+      events: [
+        {
+          eventId: event.id,
+          externalId: event.external_id,
+          title: event.title,
+          description: event.description,
+          startTime: event.start_time,
+          endTime: event.end_time,
+          htmlLink: event.html_link,
+        },
+      ],
+      insertChunks: (chunks) =>
+        prisma.$transaction(async (tx: any) => {
+          await insertMemoryChunks(tx, chunks);
+          await pruneMemoryChunksForSource(tx, {
+            userId: job.user_id,
+            sourceType: 'calendar',
+            sourceId: event.id,
+            keepChunkCount: chunks.length,
+          });
+        }),
+    });
+
+    if (result.errors.length) {
+      throw new Error(result.errors.map((item) => item.error).join('; '));
+    }
+  }
+
+  private static async processSummary(job: IndexingJob) {
+    const summary = await prisma.summary.findFirst({
+      where: { id: job.source_id, user_id: job.user_id },
+    });
+
+    if (!summary) {
+      await deleteMemoryChunksForSource(prisma as any, {
+        userId: job.user_id,
+        sourceType: 'summary',
+        sourceId: job.source_id,
+      });
+      return;
+    }
+
+    const result = await indexMemoryFromSummary({
+      userId: job.user_id,
+      summaryId: summary.id,
+      summaryType: summary.summary_type,
+      content: summary.content,
+      periodStart: summary.period_start,
+      periodEnd: summary.period_end,
+      insertChunks: (chunks) =>
+        prisma.$transaction(async (tx: any) => {
+          await insertMemoryChunks(tx, chunks);
+          await pruneMemoryChunksForSource(tx, {
+            userId: job.user_id,
+            sourceType: 'summary',
+            sourceId: summary.id,
+            keepChunkCount: chunks.length,
+          });
+        }),
+    });
+
+    if (result.chunkCount === 0) {
+      await deleteMemoryChunksForSource(prisma as any, {
+        userId: job.user_id,
+        sourceType: 'summary',
+        sourceId: summary.id,
+      });
+    }
+  }
+
+  private static async markSucceeded(jobId: string) {
+    await prisma.indexingOutbox.update({
+      where: { id: jobId },
+      data: {
+        status: 'succeeded',
+        error: null,
+        locked_at: null,
+        processed_at: new Date(),
+      },
+    });
+  }
+
+  private static async markFailed(job: IndexingJob, error: unknown) {
+    const message = this.toErrorMessage(error).slice(0, 4000);
+    const nextRetryCount = job.retry_count + 1;
+    const exhausted = nextRetryCount >= job.max_retries;
+
+    await prisma.indexingOutbox.update({
+      where: { id: job.id },
+      data: {
+        status: exhausted ? 'dead_letter' : 'retry',
+        retry_count: nextRetryCount,
+        error: message,
+        run_after: exhausted ? job.run_after : this.nextRunAfter(nextRetryCount),
+        locked_at: null,
+        processed_at: exhausted ? new Date() : null,
+      },
+    });
+
+    console.error(
+      `[Worker - Ingestion] Job ${job.id} (${job.source_type}/${job.source_id}) ${exhausted ? 'dead-lettered' : 'scheduled for retry'}: ${message}`,
+    );
+  }
+
+  private static nextRunAfter(retryCount: number) {
+    const baseMs = Number(process.env.INDEXING_RETRY_BASE_MS ?? 30_000);
+    const maxMs = Number(process.env.INDEXING_RETRY_MAX_MS ?? 15 * 60_000);
+    const delay = Math.min(maxMs, Math.max(1_000, baseMs) * 2 ** Math.max(0, retryCount - 1));
+    return new Date(Date.now() + delay);
+  }
+
+  private static toErrorMessage(error: unknown) {
+    if (error instanceof Error) return error.message;
+    return String(error);
+  }
+
+  static startCron() {
+    cron.schedule('*/1 * * * *', async () => {
+      if (this.processing) return;
+      this.processing = true;
+      try {
+        const result = await this.processPendingIndexingJobs(
+          Number(process.env.INDEXING_WORKER_BATCH_SIZE ?? 10),
+        );
+        if (result.claimed > 0 || result.resetStale > 0) {
+          console.log(`[Worker - Ingestion] ${JSON.stringify(result)}`);
+        }
+      } catch (error) {
+        console.error('[Worker - Ingestion] Cron processing error:', error);
+      } finally {
+        this.processing = false;
+      }
+    });
+    console.log('Background Worker for IndexingOutbox ingestion started.');
+  }
+
+  static startRealtimeListener() {
+    if (this.listenerStarted) return;
+    this.listenerStarted = true;
+
+    const connectionString = process.env.DATABASE_URL;
+    if (!connectionString) {
+      console.warn('[Worker - Ingestion] DATABASE_URL missing; realtime listener disabled.');
+      return;
+    }
+
+    const client = new PgClient({ connectionString });
+    client
+      .connect()
+      .then(async () => {
+        await client.query('LISTEN indexing_outbox_jobs');
+        console.log('[Worker - Ingestion] Listening for indexing_outbox_jobs notifications.');
+      })
+      .catch((error) => {
+        console.warn('[Worker - Ingestion] Could not start realtime listener:', error.message);
+      });
+
+    client.on('notification', () => {
+      void this.processPendingIndexingJobs(
+        Number(process.env.INDEXING_WORKER_BATCH_SIZE ?? 10),
+      ).catch((error) => {
+        console.error('[Worker - Ingestion] Realtime drain failed:', error);
+      });
+    });
+
+    client.on('error', (error) => {
+      console.warn('[Worker - Ingestion] Realtime listener error:', error.message);
+    });
   }
 }

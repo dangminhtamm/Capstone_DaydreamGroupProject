@@ -188,7 +188,7 @@ SUPABASE_SERVICE_KEY="your-service-role-key"
 # ── Google OAuth (Calendar Sync) ──────────────────────────
 GOOGLE_CLIENT_ID="your-google-client-id"
 GOOGLE_CLIENT_SECRET="your-google-client-secret"
-GOOGLE_CALLBACK_URL="http://localhost:3001/api/auth/google/callback"
+GOOGLE_REDIRECT_URI="http://localhost:3001/api/calendar/oauth/callback"
 
 # ── AI / Gemini ───────────────────────────────────────────
 GEMINI_API_KEY="your-gemini-api-key"

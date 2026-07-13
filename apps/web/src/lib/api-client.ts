@@ -5,11 +5,33 @@ export type DiaryEntry = {
   id: string;
   title: string;
   content: string;
-  attachments?: string[];
+  attachments?: Array<string | DiaryAttachment>;
+  calendarEvents?: DiaryCalendarEvent[];
   entryDate?: string;
   createdAt: string;
   updatedAt: string;
   userId: string;
+};
+
+export type DiaryAttachment = {
+  id: string;
+  fileType: string;
+  fileName: string;
+  signedUrl?: string;
+  extractionStatus: 'extracted' | 'pending' | 'empty';
+  indexingStatus: 'pending' | 'retry' | 'processing' | 'succeeded' | 'dead_letter' | 'failed' | 'unknown';
+  indexingError?: string | null;
+  retryCount?: number;
+  createdAt: string;
+  updatedAt?: string;
+};
+
+export type DiaryCalendarEvent = {
+  id: string;
+  title: string;
+  startTime: string;
+  endTime: string;
+  htmlLink?: string | null;
 };
 
 export type CreateDiaryPayload = {
@@ -171,13 +193,15 @@ export type AttachmentUploadResponse = {
   message: string;
   extractionStatus: 'extracted' | 'pending' | 'empty';
   memoryIndexed: boolean;
-  memoryIndexingStatus?: 'queued' | 'pending' | 'processing' | 'succeeded' | 'failed';
+  memoryIndexingStatus?: 'queued' | 'pending' | 'processing' | 'succeeded' | 'failed' | 'dead_letter' | 'retry';
   memoryChunkCount: number;
   processingError?: string;
   attachment: {
     id: string;
     diaryEntryId: string;
     fileType: string;
+    extractionStatus?: 'extracted' | 'pending' | 'empty';
+    signedUrl?: string;
     createdAt: string;
   };
 };
@@ -265,6 +289,7 @@ export type GenerateSummaryPayload = {
 export type GenerateSummaryResponse = {
   generated: boolean;
   summary: SummaryRecord;
+  memoryIndexingStatus?: 'queued' | 'succeeded' | 'failed';
 };
 
 export async function getSummaries(
@@ -326,6 +351,8 @@ export type CalendarSyncResponse = {
   message: string;
   syncedCount: number;
   queuedIndexingJobs?: number;
+  linkedDiaryCount?: number;
+  linkedEventCount?: number;
   memoryIndexingStatus?: 'queued' | 'succeeded' | 'failed';
 };
 
@@ -464,6 +491,33 @@ export type IndexingStatus = {
   recent: IndexingJobStatus[];
 };
 
+export type DemoReadiness = {
+  ready: boolean;
+  counts: {
+    diaryEntries: number;
+    memoryChunks: number;
+    summaries: number;
+    calendarEvents: number;
+    linkedDiaries: number;
+    attachments: number;
+    extractedAttachments: number;
+    pendingOutbox: number;
+    failedOutbox: number;
+  };
+  outbox: {
+    available: boolean;
+    counts: Record<string, number>;
+  };
+  checks: Array<{
+    id: string;
+    label: string;
+    ok: boolean;
+    required: boolean;
+    detail: string;
+  }>;
+  nextActions: string[];
+};
+
 export async function getSystemHealth(accessToken: string | null): Promise<SystemHealth> {
   const response = await authFetch('/api/health', {
     method: 'GET',
@@ -486,6 +540,21 @@ export async function getIndexingStatus(
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ message: 'Failed to fetch indexing status' }));
+    throw new Error(error.message || `HTTP ${response.status}`);
+  }
+
+  return response.json();
+}
+
+export async function getDemoReadiness(
+  accessToken: string | null,
+): Promise<DemoReadiness> {
+  const response = await authFetch('/api/indexing/demo-readiness', {
+    method: 'GET',
+  }, accessToken);
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ message: 'Failed to fetch demo readiness' }));
     throw new Error(error.message || `HTTP ${response.status}`);
   }
 

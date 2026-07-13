@@ -26,6 +26,7 @@ type AttachmentQueueItem = {
   status: AttachmentStatus;
   message: string;
   attachmentId?: string;
+  signedUrl?: string;
   memoryChunkCount?: number;
 };
 
@@ -47,6 +48,10 @@ function getAttachmentStatusClass(status: AttachmentStatus) {
 
   if (status === "pending") {
     return "bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-900/30 dark:text-amber-300 dark:ring-amber-800";
+  }
+
+  if (status === "uploading" || status === "extracting") {
+    return "bg-sky-50 text-sky-700 ring-sky-200 dark:bg-sky-900/30 dark:text-sky-300 dark:ring-sky-800";
   }
 
   return "bg-indigo-50 text-indigo-700 ring-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-300 dark:ring-indigo-800";
@@ -321,6 +326,14 @@ export function DiaryInputForm() {
       return `Indexed ${response.memoryChunkCount} memory chunks`;
     }
 
+    if (response.memoryIndexingStatus === "dead_letter") {
+      return "Indexing failed after retries. Requeue from Settings or upload again.";
+    }
+
+    if (response.memoryIndexingStatus === "retry") {
+      return "Worker hit a temporary error; retry is scheduled automatically.";
+    }
+
     if (response.memoryIndexingStatus === "queued" || response.memoryIndexingStatus === "pending") {
       return response.extractionStatus === "extracted"
         ? "Text extracted; queued for memory indexing"
@@ -345,8 +358,13 @@ export function DiaryInputForm() {
   }
 
   function getAttachmentStatus(response: AttachmentUploadResponse): AttachmentStatus {
-    if (response.processingError || response.memoryIndexingStatus === "failed") return "error";
+    if (
+      response.processingError ||
+      response.memoryIndexingStatus === "failed" ||
+      response.memoryIndexingStatus === "dead_letter"
+    ) return "error";
     if (response.memoryIndexed || response.memoryIndexingStatus === "succeeded") return "indexed";
+    if (response.memoryIndexingStatus === "processing") return "extracting";
     return "pending";
   }
 
@@ -435,6 +453,7 @@ export function DiaryInputForm() {
           const uploadResult = await uploadDiaryAttachment(diaryEntry.id, item.file, accessToken);
           updateAttachmentItem(item.id, {
             attachmentId: uploadResult.attachment.id,
+            signedUrl: uploadResult.attachment.signedUrl,
             status: getAttachmentStatus(uploadResult),
             message: getAttachmentMessage(uploadResult),
             memoryChunkCount: uploadResult.memoryChunkCount,
@@ -444,6 +463,7 @@ export function DiaryInputForm() {
             const processResult = await processDiaryAttachment(uploadResult.attachment.id, accessToken);
             updateAttachmentItem(item.id, {
               status: getAttachmentStatus(processResult),
+              signedUrl: processResult.attachment.signedUrl ?? uploadResult.attachment.signedUrl,
               message: getAttachmentMessage(processResult),
               memoryChunkCount: processResult.memoryChunkCount,
             });
@@ -657,6 +677,16 @@ export function DiaryInputForm() {
                     <span className="max-w-[220px] truncate text-xs text-slate-500 dark:text-slate-400">
                       {item.message}
                     </span>
+                    {item.signedUrl ? (
+                      <a
+                        href={item.signedUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="rounded-lg px-2 py-1 text-xs font-semibold text-indigo-600 transition hover:bg-indigo-50 hover:text-indigo-800 dark:text-indigo-300 dark:hover:bg-indigo-900/30"
+                      >
+                        Open
+                      </a>
+                    ) : null}
                     {item.status === "queued" ? (
                       <button
                         type="button"

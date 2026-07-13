@@ -8,12 +8,14 @@ import { useTheme } from "@/contexts/ThemeContext";
 import {
   getCalendarEvents,
   getCalendarStatus,
+  getDemoReadiness,
   getIndexingStatus,
   getGoogleCalendarConnectUrl,
   getSystemHealth,
   syncGoogleCalendar,
   type CalendarConnectionStatus,
   type CalendarEventRecord,
+  type DemoReadiness,
   type IndexingStatus,
   type SystemHealth,
 } from "@/lib/api-client";
@@ -81,6 +83,7 @@ export default function SettingsPage() {
   const [calendarEvents, setCalendarEvents] = useState<CalendarEventRecord[]>([]);
   const [systemHealth, setSystemHealth] = useState<SystemHealth | null>(null);
   const [indexingStatus, setIndexingStatus] = useState<IndexingStatus | null>(null);
+  const [demoReadiness, setDemoReadiness] = useState<DemoReadiness | null>(null);
   const [isLoadingSystemStatus, setIsLoadingSystemStatus] = useState(false);
   const [systemStatusMsg, setSystemStatusMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
@@ -145,13 +148,15 @@ export default function SettingsPage() {
     setSystemStatusMsg(null);
     try {
       const token = getAccessToken();
-      const [health, indexing] = await Promise.all([
+      const [health, indexing, readiness] = await Promise.all([
         isAuthenticated ? getSystemHealth(token) : Promise.resolve(null),
         isAuthenticated ? getIndexingStatus(token) : Promise.resolve(null),
+        isAuthenticated ? getDemoReadiness(token) : Promise.resolve(null),
       ]);
 
       setSystemHealth(health);
       setIndexingStatus(indexing);
+      setDemoReadiness(readiness);
     } catch (error) {
       setSystemStatusMsg({
         type: "error",
@@ -323,9 +328,10 @@ export default function SettingsPage() {
       const result = await syncGoogleCalendar(getAccessToken(), limit);
       setCalendarMsg({
         type: "success",
-        text: `Calendar synced: ${result.syncedCount} events, ${result.queuedIndexingJobs ?? 0} queued for memory indexing.`,
+        text: `Calendar synced: ${result.syncedCount} events, ${result.queuedIndexingJobs ?? 0} indexing jobs queued, ${result.linkedDiaryCount ?? 0} diaries linked to ${result.linkedEventCount ?? 0} events.`,
       });
       await refreshCalendarStatus();
+      await refreshSystemStatus();
     } catch (error) {
       setCalendarMsg({
         type: "error",
@@ -353,9 +359,31 @@ export default function SettingsPage() {
     ...(systemHealth?.schema.indexes ?? {}),
   });
   const formatCounts = (counts: Record<string, number>) => {
-    const entries = Object.entries(counts);
+    const order = ["pending", "retry", "processing", "succeeded", "dead_letter", "failed"];
+    const entries = Object.entries(counts).sort(
+      ([first], [second]) => order.indexOf(first) - order.indexOf(second),
+    );
     if (entries.length === 0) return "0 jobs";
     return entries.map(([status, count]) => `${status}: ${count}`).join(" · ");
+  };
+  const getIndexingBadgeClass = (status: string) => {
+    if (status === "succeeded" || status === "completed") {
+      return "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300";
+    }
+
+    if (status === "dead_letter" || status === "failed") {
+      return "bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300";
+    }
+
+    if (status === "processing") {
+      return "bg-sky-50 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300";
+    }
+
+    if (status === "retry") {
+      return "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300";
+    }
+
+    return "bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300";
   };
   const formatCalendarEventTime = (event: CalendarEventRecord) => {
     const start = new Date(event.startTime);
@@ -734,6 +762,77 @@ export default function SettingsPage() {
             </div>
           </div>
 
+          {demoReadiness ? (
+            <div className={`mt-4 rounded-2xl border p-4 ${
+              demoReadiness.ready
+                ? "border-emerald-200 bg-emerald-50 dark:border-emerald-900/50 dark:bg-emerald-950/20"
+                : "border-amber-200 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/20"
+            }`}>
+              <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className={`text-sm font-bold ${
+                    demoReadiness.ready
+                      ? "text-emerald-800 dark:text-emerald-300"
+                      : "text-amber-800 dark:text-amber-300"
+                  }`}>
+                    Demo readiness: {demoReadiness.ready ? "Ready" : "Needs work"}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
+                    Diary {demoReadiness.counts.diaryEntries} · Memory chunks {demoReadiness.counts.memoryChunks} · Summaries {demoReadiness.counts.summaries} · Calendar links {demoReadiness.counts.linkedDiaries}
+                  </p>
+                </div>
+                <span className={`self-start rounded-full px-3 py-1 text-xs font-semibold ${
+                  demoReadiness.ready
+                    ? "bg-emerald-600 text-white"
+                    : "bg-amber-600 text-white"
+                }`}>
+                  {demoReadiness.checks.filter((check) => check.ok).length}/{demoReadiness.checks.length} checks
+                </span>
+              </div>
+
+              <div className="grid gap-2 md:grid-cols-2">
+                {demoReadiness.checks.map((check) => (
+                  <div
+                    key={check.id}
+                    className="flex items-start gap-3 rounded-xl border border-white/70 bg-white/70 px-3 py-2.5 dark:border-slate-700/70 dark:bg-slate-900/30"
+                  >
+                    <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+                      check.ok
+                        ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300"
+                        : "bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-300"
+                    }`}>
+                      {check.ok ? "OK" : "!"}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">
+                        {check.label}
+                        {!check.required ? (
+                          <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-slate-500 dark:bg-slate-700 dark:text-slate-300">
+                            stretch
+                          </span>
+                        ) : null}
+                      </p>
+                      <p className="mt-0.5 text-xs text-slate-600 dark:text-slate-400">{check.detail}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {demoReadiness.nextActions.length ? (
+                <div className="mt-4 rounded-xl bg-white/70 px-3 py-2.5 dark:bg-slate-900/30">
+                  <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                    Next actions
+                  </p>
+                  <ul className="space-y-1 text-sm text-slate-700 dark:text-slate-300">
+                    {demoReadiness.nextActions.slice(0, 4).map((action) => (
+                      <li key={action}>- {action}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800/60">
               <p className="mb-3 text-sm font-semibold text-slate-700 dark:text-slate-300">Environment</p>
@@ -805,7 +904,7 @@ export default function SettingsPage() {
                           {job.sourceId} · updated {new Date(job.updatedAt).toLocaleString()}
                         </p>
                       </div>
-                      <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold ${job.status === "completed" || job.status === "succeeded" ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300" : job.status === "failed" ? "bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300" : "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"}`}>
+                      <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold ${getIndexingBadgeClass(job.status)}`}>
                         {job.status}
                       </span>
                     </div>

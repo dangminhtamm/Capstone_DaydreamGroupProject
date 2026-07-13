@@ -14,4 +14,12 @@ export class IndexingController {
       email: req.user.email,
     });
   }
+
+  @Get('demo-readiness')
+  getDemoReadiness(@Request() req) {
+    return this.indexingService.getDemoReadiness({
+      supabaseId: req.user.userId,
+      email: req.user.email,
+    });
+  }
 }

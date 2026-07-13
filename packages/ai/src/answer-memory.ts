@@ -13,6 +13,9 @@ const MIN_TOP_SIMILARITY = Number(
   process.env.MEMORY_MIN_TOP_SIMILARITY ?? 0.62,
 );
 const DEFAULT_MAX_DISTANCE = Number(process.env.MEMORY_MAX_DISTANCE ?? 0.42);
+const DEFAULT_PROMPT_SOURCE_LIMIT = Number(process.env.MEMORY_PROMPT_SOURCE_LIMIT ?? 4);
+const DEFAULT_MAX_ANSWER_TOKENS = Number(process.env.MEMORY_MAX_ANSWER_TOKENS ?? 512);
+const DEFAULT_RETRIEVAL_CANDIDATE_LIMIT = Number(process.env.MEMORY_RETRIEVAL_CANDIDATE_LIMIT ?? 12);
 
 const GroundedAnswerSchema = z.object({
   answer: z.string().min(1),
@@ -151,7 +154,10 @@ export async function answerMemory(
   const appliedFilters = {
     ...inferredFilters,
     ...options.filters,
-    limit: options.limit ?? 8,
+    limit: Math.min(
+      Math.max(options.limit ?? DEFAULT_RETRIEVAL_CANDIDATE_LIMIT, DEFAULT_RETRIEVAL_CANDIDATE_LIMIT),
+      20,
+    ),
     maxDistance: options.maxDistance ?? DEFAULT_MAX_DISTANCE,
   };
 
@@ -161,11 +167,15 @@ export async function answerMemory(
   const embedMs = performance.now() - embedStart;
 
   const retrieveStart = performance.now();
-  const chunks = await retrieveMemoryWithEmbedding(
+  const chunks = rerankMemoryHits(
     normalizedQuestion,
-    userId,
-    dbClient,
-    embedding,
+    await retrieveMemoryWithEmbedding(
+      normalizedQuestion,
+      userId,
+      dbClient,
+      embedding,
+      appliedFilters,
+    ),
     appliedFilters,
   );
   const retrieveMs = performance.now() - retrieveStart;
@@ -392,15 +402,15 @@ export async function answerFromChunks(
   }
 
   const sources = buildCitations(sortedChunks);
-  // Only send the top 5 most relevant sources to the prompt to reduce input tokens
-  const promptSources = sources.slice(0, 5);
+  const promptSourceLimit = Math.min(Math.max(DEFAULT_PROMPT_SOURCE_LIMIT, 2), 6);
+  const promptSources = sources.slice(0, promptSourceLimit);
   const sourceContext = promptSources
     .map((source) => {
       return [
         `[${source.marker}]`,
         `date: ${source.occurredAt}`,
         `type: ${source.sourceType}/${source.chunkType}`,
-        `memory: ${source.quote}`,
+        `memory: ${trimPromptQuote(source.quote)}`,
       ].join("\n");
     })
     .join("\n\n");
@@ -425,7 +435,7 @@ Rules:
 - However, you MUST still provide the citations in the JSON output with their respective claims.
 - Each citations.claim MUST be directly supported by its source and reuse the source's key names, dates, and terms.
 - If the sources do not answer the question, say that the memory is insufficient and set confidence to "low".
-- Prefer a concise answer over a fluent but unsupported answer.
+- Prefer a concise answer over a fluent but unsupported answer; usually 2-5 short sentences or bullets are enough.
 ${languageInstruction}
 `.trim();
 
@@ -437,19 +447,19 @@ ${languageInstruction}
       responseSchema: GeminiGroundedAnswerResponseSchema,
       validator: GroundedAnswerSchema,
       temperature: 0.1,
-      maxOutputTokens: Number(process.env.MEMORY_MAX_ANSWER_TOKENS ?? 1024),
+      maxOutputTokens: DEFAULT_MAX_ANSWER_TOKENS,
     });
     const generateMs = performance.now() - generateStart;
 
     const output = geminiResult.data;
     const tokenUsage = geminiResult.tokenUsage;
 
-    const allowedMarkers = new Set(sources.map((source) => source.marker));
+    const allowedMarkers = new Set(promptSources.map((source) => source.marker));
     const validModelCitations = output.citations.filter((citation) =>
       allowedMarkers.has(citation.marker),
     );
     const sourceByMarker = new Map(
-      sources.map((source) => [source.marker, source]),
+      promptSources.map((source) => [source.marker, source]),
     );
     const supportedModelCitations = validModelCitations.filter((citation) => {
       const source = sourceByMarker.get(citation.marker);
@@ -477,7 +487,7 @@ ${languageInstruction}
       supportedModelCitations.map((citation) => [citation.marker, citation.claim]),
     );
 
-    const citations = sources
+    const citations = promptSources
       .filter((source) => citedMarkerToClaim.has(source.marker))
       .map((source) => ({
         ...source,
@@ -533,6 +543,99 @@ ${languageInstruction}
       },
     };
   }
+}
+
+export function rerankMemoryHits(
+  question: string,
+  chunks: MemorySearchHit[],
+  filters: RetrievalFilters = {},
+): MemorySearchHit[] {
+  if (chunks.length <= 1) return chunks;
+
+  const queryTokens = new Set(importantTokens(question));
+  const latestTimestamp = Math.max(
+    ...chunks.map((chunk) => new Date(chunk.occurredAt).getTime()).filter(Number.isFinite),
+  );
+  const hasPrimarySources = chunks.some((chunk) => chunk.sourceType !== "summary");
+  const recentIntent = hasRecentIntent(question);
+  const preferredSourceTypes = new Set(filters.preferredSourceTypes ?? []);
+  const preferredChunkTypes = new Set(filters.preferredChunkTypes ?? []);
+
+  return chunks
+    .map((chunk) => {
+      const evidenceTokens = new Set(importantTokens(`${chunk.text} ${chunk.evidence ?? ""}`));
+      const titleTokens = new Set(importantTokens(getMetadataString(chunk.metadata, "sourceTitle")));
+      const overlap = countOverlap(queryTokens, evidenceTokens);
+      const titleOverlap = countOverlap(queryTokens, titleTokens);
+      const overlapRatio = queryTokens.size ? overlap / queryTokens.size : 0;
+      const titleRatio = queryTokens.size ? titleOverlap / queryTokens.size : 0;
+      const occurredAt = new Date(chunk.occurredAt).getTime();
+      const ageDays = Number.isFinite(occurredAt) && Number.isFinite(latestTimestamp)
+        ? Math.max(0, (latestTimestamp - occurredAt) / (24 * 60 * 60 * 1000))
+        : 0;
+      const recencyBoost = recentIntent ? Math.max(0, 0.08 - ageDays * 0.01) : 0;
+      const preferredSourceBoost = preferredSourceTypes.has(chunk.sourceType) ? 0.06 : 0;
+      const preferredChunkBoost = preferredChunkTypes.has(chunk.chunkType) ? 0.05 : 0;
+      const lexicalBoost = Math.min(0.1, overlapRatio * 0.1);
+      const titleBoost = Math.min(0.04, titleRatio * 0.04);
+      const summaryPenalty = hasPrimarySources && chunk.sourceType === "summary" ? 0.06 : 0;
+
+      return {
+        ...chunk,
+        similarity: clampScore(
+          chunk.similarity +
+            recencyBoost +
+            preferredSourceBoost +
+            preferredChunkBoost +
+            lexicalBoost +
+            titleBoost -
+            summaryPenalty,
+        ),
+      };
+    })
+    .sort((a, b) => b.similarity - a.similarity || b.occurredAt.getTime() - a.occurredAt.getTime());
+}
+
+function trimPromptQuote(text: string, maxLength = 420): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, maxLength - 1)}…`;
+}
+
+function countOverlap(first: Set<string>, second: Set<string>): number {
+  let hits = 0;
+  for (const token of first) {
+    if (second.has(token)) hits += 1;
+  }
+  return hits;
+}
+
+function getMetadataString(metadata: unknown, key: string): string {
+  if (!metadata || typeof metadata !== "object") return "";
+  const value = (metadata as Record<string, unknown>)[key];
+  return typeof value === "string" ? value : "";
+}
+
+function hasRecentIntent(question: string): boolean {
+  const normalized = normalizeForIntent(question);
+  return includesAny(normalized, [
+    "recent",
+    "recently",
+    "latest",
+    "last few",
+    "lately",
+    "gan day",
+    "gần đây",
+    "moi day",
+    "mới đây",
+    "moi nhat",
+    "mới nhất",
+  ]);
+}
+
+function clampScore(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.min(1, Math.max(0, value));
 }
 
 function reconcileConfidence(
@@ -716,6 +819,34 @@ export function inferRetrievalFilters(question: string, now = new Date()): Retri
     };
   }
 
+  if (
+    includesAny(normalized, [
+      "attachment",
+      "attachments",
+      "file",
+      "pdf",
+      "document",
+      "upload",
+      "uploaded",
+      "tệp",
+      "tep",
+      "file đính kèm",
+      "file dinh kem",
+      "đính kèm",
+      "dinh kem",
+      "tai lieu",
+      "tài liệu",
+    ])
+  ) {
+    return {
+      ...temporalFilters,
+      preferredSourceTypes: ["attachment"],
+      preferredChunkTypes: ["general_note", "general"],
+      vectorWeight: 0.62,
+      lexicalWeight: 0.38,
+    };
+  }
+
   if (includesAny(normalized, ["feedback", "nhận xét", "nhan xet", "góp ý", "gop y"])) {
     return {
       ...temporalFilters,
@@ -826,6 +957,10 @@ function inferTemporalFilters(normalizedQuestion: string, now = new Date()): Ret
   const explicitDate = detectExplicitDate(normalizedQuestion, today);
   if (explicitDate) {
     return dateRange(explicitDate, addDays(explicitDate, 1));
+  }
+
+  if (hasRecentIntent(normalizedQuestion)) {
+    return dateRange(addDays(today, -30), addDays(today, 1));
   }
 
   const explicitYear = normalizedQuestion.match(/\b(20\d{2})\b/);

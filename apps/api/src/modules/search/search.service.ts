@@ -29,7 +29,9 @@ export class SearchService {
 
     // ── Live search ──
     try {
-      if (this.canUseExactAnswerCache(queryDto)) {
+      const includeDebugTrace = this.debugTraceEnabled();
+
+      if (this.canUseExactAnswerCache(queryDto) && !includeDebugTrace) {
         const cached = await findCachedAnswer(
           this.prisma,
           user.id,
@@ -76,7 +78,7 @@ export class SearchService {
         noMemory: result.noMemory ?? false,
         suggestions: result.suggestions ?? [],
         analytics: result.analytics ?? null,
-        debugTrace: this.debugTraceEnabled() ? (result.debugTrace ?? null) : null,
+        debugTrace: includeDebugTrace ? (result.debugTrace ?? null) : null,
         cached: false,
       };
 
@@ -152,7 +154,10 @@ export class SearchService {
   }
 
   private debugTraceEnabled() {
-    return process.env.MEMORY_DEBUG_TRACE === 'true';
+    const configured = process.env.MEMORY_DEBUG_TRACE?.toLowerCase();
+    if (configured === 'true') return true;
+    if (configured === 'false') return false;
+    return process.env.NODE_ENV !== 'production';
   }
 
   private parseJsonArray(value: string | null | undefined) {

@@ -8,6 +8,7 @@ import {
 import { createHmac, timingSafeEqual } from 'crypto';
 import { google, calendar_v3 } from 'googleapis';
 import { PrismaService } from '../../prisma/prisma.service';
+import { decryptOAuthToken, encryptOAuthToken } from './oauth-token-crypto';
 
 type GoogleConnectInput = {
     supabaseId: string;
@@ -35,7 +36,13 @@ export class CalendarService {
     ];
 
     private getFrontendUrl() {
-        return process.env.FRONTEND_URL || process.env.CORS_ORIGIN || 'http://localhost:3000';
+        const configuredUrl = process.env.FRONTEND_URL || process.env.CORS_ORIGIN;
+        const firstConfiguredUrl = configuredUrl
+            ?.split(',')
+            .map((origin) => origin.trim())
+            .filter(Boolean)[0];
+
+        return firstConfiguredUrl || 'http://localhost:3000';
     }
 
     private getApiBaseUrl() {
@@ -45,6 +52,7 @@ export class CalendarService {
     private getRedirectUri() {
         return (
             process.env.GOOGLE_REDIRECT_URI ||
+            process.env.GOOGLE_CALLBACK_URL ||
             `${this.getApiBaseUrl().replace(/\/$/, '')}/api/calendar/oauth/callback`
         );
     }
@@ -64,12 +72,16 @@ export class CalendarService {
     }
 
     private getStateSecret() {
-        return (
+        const secret =
             process.env.GOOGLE_OAUTH_STATE_SECRET ||
             process.env.SUPABASE_JWT_SECRET ||
-            process.env.GOOGLE_CLIENT_SECRET ||
-            'dev-calendar-oauth-state-secret'
-        );
+            process.env.GOOGLE_CLIENT_SECRET;
+
+        if (!secret && process.env.NODE_ENV === 'production') {
+            throw new BadRequestException('GOOGLE_OAUTH_STATE_SECRET is required in production.');
+        }
+
+        return secret || 'dev-calendar-oauth-state-secret';
     }
 
     private signState(payload: OAuthStatePayload) {
@@ -184,8 +196,8 @@ export class CalendarService {
                 where: { supabaseId: state.supabaseId },
                 data: {
                     google_connected: true,
-                    ...(tokens.access_token && { google_access_token: tokens.access_token }),
-                    ...(tokens.refresh_token && { google_refresh_token: tokens.refresh_token }),
+                    ...(tokens.access_token && { google_access_token: encryptOAuthToken(tokens.access_token) }),
+                    ...(tokens.refresh_token && { google_refresh_token: encryptOAuthToken(tokens.refresh_token) }),
                 },
             });
 
@@ -245,15 +257,15 @@ export class CalendarService {
 
         const oauth2Client = this.getOAuthClient();
         oauth2Client.setCredentials({
-            access_token: user.google_access_token,
-            refresh_token: user.google_refresh_token,
+            access_token: decryptOAuthToken(user.google_access_token),
+            refresh_token: decryptOAuthToken(user.google_refresh_token),
         });
         oauth2Client.on('tokens', async (tokens) => {
             await this.prisma.user.update({
                 where: { id: user.id },
                 data: {
-                    ...(tokens.access_token && { google_access_token: tokens.access_token }),
-                    ...(tokens.refresh_token && { google_refresh_token: tokens.refresh_token }),
+                    ...(tokens.access_token && { google_access_token: encryptOAuthToken(tokens.access_token) }),
+                    ...(tokens.refresh_token && { google_refresh_token: encryptOAuthToken(tokens.refresh_token) }),
                 },
             });
         });
@@ -322,11 +334,14 @@ export class CalendarService {
 
                 return queuedCount;
             });
+            const linking = await this.linkCalendarEventsToDiaries(user.id);
 
             return {
-                message: 'Sync completed successfully; calendar memory indexing queued.',
+                message: 'Sync completed successfully; calendar memory indexing queued and diary linking checked.',
                 syncedCount: rawEvents.length,
                 queuedIndexingJobs,
+                linkedDiaryCount: linking.linkedDiaryCount,
+                linkedEventCount: linking.linkedEventCount,
                 memoryIndexingStatus: 'queued',
             };
 
@@ -334,6 +349,19 @@ export class CalendarService {
             console.error('Failed to sync events:', error);
             throw new InternalServerErrorException('Could not sync calendar events to database');
         }
+    }
+
+    async linkCalendarEventsToDiariesForUser(supabaseId: string) {
+        const user = await this.prisma.user.findUnique({
+            where: { supabaseId },
+            select: { id: true },
+        });
+
+        if (!user) {
+            throw new NotFoundException('User not found');
+        }
+
+        return this.linkCalendarEventsToDiaries(user.id);
     }
 
 
@@ -418,5 +446,126 @@ export class CalendarService {
             },
             data: { expires_at: new Date() },
         });
+    }
+
+    private async linkCalendarEventsToDiaries(userId: string) {
+        const diaries = await this.prisma.diaryEntry.findMany({
+            where: { user_id: userId },
+            select: {
+                id: true,
+                user_id: true,
+                raw_text: true,
+                entry_date: true,
+                calendar_events: {
+                    select: { id: true },
+                },
+            },
+            orderBy: { entry_date: 'desc' },
+            take: 200,
+        });
+
+        let linkedDiaryCount = 0;
+        let linkedEventCount = 0;
+
+        for (const diary of diaries) {
+            const activityDate = diary.entry_date;
+            const startOfDay = new Date(activityDate);
+            startOfDay.setHours(0, 0, 0, 0);
+            const endOfDay = new Date(activityDate);
+            endOfDay.setHours(23, 59, 59, 999);
+
+            const dailyEvents = await this.prisma.calendarEvent.findMany({
+                where: {
+                    user_id: userId,
+                    start_time: { gte: startOfDay, lte: endOfDay },
+                },
+            });
+
+            if (!dailyEvents.length) continue;
+
+            const alreadyLinked = new Set(diary.calendar_events.map((event) => event.id));
+            const diaryKeywords = this.extractKeywords(diary.raw_text);
+            const matchedEvents = dailyEvents.filter((event) => {
+                if (alreadyLinked.has(event.id)) return false;
+
+                let matchScore = 0;
+                const timeDiffHours =
+                    Math.abs(activityDate.getTime() - event.end_time.getTime()) / (1000 * 60 * 60);
+                if (timeDiffHours <= 1) matchScore += 50;
+                else if (timeDiffHours <= 3) matchScore += 30;
+                else if (timeDiffHours <= 12) matchScore += 10;
+
+                const eventKeywords = this.extractKeywords(`${event.title} ${event.description || ''}`);
+                const matchedWords = eventKeywords.filter((keyword) => diaryKeywords.includes(keyword));
+                matchScore += matchedWords.length * 15;
+
+                return matchScore >= 40;
+            });
+
+            if (!matchedEvents.length) continue;
+
+            const linkedEventIds = matchedEvents.map((event) => event.id);
+            const memoryEventContext = matchedEvents.map((event) => ({
+                id: event.id,
+                title: event.title,
+                startTime: event.start_time.toISOString(),
+                endTime: event.end_time.toISOString(),
+            }));
+
+            await this.prisma.$transaction(async (tx) => {
+                await tx.diaryEntry.update({
+                    where: { id: diary.id },
+                    data: {
+                        calendar_events: {
+                            connect: linkedEventIds.map((id) => ({ id })),
+                        },
+                    },
+                });
+
+                await tx.$executeRaw`
+                    UPDATE memory_chunks
+                    SET metadata = jsonb_set(
+                        jsonb_set(
+                            COALESCE(metadata, '{}'::jsonb),
+                            '{calendarEventIds}',
+                            ${JSON.stringify(linkedEventIds)}::jsonb,
+                            true
+                        ),
+                        '{calendarEvents}',
+                        ${JSON.stringify(memoryEventContext)}::jsonb,
+                        true
+                    ),
+                    updated_at = now()
+                    WHERE user_id = ${userId}
+                      AND source_type = 'diary'
+                      AND source_id = ${diary.id}
+                `;
+
+                await this.expireSearchCache(tx, userId);
+            });
+
+            linkedDiaryCount += 1;
+            linkedEventCount += linkedEventIds.length;
+        }
+
+        return { linkedDiaryCount, linkedEventCount };
+    }
+
+    private extractKeywords(text: string) {
+        const stopWords = new Set([
+            'the', 'and', 'for', 'with', 'that', 'this', 'was', 'were', 'from',
+            'have', 'has', 'had', 'about', 'into', 'our', 'you', 'your', 'today',
+            'also', 'will', 'their', 'there', 'toi', 'tôi', 'cua', 'của', 'voi',
+            'với', 'cho', 'mot', 'một', 'cac', 'các', 'nhung', 'những', 'duoc',
+            'được', 'trong', 'ngay', 'ngày',
+        ]);
+
+        return text
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase()
+            .replace(/[^a-z0-9\s]/g, ' ')
+            .split(/\s+/)
+            .filter((word) => word.length > 2 && !stopWords.has(word));
     }
 }

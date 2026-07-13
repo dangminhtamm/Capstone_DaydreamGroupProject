@@ -24,12 +24,21 @@ describe('SearchService', () => {
   };
 
   let service: SearchService;
+  const originalNodeEnv = process.env.NODE_ENV;
+  const originalMemoryDebugTrace = process.env.MEMORY_DEBUG_TRACE;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    process.env.NODE_ENV = originalNodeEnv;
+    process.env.MEMORY_DEBUG_TRACE = originalMemoryDebugTrace;
     (saveSearchHistory as jest.Mock).mockResolvedValue(undefined);
     (findCachedAnswer as jest.Mock).mockResolvedValue(null);
     service = new SearchService(prisma as any);
+  });
+
+  afterAll(() => {
+    process.env.NODE_ENV = originalNodeEnv;
+    process.env.MEMORY_DEBUG_TRACE = originalMemoryDebugTrace;
   });
 
   it('returns grounded memory answers from the AI package', async () => {
@@ -41,6 +50,14 @@ describe('SearchService', () => {
       noMemory: false,
       suggestions: [],
       analytics: { tokenUsage: { totalTokens: 42 } },
+      debugTrace: {
+        status: 'success',
+        reason: 'mock trace',
+        chunksRetrieved: 1,
+        inferredFilters: {},
+        appliedFilters: {},
+        topChunks: [],
+      },
     });
 
     const result = await service.answerQuestion('supabase-user-1', {
@@ -56,6 +73,7 @@ describe('SearchService', () => {
     );
     expect(result.confidence).toBe('high');
     expect(result.sources).toHaveLength(1);
+    expect(result.debugTrace).toMatchObject({ status: 'success', reason: 'mock trace' });
     expect(result.cached).toBe(false);
     expect(saveSearchHistory).toHaveBeenCalledWith(
       prisma,
@@ -68,6 +86,7 @@ describe('SearchService', () => {
   });
 
   it('returns cached answers for unfiltered repeat questions', async () => {
+    process.env.MEMORY_DEBUG_TRACE = 'false';
     prisma.user.findUnique.mockResolvedValue({ id: 'user-1' });
     (findCachedAnswer as jest.Mock).mockResolvedValue({
       answer: 'Cached answer',
@@ -95,6 +114,70 @@ describe('SearchService', () => {
       cached: true,
     });
     expect(result.sources).toHaveLength(1);
+  });
+
+  it('bypasses the answer cache when debug trace is enabled', async () => {
+    process.env.MEMORY_DEBUG_TRACE = 'true';
+    prisma.user.findUnique.mockResolvedValue({ id: 'user-1' });
+    (findCachedAnswer as jest.Mock).mockResolvedValue({
+      answer: 'Cached answer',
+      confidence: 'medium',
+    });
+    (answerMemory as jest.Mock).mockResolvedValue({
+      answer: 'Fresh debug answer',
+      confidence: 'high',
+      citations: [],
+      analytics: { tokenUsage: { totalTokens: 7 } },
+      debugTrace: {
+        status: 'success',
+        reason: 'fresh pipeline trace',
+        chunksRetrieved: 2,
+        inferredFilters: {},
+        appliedFilters: {},
+        topChunks: [],
+      },
+    });
+
+    const result = await service.answerQuestion('supabase-user-1', {
+      question: 'What did I work on?',
+      responseLanguage: 'en',
+    });
+
+    expect(findCachedAnswer).not.toHaveBeenCalled();
+    expect(answerMemory).toHaveBeenCalled();
+    expect(result).toMatchObject({
+      answer: 'Fresh debug answer',
+      cached: false,
+      debugTrace: { status: 'success', reason: 'fresh pipeline trace' },
+    });
+  });
+
+  it('omits debug trace by default in production', async () => {
+    process.env.NODE_ENV = 'production';
+    delete process.env.MEMORY_DEBUG_TRACE;
+    prisma.user.findUnique.mockResolvedValue({ id: 'user-1' });
+    (answerMemory as jest.Mock).mockResolvedValue({
+      answer: 'Production answer',
+      confidence: 'high',
+      citations: [],
+      analytics: { tokenUsage: { totalTokens: 7 } },
+      debugTrace: {
+        status: 'success',
+        reason: 'should be hidden',
+        chunksRetrieved: 2,
+        inferredFilters: {},
+        appliedFilters: {},
+        topChunks: [],
+      },
+    });
+
+    const result = await service.answerQuestion('supabase-user-1', {
+      question: 'What did I work on?',
+      responseLanguage: 'en',
+      limit: 8,
+    });
+
+    expect(result.debugTrace).toBeNull();
   });
 
   it('bypasses answer cache when retrieval filters are present', async () => {
