@@ -12,6 +12,7 @@ async function main() {
     succeeded: 0,
     failed: 0,
     resetStale: 0,
+    metrics: DataIngestionJob.getMetrics(),
   };
 
   for (let i = 0; i < maxBatches; i += 1) {
@@ -22,6 +23,7 @@ async function main() {
     totals.succeeded += result.succeeded;
     totals.failed += result.failed;
     totals.resetStale += result.resetStale;
+    totals.metrics = result.metrics;
 
     if (result.claimed === 0) break;
   }

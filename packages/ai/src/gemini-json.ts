@@ -96,6 +96,7 @@ export async function generateGeminiJsonWithMeta<T>(
 
       // Only retry on transient/network errors, not on validation failures.
       const isTransient = isTransientGeminiError(lastError);
+      if (isQuotaExhaustedError(lastError)) break;
 
       if (!isTransient || attempt === maxRetries) break;
 
@@ -118,6 +119,18 @@ function isTransientGeminiError(error: Error): boolean {
     status === 503 ||
     error.message.includes("ECONNRESET") ||
     error.message.includes("fetch failed")
+  );
+}
+
+function isQuotaExhaustedError(error: Error): boolean {
+  const status = getErrorStatus(error);
+  if (status !== 429) return false;
+
+  const normalized = error.message.toLowerCase();
+  return (
+    normalized.includes("current quota") ||
+    normalized.includes("plan and billing") ||
+    normalized.includes("billing details")
   );
 }
 

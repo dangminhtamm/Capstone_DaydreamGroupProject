@@ -1,5 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { getAuditLogStatus } from '../../common/middleware/audit-log.middleware';
+import { checkRedisRateLimitHealth, getRateLimitStatus } from '../../common/middleware/rate-limit.middleware';
+import { getSearchCacheStatus } from '../../common/cache/search-answer-cache';
 
 type DbCountRow = {
   status: string;
@@ -31,8 +34,11 @@ export class HealthService {
 
   async getHealth() {
     const checkedAt = new Date().toISOString();
-    const env = this.getEnvironmentStatus();
-    const database = await this.checkDatabase();
+    const [redis, database] = await Promise.all([
+      checkRedisRateLimitHealth(),
+      this.checkDatabase(),
+    ]);
+    const env = this.getEnvironmentStatus(redis);
     const tables = database.ok
       ? await this.checkRelations({
           indexing_outbox: true,
@@ -67,6 +73,7 @@ export class HealthService {
       checkedAt,
       database,
       environment: env,
+      enterpriseControls: this.getEnterpriseControls(redis),
       schema: {
         tables,
         indexes,
@@ -158,7 +165,7 @@ export class HealthService {
     }
   }
 
-  private getEnvironmentStatus() {
+  private getEnvironmentStatus(redis: Awaited<ReturnType<typeof checkRedisRateLimitHealth>>) {
     const supabaseServerKey =
       process.env.SUPABASE_SERVICE_ROLE_KEY ??
       process.env.SUPABASE_SECRET_KEY ??
@@ -174,6 +181,45 @@ export class HealthService {
         !supabaseServerKeyIsPublishable,
       geminiConfigured: hasRealValue(process.env.GEMINI_API_KEY),
       googleOAuthConfigured: hasRealValue(process.env.GOOGLE_CLIENT_ID) && hasRealValue(process.env.GOOGLE_CLIENT_SECRET),
+      redisConfigured: hasRealValue(process.env.REDIS_URL),
+      redisReachable: redis.reachable,
+      temporalConfigured: hasRealValue(process.env.TEMPORAL_ADDRESS) || hasRealValue(process.env.TEMPORAL_NAMESPACE),
+      sentryConfigured: hasRealValue(process.env.SENTRY_DSN),
+      openTelemetryConfigured:
+        hasRealValue(process.env.OTEL_EXPORTER_OTLP_ENDPOINT) ||
+        hasRealValue(process.env.OTEL_SERVICE_NAME),
+    };
+  }
+
+  private getEnterpriseControls(redis: Awaited<ReturnType<typeof checkRedisRateLimitHealth>>) {
+    return {
+      requestId: {
+        enabled: true,
+        header: 'x-request-id',
+      },
+      securityHeaders: {
+        enabled: true,
+        headers: [
+          'X-Content-Type-Options',
+          'X-Frame-Options',
+          'Referrer-Policy',
+          'Permissions-Policy',
+          'Cross-Origin-Resource-Policy',
+        ],
+      },
+      rateLimit: getRateLimitStatus(),
+      auditLogging: getAuditLogStatus(),
+      searchCache: getSearchCacheStatus(),
+      observability: {
+        sentryConfigured: hasRealValue(process.env.SENTRY_DSN),
+        openTelemetryConfigured:
+          hasRealValue(process.env.OTEL_EXPORTER_OTLP_ENDPOINT) ||
+          hasRealValue(process.env.OTEL_SERVICE_NAME),
+        redisConfigured: hasRealValue(process.env.REDIS_URL),
+        redisReachable: redis.reachable,
+        redisError: redis.error,
+        temporalConfigured: hasRealValue(process.env.TEMPORAL_ADDRESS) || hasRealValue(process.env.TEMPORAL_NAMESPACE),
+      },
     };
   }
 
@@ -190,6 +236,11 @@ export class HealthService {
     if (!input.env.geminiConfigured) warnings.push('GEMINI_API_KEY is missing; AI summary/search/indexing will fail.');
     if (!input.env.supabaseConfigured) warnings.push('Supabase service env is missing; storage/auth-backed features may fail.');
     if (!input.env.googleOAuthConfigured) warnings.push('Google OAuth env is missing; Calendar connect cannot run end-to-end.');
+    if (!input.env.redisConfigured) warnings.push('Redis is not configured; rate limiting and hot answer cache are using local fallbacks.');
+    if (input.env.redisConfigured && !input.env.redisReachable) warnings.push('Redis is configured but not reachable; rate limiting and hot answer cache are using local fallbacks.');
+    if (!input.env.temporalConfigured) warnings.push('Temporal is not configured; worker jobs are running with local cron/outbox semantics.');
+    if (!input.env.sentryConfigured) warnings.push('Sentry is not configured; production error reporting is disabled.');
+    if (!input.env.openTelemetryConfigured) warnings.push('OpenTelemetry is not configured; distributed tracing export is disabled.');
 
     for (const [name, check] of Object.entries(input.tables)) {
       if (check.required && !check.ok) warnings.push(`Missing required table: ${name}.`);

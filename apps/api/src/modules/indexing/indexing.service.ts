@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 
 type AuthenticatedUserInput = {
@@ -59,21 +59,76 @@ export class IndexingService {
       available: true,
       counts,
       staleProcessingCount: staleProcessing,
-      recent: recent.map((job) => ({
-        id: job.id,
-        jobType: job.job_type,
-        sourceType: job.source_type,
-        sourceId: job.source_id,
-        status: job.status,
-        retryCount: job.retry_count,
-        maxRetries: job.max_retries,
-        error: job.error,
-        runAfter: job.run_after.toISOString(),
-        lockedAt: job.locked_at?.toISOString() ?? null,
-        processedAt: job.processed_at?.toISOString() ?? null,
-        createdAt: job.created_at.toISOString(),
-        updatedAt: job.updated_at.toISOString(),
-      })),
+      recent: recent.map((job) => this.toClientJob(job)),
+    };
+  }
+
+  async requeueJob(authUser: AuthenticatedUserInput, jobId: string) {
+    const user = await this.findOrCreateUser(authUser);
+    const available = await this.outboxExists();
+
+    if (!available) {
+      return {
+        requeued: false,
+        reason: 'indexing_outbox table is missing. Apply migrations before requeueing jobs.',
+      };
+    }
+
+    const job = await this.prisma.indexingOutbox.findFirst({
+      where: { id: jobId, user_id: user.id },
+    });
+
+    if (!job) {
+      throw new NotFoundException('Indexing job not found.');
+    }
+
+    const updated = await this.prisma.indexingOutbox.update({
+      where: { id: job.id },
+      data: this.requeueData(),
+    });
+
+    return {
+      requeued: true,
+      job: this.toClientJob({
+        id: updated.id,
+        job_type: updated.job_type,
+        source_type: updated.source_type,
+        source_id: updated.source_id,
+        status: updated.status,
+        retry_count: updated.retry_count,
+        max_retries: updated.max_retries,
+        error: updated.error,
+        run_after: updated.run_after,
+        locked_at: updated.locked_at,
+        processed_at: updated.processed_at,
+        created_at: updated.created_at,
+        updated_at: updated.updated_at,
+      }),
+    };
+  }
+
+  async requeueDeadLetterJobs(authUser: AuthenticatedUserInput) {
+    const user = await this.findOrCreateUser(authUser);
+    const available = await this.outboxExists();
+
+    if (!available) {
+      return {
+        requeued: 0,
+        reason: 'indexing_outbox table is missing. Apply migrations before requeueing jobs.',
+      };
+    }
+
+    const result = await this.prisma.indexingOutbox.updateMany({
+      where: {
+        user_id: user.id,
+        status: { in: ['dead_letter', 'failed'] },
+      },
+      data: this.requeueData(),
+    });
+
+    return {
+      requeued: result.count,
+      status: result.count > 0 ? 'pending' : 'no_dead_letter_jobs',
     };
   }
 
@@ -272,6 +327,46 @@ export class IndexingService {
       LIMIT 10`,
       userId,
     );
+  }
+
+  private requeueData() {
+    return {
+      status: 'pending',
+      retry_count: 0,
+      error: null,
+      run_after: new Date(),
+      locked_at: null,
+      processed_at: null,
+    };
+  }
+
+  private toClientJob(job: RecentJobRow) {
+    const now = Date.now();
+    const ageMs = Math.max(0, now - job.created_at.getTime());
+    const processingAgeMs =
+      job.status === 'processing' && job.locked_at
+        ? Math.max(0, now - job.locked_at.getTime())
+        : null;
+
+    return {
+      id: job.id,
+      jobType: job.job_type,
+      sourceType: job.source_type,
+      sourceId: job.source_id,
+      status: job.status,
+      retryCount: job.retry_count,
+      maxRetries: job.max_retries,
+      error: job.error,
+      lastErrorAt: job.error ? job.updated_at.toISOString() : null,
+      runAfter: job.run_after.toISOString(),
+      nextRunAfter: job.run_after.toISOString(),
+      ageMs,
+      processingAgeMs,
+      lockedAt: job.locked_at?.toISOString() ?? null,
+      processedAt: job.processed_at?.toISOString() ?? null,
+      createdAt: job.created_at.toISOString(),
+      updatedAt: job.updated_at.toISOString(),
+    };
   }
 
   private nextActionForCheck(checkId: string) {

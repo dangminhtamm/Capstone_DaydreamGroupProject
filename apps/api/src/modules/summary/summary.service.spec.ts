@@ -42,7 +42,7 @@ describe('SummaryService', () => {
         summary_type: 'daily',
         period_start: periodStart,
         period_end: periodEnd,
-        content: 'A useful summary',
+        content: '**Key wins:** A useful summary',
         created_at: new Date('2026-05-18T12:00:00.000Z'),
       },
     ]);
@@ -67,7 +67,7 @@ describe('SummaryService', () => {
         expect.objectContaining({
           id: 'summary-1',
           type: 'daily',
-          content: 'A useful summary',
+          content: 'Key wins: A useful summary',
           periodStart: periodStart.toISOString(),
           periodEnd: periodEnd.toISOString(),
         }),

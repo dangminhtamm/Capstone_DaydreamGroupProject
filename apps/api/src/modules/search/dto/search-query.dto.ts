@@ -50,4 +50,9 @@ export class SearchQueryDto {
   @IsString()
   @IsIn(['en', 'vi'])
   responseLanguage?: 'en' | 'vi';
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['auto', 'fast', 'deep'])
+  answerStrategy?: 'auto' | 'fast' | 'deep';
 }

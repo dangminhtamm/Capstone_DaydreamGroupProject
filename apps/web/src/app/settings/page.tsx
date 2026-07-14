@@ -12,6 +12,8 @@ import {
   getIndexingStatus,
   getGoogleCalendarConnectUrl,
   getSystemHealth,
+  requeueDeadLetterIndexingJobs,
+  requeueIndexingJob,
   syncGoogleCalendar,
   type CalendarConnectionStatus,
   type CalendarEventRecord,
@@ -85,6 +87,7 @@ export default function SettingsPage() {
   const [indexingStatus, setIndexingStatus] = useState<IndexingStatus | null>(null);
   const [demoReadiness, setDemoReadiness] = useState<DemoReadiness | null>(null);
   const [isLoadingSystemStatus, setIsLoadingSystemStatus] = useState(false);
+  const [isRequeueingIndexing, setIsRequeueingIndexing] = useState(false);
   const [systemStatusMsg, setSystemStatusMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   // Avatar upload
@@ -170,6 +173,43 @@ export default function SettingsPage() {
   useEffect(() => {
     void refreshSystemStatus();
   }, [refreshSystemStatus]);
+
+  const handleRequeueDeadLetterJobs = useCallback(async () => {
+    setIsRequeueingIndexing(true);
+    setSystemStatusMsg(null);
+    try {
+      const result = await requeueDeadLetterIndexingJobs(getAccessToken());
+      setSystemStatusMsg({
+        type: "success",
+        text: result.requeued > 0 ? `Requeued ${result.requeued} dead-letter indexing job(s).` : "No dead-letter indexing jobs to requeue.",
+      });
+      await refreshSystemStatus();
+    } catch (error) {
+      setSystemStatusMsg({
+        type: "error",
+        text: error instanceof Error ? error.message : "Could not requeue dead-letter jobs.",
+      });
+    } finally {
+      setIsRequeueingIndexing(false);
+    }
+  }, [getAccessToken, refreshSystemStatus]);
+
+  const handleRequeueJob = useCallback(async (jobId: string) => {
+    setIsRequeueingIndexing(true);
+    setSystemStatusMsg(null);
+    try {
+      await requeueIndexingJob(getAccessToken(), jobId);
+      setSystemStatusMsg({ type: "success", text: "Indexing job requeued." });
+      await refreshSystemStatus();
+    } catch (error) {
+      setSystemStatusMsg({
+        type: "error",
+        text: error instanceof Error ? error.message : "Could not requeue indexing job.",
+      });
+    } finally {
+      setIsRequeueingIndexing(false);
+    }
+  }, [getAccessToken, refreshSystemStatus]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -353,7 +393,15 @@ export default function SettingsPage() {
     ["Supabase service", systemHealth?.environment.supabaseConfigured],
     ["Gemini API", systemHealth?.environment.geminiConfigured],
     ["Google OAuth", systemHealth?.environment.googleOAuthConfigured],
+    ["Redis configured", systemHealth?.environment.redisConfigured],
+    ["Redis reachable", systemHealth?.environment.redisReachable],
+    ["Temporal", systemHealth?.environment.temporalConfigured],
+    ["Sentry", systemHealth?.environment.sentryConfigured],
+    ["OpenTelemetry", systemHealth?.environment.openTelemetryConfigured],
   ];
+  const userPendingJobs = (userIndexingCounts.pending ?? 0) + (userIndexingCounts.retry ?? 0);
+  const userProcessingJobs = userIndexingCounts.processing ?? 0;
+  const userFailedJobs = (userIndexingCounts.dead_letter ?? 0) + (userIndexingCounts.failed ?? 0);
   const schemaChecks = Object.entries({
     ...(systemHealth?.schema.tables ?? {}),
     ...(systemHealth?.schema.indexes ?? {}),
@@ -365,6 +413,16 @@ export default function SettingsPage() {
     );
     if (entries.length === 0) return "0 jobs";
     return entries.map(([status, count]) => `${status}: ${count}`).join(" · ");
+  };
+  const formatDuration = (ms: number | null | undefined) => {
+    if (ms == null) return null;
+    const seconds = Math.max(0, Math.round(ms / 1000));
+    if (seconds < 60) return `${seconds}s`;
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    if (minutes < 60) return `${minutes}m ${remainingSeconds}s`;
+    const hours = Math.floor(minutes / 60);
+    return `${hours}h ${minutes % 60}m`;
   };
   const getIndexingBadgeClass = (status: string) => {
     if (status === "succeeded" || status === "completed") {
@@ -719,14 +777,24 @@ export default function SettingsPage() {
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-600 dark:text-cyan-400">System</p>
               <h3 className="mt-2 text-2xl font-bold tracking-tight text-slate-950 dark:text-slate-100">Health & Indexing</h3>
             </div>
-            <button
-              type="button"
-              onClick={() => void refreshSystemStatus()}
-              disabled={isLoadingSystemStatus}
-              className="cursor-pointer rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600"
-            >
-              {isLoadingSystemStatus ? "Checking..." : "Refresh"}
-            </button>
+            <div className="flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => void handleRequeueDeadLetterJobs()}
+                disabled={!isAuthenticated || isRequeueingIndexing || userFailedJobs === 0}
+                className="cursor-pointer rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm font-semibold text-amber-700 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300 dark:hover:bg-amber-900/40"
+              >
+                {isRequeueingIndexing ? "Requeueing..." : "Requeue failed"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void refreshSystemStatus()}
+                disabled={isLoadingSystemStatus}
+                className="cursor-pointer rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600"
+              >
+                {isLoadingSystemStatus ? "Checking..." : "Refresh"}
+              </button>
+            </div>
           </div>
 
           {systemStatusMsg && (
@@ -877,10 +945,96 @@ export default function SettingsPage() {
             </div>
           ) : null}
 
+          {systemHealth?.enterpriseControls ? (
+            <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800/60">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">Enterprise Controls</p>
+                  <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">Request tracing, API protection, audit logging, and observability readiness.</p>
+                </div>
+                <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
+                  active
+                </span>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5 dark:border-slate-700 dark:bg-slate-900/40">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Traceability</p>
+                  <p className="mt-1 text-sm font-medium text-slate-800 dark:text-slate-200">
+                    {systemHealth.enterpriseControls.requestId.enabled ? "Request ID enabled" : "Request ID disabled"}
+                  </p>
+                  <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{systemHealth.enterpriseControls.requestId.header}</p>
+                </div>
+
+                <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5 dark:border-slate-700 dark:bg-slate-900/40">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">API Rate Limit</p>
+                  <p className="mt-1 text-sm font-medium text-slate-800 dark:text-slate-200">
+                    {systemHealth.enterpriseControls.rateLimit.enabled ? "Enabled" : "Disabled"} · {systemHealth.enterpriseControls.rateLimit.storage}
+                  </p>
+                  <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                    Redis {systemHealth.enterpriseControls.rateLimit.redisConnected ? "connected" : "fallback"} · AI {systemHealth.enterpriseControls.rateLimit.profiles.ai?.max ?? "-"} req/min
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5 dark:border-slate-700 dark:bg-slate-900/40">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Search Cache</p>
+                  <p className="mt-1 text-sm font-medium text-slate-800 dark:text-slate-200">
+                    {systemHealth.enterpriseControls.searchCache?.enabled ? "Enabled" : "Disabled"} · {systemHealth.enterpriseControls.searchCache?.storage ?? "database-fallback"}
+                  </p>
+                  <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                    TTL {systemHealth.enterpriseControls.searchCache?.ttlSeconds ?? "-"}s · exact answer cache
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5 dark:border-slate-700 dark:bg-slate-900/40">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Audit Logging</p>
+                  <p className="mt-1 text-sm font-medium text-slate-800 dark:text-slate-200">
+                    {systemHealth.enterpriseControls.auditLogging.enabled ? "Enabled" : "Disabled"} · {systemHealth.enterpriseControls.auditLogging.sink}
+                  </p>
+                  <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                    {systemHealth.enterpriseControls.auditLogging.piiSafe ? "PII-safe request metadata only" : "Review log payload policy"}
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5 dark:border-slate-700 dark:bg-slate-900/40">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Security Headers</p>
+                  <p className="mt-1 text-sm font-medium text-slate-800 dark:text-slate-200">
+                    {systemHealth.enterpriseControls.securityHeaders.enabled ? "Enabled" : "Disabled"}
+                  </p>
+                  <p className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">
+                    {systemHealth.enterpriseControls.securityHeaders.headers.slice(0, 3).join(", ")}
+                  </p>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
           <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800/60">
             <div className="mb-3 flex items-center justify-between gap-3">
               <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">Your Indexing Jobs</p>
               <p className="text-xs text-slate-500 dark:text-slate-400">{formatCounts(userIndexingCounts)}</p>
+            </div>
+
+            <div className="mb-4 grid gap-2 sm:grid-cols-4">
+              {[
+                { label: "Waiting", value: userPendingJobs, tone: userPendingJobs ? "amber" : "emerald" },
+                { label: "Processing", value: userProcessingJobs, tone: userProcessingJobs ? "sky" : "emerald" },
+                { label: "Failed", value: userFailedJobs, tone: userFailedJobs ? "rose" : "emerald" },
+                { label: "Done", value: userIndexingCounts.succeeded ?? 0, tone: "emerald" },
+              ].map((item) => (
+                <div key={item.label} className={`rounded-xl border px-3 py-2 ${
+                  item.tone === "rose"
+                    ? "border-rose-200 bg-rose-50 dark:border-rose-900/50 dark:bg-rose-950/20"
+                    : item.tone === "amber"
+                      ? "border-amber-200 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/20"
+                      : item.tone === "sky"
+                        ? "border-sky-200 bg-sky-50 dark:border-sky-900/50 dark:bg-sky-950/20"
+                        : "border-emerald-200 bg-emerald-50 dark:border-emerald-900/50 dark:bg-emerald-950/20"
+                }`}>
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{item.label}</p>
+                  <p className="mt-1 text-lg font-bold text-slate-900 dark:text-slate-100">{item.value}</p>
+                </div>
+              ))}
             </div>
 
             {!isAuthenticated ? (
@@ -911,10 +1065,24 @@ export default function SettingsPage() {
                     {job.error && (
                       <p className="mt-2 line-clamp-2 text-xs leading-5 text-rose-600 dark:text-rose-300">{job.error}</p>
                     )}
-                    <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-                      retries {job.retryCount}/{job.maxRetries}
-                      {job.lockedAt ? ` · locked ${new Date(job.lockedAt).toLocaleString()}` : ""}
-                    </p>
+                    <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        retries {job.retryCount}/{job.maxRetries} · age {formatDuration(job.ageMs)}
+                        {job.nextRunAfter ? ` · next ${new Date(job.nextRunAfter).toLocaleString()}` : ""}
+                        {job.processingAgeMs ? ` · processing ${formatDuration(job.processingAgeMs)}` : ""}
+                        {job.lastErrorAt ? ` · last error ${new Date(job.lastErrorAt).toLocaleString()}` : ""}
+                      </p>
+                      {["dead_letter", "failed", "retry", "processing"].includes(job.status) ? (
+                        <button
+                          type="button"
+                          onClick={() => void handleRequeueJob(job.id)}
+                          disabled={isRequeueingIndexing}
+                          className="cursor-pointer rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                        >
+                          Requeue
+                        </button>
+                      ) : null}
+                    </div>
                   </div>
                 ))}
               </div>

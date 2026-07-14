@@ -19,6 +19,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { StorageService } from '../../storage/storage.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PrismaService } from '../../prisma/prisma.service';
+import { invalidateUserSearchCache } from '../../common/cache/search-answer-cache';
 
 @Controller('upload')
 @UseGuards(JwtAuthGuard)
@@ -266,6 +267,7 @@ export class UploadController {
       },
       data: { expires_at: new Date() },
     });
+    await invalidateUserSearchCache(input.userId);
 
     return job;
   }

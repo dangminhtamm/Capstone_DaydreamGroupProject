@@ -7,8 +7,14 @@ import {
   deleteSearchHistoryItem,
   clearUserSearchHistory,
 } from '@second-brain/db';
+import {
+  getCachedSearchAnswer,
+  setCachedSearchAnswer,
+} from '../../common/cache/search-answer-cache';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SearchQueryDto } from './dto/search-query.dto';
+
+const DEFAULT_SEARCH_LIMIT = 8;
 
 @Injectable()
 export class SearchService {
@@ -32,6 +38,22 @@ export class SearchService {
       const includeDebugTrace = this.debugTraceEnabled();
 
       if (this.canUseExactAnswerCache(queryDto) && !includeDebugTrace) {
+        const redisCached = await getCachedSearchAnswer({
+          userId: user.id,
+          question: normalizedQuestion,
+          responseLanguage: lang,
+        });
+
+        if (redisCached) {
+          return {
+            ...redisCached,
+            debugTrace: null,
+            cached: true,
+            answerMode: 'cache',
+            cacheStorage: 'redis',
+          };
+        }
+
         const cached = await findCachedAnswer(
           this.prisma,
           user.id,
@@ -49,6 +71,8 @@ export class SearchService {
             analytics: this.parseJsonObject(cached.analytics_json),
             debugTrace: null,
             cached: true,
+            answerMode: 'cache',
+            cacheStorage: 'database',
           };
         }
       }
@@ -65,12 +89,14 @@ export class SearchService {
       if (queryDto.endDate) filters.endDate = new Date(queryDto.endDate);
 
       const result = await answerMemory(normalizedQuestion, user.id, this.prisma, {
-        limit: queryDto.limit ?? 8,
+        limit: queryDto.limit ?? DEFAULT_SEARCH_LIMIT,
         maxDistance: queryDto.maxDistance,
         responseLanguage: lang,
+        answerStrategy: queryDto.answerStrategy ?? 'auto',
         filters,
       });
 
+      const answerMode = result.answerMode ?? result.analytics?.answerMode ?? 'gemini';
       const response = {
         answer: result.answer,
         confidence: result.confidence,
@@ -78,11 +104,35 @@ export class SearchService {
         noMemory: result.noMemory ?? false,
         suggestions: result.suggestions ?? [],
         analytics: result.analytics ?? null,
+        modelError: result.modelError ?? null,
+        answerMode,
         debugTrace: includeDebugTrace ? (result.debugTrace ?? null) : null,
         cached: false,
       };
 
       // ── Persist to search history (async, non-blocking) ──
+      if (this.canUseExactAnswerCache(queryDto) && !includeDebugTrace) {
+        setCachedSearchAnswer(
+          {
+            userId: user.id,
+            question: normalizedQuestion,
+            responseLanguage: lang,
+          },
+          {
+            answer: result.answer,
+            confidence: result.confidence,
+            sources: result.citations ?? [],
+            noMemory: result.noMemory ?? false,
+            suggestions: result.suggestions ?? [],
+            analytics: result.analytics ?? null,
+            answerMode,
+            modelError: result.modelError ?? null,
+          },
+        ).catch((err) => {
+          console.warn('Failed to save Redis search cache (non-fatal):', err);
+        });
+      }
+
       saveSearchHistory(this.prisma, {
         userId: user.id,
         question: normalizedQuestion,
@@ -148,9 +198,18 @@ export class SearchService {
       queryDto.sourceType ||
       queryDto.startDate ||
       queryDto.endDate ||
-      queryDto.limit ||
-      queryDto.maxDistance
+      queryDto.maxDistance ||
+      !this.isDefaultAnswerStrategy(queryDto.answerStrategy) ||
+      !this.isDefaultSearchLimit(queryDto.limit)
     );
+  }
+
+  private isDefaultSearchLimit(limit: number | undefined) {
+    return limit === undefined || limit === DEFAULT_SEARCH_LIMIT;
+  }
+
+  private isDefaultAnswerStrategy(strategy: SearchQueryDto['answerStrategy']) {
+    return strategy === undefined || strategy === 'auto';
   }
 
   private debugTraceEnabled() {

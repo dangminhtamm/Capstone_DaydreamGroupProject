@@ -197,7 +197,7 @@ async function callAI(type: SummaryType, period: Period, context: string) {
   const result = await model.generateContent(buildSummaryPrompt(type, period, context));
   const text = result.response.text().trim();
   if (!text) throw new Error('Gemini returned an empty summary.');
-  return text;
+  return sanitizeSummaryContent(text);
 }
 
 const dayMs = 24 * 60 * 60 * 1000;
@@ -270,11 +270,20 @@ Rules:
 - Do not invent people, events, dates, emotions, or outcomes.
 - Prefer specific details over generic encouragement.
 - If evidence is thin, say so briefly.
-- Respond in clear English with short sections.
+- Respond in clear English with short plain-text sections.
+- Do not use Markdown emphasis. Never wrap headings, labels, or phrases in **.
 
 Context:
 ${context}
 `.trim();
+}
+
+function sanitizeSummaryContent(content: string) {
+  return content
+    .replace(/\*\*([\s\S]*?)\*\*/g, '$1')
+    .replace(/\*\*/g, '')
+    .replace(/[ \t]+\n/g, '\n')
+    .trim();
 }
 
 async function runForAllUsers(type: SummaryType, anchorDate = new Date()) {

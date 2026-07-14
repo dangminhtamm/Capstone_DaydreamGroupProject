@@ -69,7 +69,7 @@ describe('SearchService', () => {
       'What did I work on?',
       'user-1',
       prisma,
-      expect.objectContaining({ responseLanguage: 'en' }),
+      expect.objectContaining({ responseLanguage: 'en', answerStrategy: 'auto' }),
     );
     expect(result.confidence).toBe('high');
     expect(result.sources).toHaveLength(1);
@@ -98,6 +98,7 @@ describe('SearchService', () => {
     const result = await service.answerQuestion('supabase-user-1', {
       question: '  What did I work on?  ',
       responseLanguage: 'en',
+      limit: 8,
     });
 
     expect(findCachedAnswer).toHaveBeenCalledWith(
@@ -203,6 +204,74 @@ describe('SearchService', () => {
     expect(answerMemory).toHaveBeenCalled();
     expect(result).toMatchObject({
       answer: 'Fresh filtered answer',
+      cached: false,
+    });
+  });
+
+  it('bypasses answer cache when a non-default limit is present', async () => {
+    process.env.MEMORY_DEBUG_TRACE = 'false';
+    prisma.user.findUnique.mockResolvedValue({ id: 'user-1' });
+    (findCachedAnswer as jest.Mock).mockResolvedValue({
+      answer: 'Cached answer',
+      confidence: 'medium',
+    });
+    (answerMemory as jest.Mock).mockResolvedValue({
+      answer: 'Fresh wider answer',
+      confidence: 'high',
+      citations: [],
+      analytics: { tokenUsage: { totalTokens: 7 } },
+    });
+
+    const result = await service.answerQuestion('supabase-user-1', {
+      question: 'What happened in June?',
+      responseLanguage: 'en',
+      limit: 12,
+    });
+
+    expect(findCachedAnswer).not.toHaveBeenCalled();
+    expect(answerMemory).toHaveBeenCalledWith(
+      'What happened in June?',
+      'user-1',
+      prisma,
+      expect.objectContaining({ limit: 12 }),
+    );
+    expect(result).toMatchObject({
+      answer: 'Fresh wider answer',
+      cached: false,
+    });
+  });
+
+  it('bypasses answer cache when answer strategy is not auto', async () => {
+    process.env.MEMORY_DEBUG_TRACE = 'false';
+    prisma.user.findUnique.mockResolvedValue({ id: 'user-1' });
+    (findCachedAnswer as jest.Mock).mockResolvedValue({
+      answer: 'Cached answer',
+      confidence: 'medium',
+    });
+    (answerMemory as jest.Mock).mockResolvedValue({
+      answer: 'Fresh deep answer',
+      confidence: 'high',
+      citations: [],
+      analytics: { tokenUsage: { totalTokens: 21 } },
+      answerMode: 'gemini',
+    });
+
+    const result = await service.answerQuestion('supabase-user-1', {
+      question: 'Analyze my mood this week',
+      responseLanguage: 'en',
+      answerStrategy: 'deep',
+    });
+
+    expect(findCachedAnswer).not.toHaveBeenCalled();
+    expect(answerMemory).toHaveBeenCalledWith(
+      'Analyze my mood this week',
+      'user-1',
+      prisma,
+      expect.objectContaining({ answerStrategy: 'deep' }),
+    );
+    expect(result).toMatchObject({
+      answer: 'Fresh deep answer',
+      answerMode: 'gemini',
       cached: false,
     });
   });

@@ -8,6 +8,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import {
   deleteMemoryChunksForSource,
 } from '@second-brain/db';
+import { invalidateUserSearchCache } from '../../common/cache/search-answer-cache';
 import { PrismaService } from '../../prisma/prisma.service'; // Adjust path based on your setup
 import { StorageService } from '../../storage/storage.service';
 import { CreateDiaryDto } from './dto/create-diary.dto';
@@ -171,6 +172,15 @@ export class DiaryService {
         sourceId: id,
       });
 
+      await tx.searchHistory?.updateMany?.({
+        where: {
+          user_id: user.id,
+          expires_at: { gt: new Date() },
+        },
+        data: { expires_at: new Date() },
+      });
+      await invalidateUserSearchCache(user.id);
+
       return tx.diaryEntry.delete({ where: { id } });
     });
   }
@@ -236,6 +246,7 @@ export class DiaryService {
       },
       data: { expires_at: new Date() },
     });
+    await invalidateUserSearchCache(input.userId);
 
     return job;
   }

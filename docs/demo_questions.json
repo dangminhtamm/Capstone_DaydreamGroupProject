@@ -1,0 +1,28 @@
+[
+  {
+    "id": "mentor-feedback",
+    "question": "What feedback did I receive about the project?",
+    "why": "Should retrieve diary, calendar, attachment, and weekly summary sources about grounded citations and avoiding Gmail scope creep."
+  },
+  {
+    "id": "weekly-progress",
+    "question": "What did we work on this week?",
+    "why": "Shows temporal range retrieval and the fast path/fallback can answer without overusing Gemini."
+  },
+  {
+    "id": "calendar-links",
+    "question": "Which Calendar meetings were linked to my diary?",
+    "why": "Proves Google Calendar context is part of memory."
+  },
+  {
+    "id": "attachment-brief",
+    "question": "What did the attachment say about the MVP?",
+    "why": "Proves private attachment extraction/indexing works as a first-class source."
+  },
+  {
+    "id": "vietnamese-summary",
+    "question": "Tom tat tien do MVP tuan nay cua toi.",
+    "responseLanguage": "vi",
+    "why": "Vietnamese demo question for natural answer quality."
+  }
+]

@@ -454,6 +454,49 @@ export type SystemHealth = {
     supabaseConfigured: boolean;
     geminiConfigured: boolean;
     googleOAuthConfigured: boolean;
+    redisConfigured?: boolean;
+    redisReachable?: boolean;
+    temporalConfigured?: boolean;
+    sentryConfigured?: boolean;
+    openTelemetryConfigured?: boolean;
+  };
+  enterpriseControls?: {
+    requestId: {
+      enabled: boolean;
+      header: string;
+    };
+    securityHeaders: {
+      enabled: boolean;
+      headers: string[];
+    };
+    rateLimit: {
+      enabled: boolean;
+      storage: string;
+      redisConfigured?: boolean;
+      redisConnected?: boolean;
+      redisLastError?: string | null;
+      profiles: Record<string, { max: number; windowMs: number }>;
+    };
+    searchCache?: {
+      enabled: boolean;
+      storage: string;
+      ttlSeconds: number;
+      redisConfigured: boolean;
+      redisConnected: boolean;
+    };
+    auditLogging: {
+      enabled: boolean;
+      sink: string;
+      piiSafe: boolean;
+    };
+    observability: {
+      sentryConfigured: boolean;
+      openTelemetryConfigured: boolean;
+      redisConfigured: boolean;
+      redisReachable?: boolean;
+      redisError?: string | null;
+      temporalConfigured: boolean;
+    };
   };
   schema: {
     tables: Record<string, { ok: boolean; required: boolean; detail?: string }>;
@@ -476,7 +519,11 @@ export type IndexingJobStatus = {
   retryCount: number;
   maxRetries: number;
   error: string | null;
+  lastErrorAt: string | null;
   runAfter: string;
+  nextRunAfter: string;
+  ageMs: number;
+  processingAgeMs: number | null;
   lockedAt: string | null;
   processedAt: string | null;
   createdAt: string;
@@ -489,6 +536,18 @@ export type IndexingStatus = {
   counts: Record<string, number>;
   staleProcessingCount: number;
   recent: IndexingJobStatus[];
+};
+
+export type RequeueIndexingJobResponse = {
+  requeued: boolean;
+  reason?: string;
+  job?: IndexingJobStatus;
+};
+
+export type RequeueDeadLetterResponse = {
+  requeued: number;
+  status?: string;
+  reason?: string;
 };
 
 export type DemoReadiness = {
@@ -555,6 +614,37 @@ export async function getDemoReadiness(
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ message: 'Failed to fetch demo readiness' }));
+    throw new Error(error.message || `HTTP ${response.status}`);
+  }
+
+  return response.json();
+}
+
+export async function requeueIndexingJob(
+  accessToken: string | null,
+  jobId: string,
+): Promise<RequeueIndexingJobResponse> {
+  const response = await authFetch(`/api/indexing/jobs/${jobId}/requeue`, {
+    method: 'POST',
+  }, accessToken);
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ message: 'Failed to requeue indexing job' }));
+    throw new Error(error.message || `HTTP ${response.status}`);
+  }
+
+  return response.json();
+}
+
+export async function requeueDeadLetterIndexingJobs(
+  accessToken: string | null,
+): Promise<RequeueDeadLetterResponse> {
+  const response = await authFetch('/api/indexing/jobs/requeue-dead-letter', {
+    method: 'POST',
+  }, accessToken);
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ message: 'Failed to requeue dead-letter indexing jobs' }));
     throw new Error(error.message || `HTTP ${response.status}`);
   }
 

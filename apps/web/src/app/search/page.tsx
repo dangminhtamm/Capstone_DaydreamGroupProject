@@ -24,6 +24,9 @@ type SearchCitation = {
   claim?: string;
 };
 
+type AnswerMode = "cache" | "fast_path" | "gemini" | "extractive_fallback" | "no_memory";
+type AnswerStrategy = "auto" | "fast" | "deep";
+
 type QueryAnalytics = {
   tokenUsage: {
     promptTokens: number;
@@ -39,6 +42,7 @@ type QueryAnalytics = {
   };
   chunksRetrieved: number;
   status: "success" | "no_memory" | "error";
+  answerMode?: AnswerMode;
 };
 
 type MemoryDebugTrace = {
@@ -71,9 +75,16 @@ type SearchResponse = {
   noMemory?: boolean;
   suggestions?: string[];
   analytics?: QueryAnalytics | null;
+  modelError?: {
+    status?: number;
+    kind: "quota" | "service_unavailable" | "validation" | "transient" | "unknown";
+    message: string;
+  } | null;
   debugTrace?: MemoryDebugTrace | null;
   cached?: boolean;
   cachedAt?: string;
+  answerMode?: AnswerMode;
+  cacheStorage?: "redis" | "database";
 };
 
 type ResponseLanguage = "en" | "vi";
@@ -85,11 +96,89 @@ const suggestedQuestions = [
   "Summarize my latest diary memories.",
 ];
 
+const answerStrategies: Array<{ value: AnswerStrategy; label: string }> = [
+  { value: "auto", label: "Auto" },
+  { value: "fast", label: "Fast" },
+  { value: "deep", label: "Deep" },
+];
+
 const confidenceStyles = {
   high: "bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:ring-emerald-700",
   medium: "bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:ring-amber-700",
   low: "bg-rose-50 text-rose-700 ring-rose-200 dark:bg-rose-900/30 dark:text-rose-400 dark:ring-rose-700",
 };
+
+const sourceToneStyles: Record<string, string> = {
+  diary: "bg-indigo-50 text-indigo-700 ring-indigo-100 dark:bg-indigo-900/30 dark:text-indigo-300 dark:ring-indigo-800",
+  calendar: "bg-sky-50 text-sky-700 ring-sky-100 dark:bg-sky-900/30 dark:text-sky-300 dark:ring-sky-800",
+  attachment: "bg-emerald-50 text-emerald-700 ring-emerald-100 dark:bg-emerald-900/30 dark:text-emerald-300 dark:ring-emerald-800",
+  summary: "bg-amber-50 text-amber-700 ring-amber-100 dark:bg-amber-900/30 dark:text-amber-300 dark:ring-amber-800",
+};
+
+function formatSourceType(value: string) {
+  return value.replaceAll("_", " ");
+}
+
+function formatSourceDate(value: string) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return value;
+  return date.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function formatAnswerMode(value?: AnswerMode) {
+  switch (value) {
+    case "cache":
+      return "Cache";
+    case "fast_path":
+      return "Fast path";
+    case "gemini":
+      return "Gemini";
+    case "extractive_fallback":
+      return "Extractive fallback";
+    case "no_memory":
+      return "No memory";
+    default:
+      return "Unknown";
+  }
+}
+
+function highlightQuote(quote: string, claim?: string) {
+  const cleanClaim = claim?.replace(/\s+/g, " ").trim();
+  if (!cleanClaim || cleanClaim.length < 8) return quote;
+
+  const quoteLower = quote.toLowerCase();
+  const claimLower = cleanClaim.toLowerCase();
+  const start = quoteLower.indexOf(claimLower);
+
+  if (start >= 0) {
+    const end = start + cleanClaim.length;
+    return [
+      quote.slice(0, start),
+      <mark key="claim" className="rounded bg-amber-200/80 px-1 text-slate-950 dark:bg-amber-300/30 dark:text-amber-100">
+        {quote.slice(start, end)}
+      </mark>,
+      quote.slice(end),
+    ];
+  }
+
+  const tokens = Array.from(new Set(cleanClaim.toLowerCase().match(/[\p{Letter}\p{Number}]{4,}/gu) ?? [])).slice(0, 4);
+  if (!tokens.length) return quote;
+
+  const pattern = new RegExp(`(${tokens.map((token) => token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`, "giu");
+  return quote.split(pattern).map((part, index) =>
+    tokens.includes(part.toLowerCase()) ? (
+      <mark key={`${part}-${index}`} className="rounded bg-amber-200/80 px-1 text-slate-950 dark:bg-amber-300/30 dark:text-amber-100">
+        {part}
+      </mark>
+    ) : (
+      part
+    ),
+  );
+}
 
 export default function SearchPage() {
   const { isAuthenticated, isLoading: isAuthLoading, getAccessToken } = useAuth();
@@ -98,6 +187,7 @@ export default function SearchPage() {
   const [error, setError] = useState<string | null>(null);
   const [isSearching, setIsSearching] = useState(false);
   const [responseLanguage, setResponseLanguage] = useState<ResponseLanguage>("en");
+  const [answerStrategy, setAnswerStrategy] = useState<AnswerStrategy>("auto");
   const [showAuthPrompt, setShowAuthPrompt] = useState(false);
   const [analyticsOpen, setAnalyticsOpen] = useState(false);
   const [searchHistory, setSearchHistory] = useState<SearchHistoryEntry[]>([]);
@@ -107,6 +197,11 @@ export default function SearchPage() {
   useEffect(() => {
     const saved = localStorage.getItem("dd-response-lang") as ResponseLanguage | null;
     if (saved === "en" || saved === "vi") setResponseLanguage(saved);
+
+    const savedStrategy = localStorage.getItem("dd-answer-strategy") as AnswerStrategy | null;
+    if (savedStrategy === "auto" || savedStrategy === "fast" || savedStrategy === "deep") {
+      setAnswerStrategy(savedStrategy);
+    }
   }, []);
 
   // Load search history from server when authenticated
@@ -194,11 +289,15 @@ export default function SearchPage() {
           question: normalizedQuestion,
           limit: 8,
           responseLanguage,
+          ...(answerStrategy === "auto" ? {} : { answerStrategy }),
         }),
       });
 
       if (!response.ok) {
-        throw new Error(`Search failed with status ${response.status}`);
+        const requestId = response.headers.get("x-request-id");
+        const errorBody = await response.json().catch(() => null) as { message?: string; requestId?: string } | null;
+        const detail = errorBody?.message || `Search failed with status ${response.status}`;
+        throw new Error(requestId || errorBody?.requestId ? `${detail} (request ${requestId || errorBody?.requestId})` : detail);
       }
 
       const data = (await response.json()) as SearchResponse;
@@ -225,7 +324,7 @@ export default function SearchPage() {
     } finally {
       setIsSearching(false);
     }
-  }, [getAccessToken, isAuthenticated, loadServerHistory, responseLanguage]);
+  }, [answerStrategy, getAccessToken, isAuthenticated, loadServerHistory, responseLanguage]);
 
   async function handleSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -293,6 +392,32 @@ export default function SearchPage() {
                   className="mt-2 min-h-36 w-full resize-none rounded-2xl border border-slate-200 bg-white/80 px-4 py-3 text-sm text-slate-900 shadow-inner outline-none transition placeholder:text-slate-400 focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-100 dark:border-slate-600 dark:bg-slate-700/60 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-indigo-500 dark:focus:bg-slate-700 dark:focus:ring-indigo-900/40"
                 />
               </label>
+
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white/70 px-3 py-2 dark:border-slate-700 dark:bg-slate-800/50">
+                <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Answer mode</span>
+                <div className="inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1 dark:border-slate-700 dark:bg-slate-900/40">
+                  {answerStrategies.map((strategy) => {
+                    const active = answerStrategy === strategy.value;
+                    return (
+                      <button
+                        key={strategy.value}
+                        type="button"
+                        onClick={() => {
+                          setAnswerStrategy(strategy.value);
+                          localStorage.setItem("dd-answer-strategy", strategy.value);
+                        }}
+                        className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                          active
+                            ? "bg-indigo-600 text-white shadow-sm"
+                            : "text-slate-600 hover:bg-white hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
+                        }`}
+                      >
+                        {strategy.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
 
               <div className="flex flex-wrap gap-2">
                 {suggestedQuestions.map((suggestion) => (
@@ -436,7 +561,7 @@ export default function SearchPage() {
                 {result.cached && (
                   <span className="flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:bg-slate-800 dark:text-slate-400">
                     <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-                    Cached
+                    Cached{result.cacheStorage ? `: ${result.cacheStorage}` : ""}
                   </span>
                 )}
                 <span className={`rounded-full px-3 py-1 text-xs font-semibold ring-1 ${confidenceStyles[result.confidence]}`}>
@@ -445,6 +570,19 @@ export default function SearchPage() {
               </div>
             ) : null}
           </div>
+
+          {result ? (
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <span className="rounded-full bg-indigo-50 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider text-indigo-700 ring-1 ring-indigo-100 dark:bg-indigo-900/30 dark:text-indigo-300 dark:ring-indigo-800">
+                Mode: {formatAnswerMode(result.answerMode ?? result.analytics?.answerMode)}
+              </span>
+              {result.analytics?.tokenUsage.totalTokens === 0 ? (
+                <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider text-emerald-700 ring-1 ring-emerald-100 dark:bg-emerald-900/30 dark:text-emerald-300 dark:ring-emerald-800">
+                  0 generate tokens
+                </span>
+              ) : null}
+            </div>
+          ) : null}
 
           {result ? (
             <div className={`mb-4 rounded-2xl border p-3 ${
@@ -467,7 +605,7 @@ export default function SearchPage() {
                   </div>
                 ) : (
                   <span className="rounded-full bg-white/80 px-2 py-0.5 text-[11px] font-semibold text-amber-700 dark:bg-slate-900/70 dark:text-amber-300">
-                    debugTrace missing
+                    debugTrace unavailable
                   </span>
                 )}
               </div>
@@ -478,7 +616,9 @@ export default function SearchPage() {
               }`}>
                 {result.debugTrace
                   ? result.debugTrace.reason
-                  : "Frontend đã nhận answer nhưng API chưa trả debugTrace. Restart API/dev server rồi hỏi lại để thấy pipeline chi tiết."}
+                  : result.cached
+                    ? "Câu trả lời này lấy từ cache nên API không trả pipeline debug cho lần search live."
+                    : "API không trả debugTrace cho response này. Nếu đang demo local, bật MEMORY_DEBUG_TRACE=true và restart API để xem pipeline chi tiết."}
               </p>
             </div>
           ) : null}
@@ -490,13 +630,41 @@ export default function SearchPage() {
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                 </svg>
-                <p className="text-sm font-medium text-indigo-700 dark:text-indigo-300">Searching through your memories…</p>
+                <div>
+                  <p className="text-sm font-semibold text-indigo-800 dark:text-indigo-200">Searching grounded memories</p>
+                  <p className="mt-0.5 text-xs text-indigo-700 dark:text-indigo-300">Filtering by time/source, ranking chunks, then composing an answer.</p>
+                </div>
               </div>
-              <div className="space-y-2.5">
-                <div className="h-3.5 w-11/12 animate-pulse rounded-full bg-slate-200 dark:bg-slate-700" />
-                <div className="h-3.5 w-9/12 animate-pulse rounded-full bg-slate-200 dark:bg-slate-700" />
-                <div className="h-3.5 w-10/12 animate-pulse rounded-full bg-slate-200 dark:bg-slate-700" />
-                <div className="h-3.5 w-7/12 animate-pulse rounded-full bg-slate-200 dark:bg-slate-700" />
+              <div className="grid gap-3 sm:grid-cols-3">
+                {["Embed query", "Retrieve sources", "Ground answer"].map((step, index) => (
+                  <div key={step} className="rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800/70">
+                    <div className="mb-3 flex items-center gap-2">
+                      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-100 text-xs font-bold text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300">{index + 1}</span>
+                      <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">{step}</p>
+                    </div>
+                    <div className="h-2 animate-pulse rounded-full bg-slate-200 dark:bg-slate-700" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : result?.modelError ? (
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4 dark:border-amber-700/60 dark:bg-amber-900/20">
+                <p className="text-sm font-semibold text-amber-900 dark:text-amber-200">
+                  {result.modelError.kind === "validation"
+                    ? "Gemini response format issue"
+                    : "Gemini generation unavailable"}
+                </p>
+                <p className="mt-1 text-xs leading-5 text-amber-800 dark:text-amber-300">
+                  {result.modelError.kind === "quota"
+                    ? "Gemini quota/rate limit was reached. Showing the best retrieved memories instead."
+                    : result.modelError.kind === "validation"
+                      ? "Gemini returned invalid JSON. Showing the best grounded memories instead."
+                      : result.modelError.message}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-indigo-100 bg-indigo-50/40 p-4 dark:border-indigo-800 dark:bg-indigo-900/20">
+                <p className="whitespace-pre-wrap text-sm leading-7 text-slate-700 dark:text-slate-300">{result.answer}</p>
               </div>
             </div>
           ) : result?.noMemory ? (
@@ -731,6 +899,13 @@ export default function SearchPage() {
                       {result.analytics.status}
                     </span>
                   </div>
+                  <div className="flex items-center gap-3">
+                    <svg className="h-4 w-4 shrink-0 text-slate-500 dark:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                    <span className="flex-1 text-sm text-slate-700 dark:text-slate-300">Answer mode</span>
+                    <span className="rounded-full bg-indigo-50 px-2.5 py-0.5 text-xs font-semibold text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300">
+                      {formatAnswerMode(result.answerMode ?? result.analytics.answerMode)}
+                    </span>
+                  </div>
                   {/* Total */}
                   <div className="flex items-center gap-3 border-t border-slate-200 pt-2.5 dark:border-slate-700">
                     <svg className="h-4 w-4 shrink-0 text-slate-500 dark:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
@@ -770,41 +945,51 @@ export default function SearchPage() {
             {result.sources.map((source) => (
               <article
                 key={`${source.marker}-${source.chunkId}`}
-                className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-indigo-200 hover:shadow-md dark:border-slate-700 dark:bg-slate-800/80 dark:hover:border-indigo-500/50"
+                className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:border-indigo-200 hover:shadow-md dark:border-slate-700 dark:bg-slate-800/80 dark:hover:border-indigo-500/50"
               >
-                <div className="mb-3 flex flex-wrap items-center gap-2">
-                  <span className="rounded-lg bg-indigo-600 px-2.5 py-1 text-xs font-bold text-white shadow-sm">
-                    {source.marker}
-                  </span>
-                  <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold capitalize text-slate-700 dark:bg-slate-700 dark:text-slate-200">
-                    {source.sourceType}
-                  </span>
-                  <span className="rounded-full bg-sky-50 px-2.5 py-1 text-xs font-semibold text-sky-700 ring-1 ring-sky-100 dark:bg-sky-900/30 dark:text-sky-300 dark:ring-sky-800">
-                    {source.chunkType.replaceAll("_", " ")}
-                  </span>
-                  <span className="ml-auto text-xs font-medium text-slate-500 dark:text-slate-400">
-                    {new Date(source.occurredAt).toLocaleDateString()}
-                  </span>
+                <div className="border-b border-slate-100 bg-slate-50/80 px-4 py-3 dark:border-slate-700 dark:bg-slate-900/40">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-lg bg-indigo-600 px-2.5 py-1 text-xs font-bold text-white shadow-sm">
+                      {source.marker}
+                    </span>
+                    <span className={`rounded-full px-2.5 py-1 text-xs font-semibold capitalize ring-1 ${sourceToneStyles[source.sourceType] ?? "bg-slate-100 text-slate-700 ring-slate-200 dark:bg-slate-700 dark:text-slate-200 dark:ring-slate-600"}`}>
+                      {formatSourceType(source.sourceType)}
+                    </span>
+                    <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-600 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700">
+                      {source.chunkType.replaceAll("_", " ")}
+                    </span>
+                    <span className="ml-auto rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-100 dark:bg-emerald-900/30 dark:text-emerald-300 dark:ring-emerald-800">
+                      {Math.round(source.similarity * 100)}% match
+                    </span>
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                    <p className="min-w-0 truncate text-sm font-semibold leading-6 text-slate-950 dark:text-slate-100">
+                      {source.sourceTitle || "Untitled memory"}
+                    </p>
+                    <span className="shrink-0 text-xs font-medium text-slate-500 dark:text-slate-400">
+                      {formatSourceDate(source.occurredAt)}
+                    </span>
+                  </div>
                 </div>
 
-                <p className="text-sm font-semibold leading-6 text-slate-950 dark:text-slate-100">
-                  {source.sourceTitle || "Untitled memory"}
-                </p>
+                <div className="p-4">
                 {source.claim ? (
-                  <p className="mt-2 rounded-xl bg-indigo-50 px-3 py-2 text-sm leading-6 text-indigo-950 dark:bg-indigo-950/30 dark:text-indigo-200">
-                    {source.claim}
-                  </p>
+                  <div className="rounded-xl border border-indigo-100 bg-indigo-50 px-3 py-2 dark:border-indigo-900/60 dark:bg-indigo-950/30">
+                    <p className="mb-1 text-[11px] font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-300">Supported claim</p>
+                    <p className="text-sm leading-6 text-indigo-950 dark:text-indigo-100">{source.claim}</p>
+                  </div>
                 ) : null}
                 <blockquote className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm leading-6 text-slate-700 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-300">
-                  {source.quote}
+                  {highlightQuote(source.quote, source.claim)}
                 </blockquote>
                 <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
                   <span className="rounded-full bg-slate-100 px-2.5 py-1 font-medium dark:bg-slate-700">
                     source id: {source.sourceId.slice(0, 8)}
                   </span>
-                  <span className="rounded-full bg-emerald-50 px-2.5 py-1 font-semibold text-emerald-700 ring-1 ring-emerald-100 dark:bg-emerald-900/30 dark:text-emerald-300 dark:ring-emerald-800">
-                    match {Math.round(source.similarity * 100)}%
+                  <span className="rounded-full bg-slate-100 px-2.5 py-1 font-medium dark:bg-slate-700">
+                    chunk id: {source.chunkId.slice(0, 8)}
                   </span>
+                </div>
                 </div>
               </article>
             ))}

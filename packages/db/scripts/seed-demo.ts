@@ -21,6 +21,14 @@ type DemoEvent = {
   startHour: number;
 };
 
+type DemoAttachment = {
+  id: string;
+  diaryId: string;
+  fileName: string;
+  fileType: string;
+  extractedText: string;
+};
+
 const demoPrefix = "[DEMO MVP]";
 
 const diaries: DemoDiary[] = [
@@ -105,10 +113,34 @@ const events: DemoEvent[] = [
   },
 ];
 
+const attachments: DemoAttachment[] = [
+  {
+    id: "demo-mvp-attachment-01",
+    diaryId: "demo-mvp-diary-03",
+    fileName: "demo_project_brief.txt",
+    fileType: "text/plain",
+    extractedText:
+      "Demo project brief: The Second Brain MVP must prove diary capture, private attachment ingestion, Google Calendar linking, hierarchical summaries, and grounded memory answers with readable citations. The strongest demo question should ask what mentor feedback the team received and show diary, calendar, attachment, and summary sources.",
+  },
+];
+
+const sampleQuestions = [
+  "What feedback did I receive about the project?",
+  "What did we work on this week?",
+  "Which Calendar meetings were linked to my diary?",
+  "What did the attachment say about the MVP?",
+  "Tóm tắt tiến độ MVP tuần này của tôi.",
+];
+
 function requiredEnv(name: string) {
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`${name} is required.`);
   return value;
+}
+
+function optionalEnv(name: string) {
+  const value = process.env[name]?.trim();
+  return value || null;
 }
 
 function createSeedPrismaClient() {
@@ -139,11 +171,28 @@ function eventDate(anchor: Date, offset: number, hour: number) {
   return { start, end };
 }
 
+const dayMs = 24 * 60 * 60 * 1000;
+
+function startOfUtcDay(date: Date) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+}
+
+function endOfUtcDay(start: Date) {
+  return new Date(start.getTime() + dayMs - 1);
+}
+
+function startOfUtcWeek(date: Date) {
+  const day = date.getUTCDay();
+  const mondayOffset = day === 0 ? -6 : 1 - day;
+  const start = startOfUtcDay(date);
+  return new Date(start.getTime() + mondayOffset * dayMs);
+}
+
 async function enqueueIndexingJob(
   prisma: any,
   input: {
     userId: string;
-    sourceType: "diary" | "calendar" | "summary";
+    sourceType: "diary" | "attachment" | "calendar" | "summary";
     sourceId: string;
     payload?: Record<string, unknown>;
   },
@@ -177,11 +226,49 @@ async function enqueueIndexingJob(
   });
 }
 
-async function main() {
-  const prisma = createSeedPrismaClient() as any;
-  const supabaseId = requiredEnv("DEMO_SUPABASE_USER_ID");
+async function resolveDemoUserInput(prisma: any) {
+  const configuredSupabaseId = optionalEnv("DEMO_SUPABASE_USER_ID");
   const email = requiredEnv("DEMO_USER_EMAIL");
   const displayName = process.env.DEMO_DISPLAY_NAME?.trim() || "Demo User";
+
+  if (configuredSupabaseId) {
+    return {
+      supabaseId: configuredSupabaseId,
+      email,
+      displayName,
+      resolvedFrom: "DEMO_SUPABASE_USER_ID",
+    };
+  }
+
+  const existingUser = await prisma.user.findUnique({
+    where: { email },
+    select: {
+      supabaseId: true,
+      email: true,
+      display_name: true,
+    },
+  });
+
+  if (existingUser?.supabaseId) {
+    return {
+      supabaseId: existingUser.supabaseId,
+      email: existingUser.email,
+      displayName: displayName || existingUser.display_name || "Demo User",
+      resolvedFrom: "existing users.email",
+    };
+  }
+
+  throw new Error(
+    [
+      "DEMO_SUPABASE_USER_ID is required because no existing app user was found for DEMO_USER_EMAIL.",
+      "Fix: log in once with the demo account so /api/auth/sync creates the user, then rerun pnpm demo:prepare.",
+      "Alternative: set DEMO_SUPABASE_USER_ID to the Supabase auth.users.id UUID for that account.",
+    ].join(" "),
+  );
+}
+
+async function main() {
+  const prisma = createSeedPrismaClient() as any;
   const anchor = process.env.DEMO_ANCHOR_DATE
     ? new Date(`${process.env.DEMO_ANCHOR_DATE}T12:00:00`)
     : new Date();
@@ -191,6 +278,7 @@ async function main() {
   }
 
   try {
+    const { supabaseId, email, displayName, resolvedFrom } = await resolveDemoUserInput(prisma);
     const user = await prisma.user.upsert({
       where: { supabaseId },
       update: { email, display_name: displayName },
@@ -263,13 +351,49 @@ async function main() {
       });
     }
 
+    for (const attachment of attachments) {
+      const diary = diaries.find((item) => item.id === attachment.diaryId);
+      const storagePath = `attachments/${user.id}/demo/${attachment.fileName}`;
+
+      if (!diary) {
+        throw new Error(`Attachment ${attachment.id} references missing diary ${attachment.diaryId}.`);
+      }
+
+      await prisma.attachment.upsert({
+        where: { id: attachment.id },
+        update: {
+          diary_entry_id: attachment.diaryId,
+          storage_path: storagePath,
+          file_type: attachment.fileType,
+          extracted_text: attachment.extractedText,
+        },
+        create: {
+          id: attachment.id,
+          diary_entry_id: attachment.diaryId,
+          storage_path: storagePath,
+          file_type: attachment.fileType,
+          extracted_text: attachment.extractedText,
+        },
+      });
+
+      await enqueueIndexingJob(prisma, {
+        userId: user.id,
+        sourceType: "attachment",
+        sourceId: attachment.id,
+        payload: { sourceTitle: attachment.fileName },
+      });
+    }
+
+    const todayStart = startOfUtcDay(anchor);
+    const weekStart = startOfUtcWeek(anchor);
+
     const dailySummary = await prisma.summary.upsert({
       where: {
         user_id_summary_type_period_start_period_end: {
           user_id: user.id,
           summary_type: "daily",
-          period_start: dayAtNoon(anchor, 0),
-          period_end: new Date(dayAtNoon(anchor, 0).getTime() + 24 * 60 * 60 * 1000 - 1),
+          period_start: todayStart,
+          period_end: endOfUtcDay(todayStart),
         },
       },
       update: {
@@ -279,8 +403,8 @@ async function main() {
       create: {
         user_id: user.id,
         summary_type: "daily",
-        period_start: dayAtNoon(anchor, 0),
-        period_end: new Date(dayAtNoon(anchor, 0).getTime() + 24 * 60 * 60 * 1000 - 1),
+        period_start: todayStart,
+        period_end: endOfUtcDay(todayStart),
         content:
           "The team closed the MVP checklist around diary entries, Calendar linking, memory chunks, summaries, and outbox health. The next step is to rehearse search answers with citations.",
       },
@@ -293,14 +417,49 @@ async function main() {
       payload: { sourceTitle: "Demo daily summary" },
     });
 
+    const weeklySummary = await prisma.summary.upsert({
+      where: {
+        user_id_summary_type_period_start_period_end: {
+          user_id: user.id,
+          summary_type: "weekly",
+          period_start: weekStart,
+          period_end: new Date(weekStart.getTime() + 7 * dayMs - 1),
+        },
+      },
+      update: {
+        content:
+          "This week the team moved the Second Brain MVP from raw diary capture toward a complete memory product. The strongest progress was grounded search with citations, Calendar-linked diary context, attachment ingestion, and a clearer readiness panel. The main demo risk is making sure indexing jobs are drained before rehearsal and Gemini quota does not block live answers.",
+      },
+      create: {
+        user_id: user.id,
+        summary_type: "weekly",
+        period_start: weekStart,
+        period_end: new Date(weekStart.getTime() + 7 * dayMs - 1),
+        content:
+          "This week the team moved the Second Brain MVP from raw diary capture toward a complete memory product. The strongest progress was grounded search with citations, Calendar-linked diary context, attachment ingestion, and a clearer readiness panel. The main demo risk is making sure indexing jobs are drained before rehearsal and Gemini quota does not block live answers.",
+      },
+    });
+
+    await enqueueIndexingJob(prisma, {
+      userId: user.id,
+      sourceType: "summary",
+      sourceId: weeklySummary.id,
+      payload: { sourceTitle: "Demo weekly summary" },
+    });
+
     console.log(
       JSON.stringify(
         {
           userId: user.id,
+          supabaseId,
+          email,
+          resolvedUserFrom: resolvedFrom,
           diaryEntries: diaries.length,
           calendarEvents: events.length,
-          summaries: 1,
-          indexingJobsQueued: diaries.length + events.length + 1,
+          attachments: attachments.length,
+          summaries: 2,
+          indexingJobsQueued: diaries.length + events.length + attachments.length + 2,
+          sampleQuestions,
         },
         null,
         2,

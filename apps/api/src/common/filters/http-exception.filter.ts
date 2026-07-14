@@ -15,7 +15,8 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const request = context.getRequest<Request>();
 
     const status = this.getStatus(exception);
-    const body = this.getBody(exception, status, request.path);
+    const requestId = (request as Request & { requestId?: string }).requestId;
+    const body = this.getBody(exception, status, request.path, requestId);
 
     response.status(status).json(body);
   }
@@ -28,7 +29,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     return HttpStatus.INTERNAL_SERVER_ERROR;
   }
 
-  private getBody(exception: unknown, status: number, path: string) {
+  private getBody(exception: unknown, status: number, path: string, requestId?: string) {
     if (exception instanceof HttpException) {
       const response = exception.getResponse();
       if (typeof response === 'string') {
@@ -37,6 +38,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
           message: response,
           error: exception.name,
           path,
+          requestId,
         };
       }
 
@@ -45,6 +47,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
           ...response,
           statusCode: Number((response as { statusCode?: number | string }).statusCode ?? status),
           path,
+          requestId,
         };
       }
     }
@@ -54,6 +57,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
       message: 'Internal server error',
       error: 'Internal Server Error',
       path,
+      requestId,
     };
   }
 }

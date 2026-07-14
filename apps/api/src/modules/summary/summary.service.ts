@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { PrismaService } from '../../prisma/prisma.service';
+import { invalidateUserSearchCache } from '../../common/cache/search-answer-cache';
 import type { CreateSummaryDto } from './dto/create-summary.dto';
 import type { SummaryType } from './dto/list-summaries-query.dto';
 
@@ -228,6 +229,7 @@ export class SummaryService {
       },
       data: { expires_at: new Date() },
     });
+    await invalidateUserSearchCache(userId);
   }
 
   private async buildSummaryContext(
@@ -377,7 +379,7 @@ export class SummaryService {
       throw new InternalServerErrorException('AI returned an empty summary.');
     }
 
-    return text;
+    return sanitizeSummaryContent(text);
   }
 
   private getGeminiClient(apiKey: string) {
@@ -407,7 +409,7 @@ export class SummaryService {
     return {
       id: summary.id,
       type: summary.summary_type,
-      content: summary.content,
+      content: sanitizeSummaryContent(summary.content),
       periodStart: summary.period_start?.toISOString?.() ?? summary.period_start,
       periodEnd: summary.period_end?.toISOString?.() ?? summary.period_end,
       createdAt: summary.created_at?.toISOString?.() ?? summary.created_at,
@@ -493,9 +495,18 @@ Rules:
 - Do not invent people, events, dates, emotions, or outcomes.
 - Prefer specific details over generic encouragement.
 - If evidence is thin, say so briefly.
-- Respond in clear English with short sections.
+- Respond in clear English with short plain-text sections.
+- Do not use Markdown emphasis. Never wrap headings, labels, or phrases in **.
 
 Context:
 ${context}
 `.trim();
+}
+
+function sanitizeSummaryContent(content: string) {
+  return content
+    .replace(/\*\*([\s\S]*?)\*\*/g, '$1')
+    .replace(/\*\*/g, '')
+    .replace(/[ \t]+\n/g, '\n')
+    .trim();
 }

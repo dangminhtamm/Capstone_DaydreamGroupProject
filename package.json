@@ -3,10 +3,13 @@
   "version": "1.0.0",
   "scripts": {
     "dev": "pnpm --recursive --parallel --if-present run dev",
-    "build": "pnpm --recursive --if-present run build",
+    "build": "pnpm --filter @second-brain/db build && pnpm --filter @second-brain/ai build && pnpm --filter @second-brain/api build:app && pnpm --filter @second-brain/worker build && pnpm --filter web build",
     "test": "pnpm --recursive --if-present run test",
     "audit": "pnpm audit --prod --audit-level moderate",
     "demo:seed": "node --env-file=.env --experimental-strip-types packages/db/scripts/seed-demo.ts",
+    "demo:drain": "pnpm --filter @second-brain/worker indexing:drain",
+    "demo:reset-indexing": "pnpm --filter @second-brain/worker indexing:reset-retries",
+    "demo:prepare": "pnpm demo:seed && pnpm demo:drain",
     "ci:memory-eval": "pnpm --filter @second-brain/ai eval:retrieval:ci && pnpm --filter @second-brain/ai eval:answer:ci"
   },
   "packageManager": "pnpm@10.33.0",

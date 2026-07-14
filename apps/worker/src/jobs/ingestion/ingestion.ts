@@ -39,6 +39,22 @@ type DrainResult = {
   succeeded: number;
   failed: number;
   resetStale: number;
+  metrics: WorkerMetricsSnapshot;
+};
+
+type JobDurationMetric = {
+  count: number;
+  last: number;
+  avg: number;
+  max: number;
+};
+
+type WorkerMetricsSnapshot = {
+  jobs_claimed_total: number;
+  jobs_succeeded_total: number;
+  jobs_failed_total: number;
+  jobs_dead_letter_total: number;
+  job_duration_ms: JobDurationMetric;
 };
 
 const ATTACHMENT_BUCKET = 'attachments-bucket';
@@ -46,6 +62,18 @@ const ATTACHMENT_BUCKET = 'attachments-bucket';
 export class DataIngestionJob {
   private static processing = false;
   private static listenerStarted = false;
+  private static metrics: WorkerMetricsSnapshot = {
+    jobs_claimed_total: 0,
+    jobs_succeeded_total: 0,
+    jobs_failed_total: 0,
+    jobs_dead_letter_total: 0,
+    job_duration_ms: {
+      count: 0,
+      last: 0,
+      avg: 0,
+      max: 0,
+    },
+  };
 
   private static getSupabaseClient() {
     const supabaseUrl = process.env.SUPABASE_URL;
@@ -103,19 +131,30 @@ Return only the extracted text or factual description.
       succeeded: 0,
       failed: 0,
       resetStale,
+      metrics: this.getMetrics(),
     };
+    this.metrics.jobs_claimed_total += jobs.length;
 
     for (const job of jobs) {
+      const jobStart = Date.now();
       try {
         await this.processJob(job);
         await this.markSucceeded(job.id);
         result.succeeded += 1;
+        this.metrics.jobs_succeeded_total += 1;
       } catch (error) {
         result.failed += 1;
-        await this.markFailed(job, error);
+        this.metrics.jobs_failed_total += 1;
+        const failedStatus = await this.markFailed(job, error);
+        if (failedStatus === 'dead_letter') {
+          this.metrics.jobs_dead_letter_total += 1;
+        }
+      } finally {
+        this.recordJobDuration(Date.now() - jobStart);
       }
     }
 
+    result.metrics = this.getMetrics();
     return result;
   }
 
@@ -422,15 +461,16 @@ Return only the extracted text or factual description.
     });
   }
 
-  private static async markFailed(job: IndexingJob, error: unknown) {
+  private static async markFailed(job: IndexingJob, error: unknown): Promise<'retry' | 'dead_letter'> {
     const message = this.toErrorMessage(error).slice(0, 4000);
     const nextRetryCount = job.retry_count + 1;
     const exhausted = nextRetryCount >= job.max_retries;
+    const nextStatus = exhausted ? 'dead_letter' : 'retry';
 
     await prisma.indexingOutbox.update({
       where: { id: job.id },
       data: {
-        status: exhausted ? 'dead_letter' : 'retry',
+        status: nextStatus,
         retry_count: nextRetryCount,
         error: message,
         run_after: exhausted ? job.run_after : this.nextRunAfter(nextRetryCount),
@@ -442,6 +482,8 @@ Return only the extracted text or factual description.
     console.error(
       `[Worker - Ingestion] Job ${job.id} (${job.source_type}/${job.source_id}) ${exhausted ? 'dead-lettered' : 'scheduled for retry'}: ${message}`,
     );
+
+    return nextStatus;
   }
 
   private static nextRunAfter(retryCount: number) {
@@ -454,6 +496,29 @@ Return only the extracted text or factual description.
   private static toErrorMessage(error: unknown) {
     if (error instanceof Error) return error.message;
     return String(error);
+  }
+
+  static getMetrics(): WorkerMetricsSnapshot {
+    return {
+      jobs_claimed_total: this.metrics.jobs_claimed_total,
+      jobs_succeeded_total: this.metrics.jobs_succeeded_total,
+      jobs_failed_total: this.metrics.jobs_failed_total,
+      jobs_dead_letter_total: this.metrics.jobs_dead_letter_total,
+      job_duration_ms: { ...this.metrics.job_duration_ms },
+    };
+  }
+
+  private static recordJobDuration(durationMs: number) {
+    const current = this.metrics.job_duration_ms;
+    const nextCount = current.count + 1;
+    const nextAvg = Math.round(((current.avg * current.count) + durationMs) / nextCount);
+
+    this.metrics.job_duration_ms = {
+      count: nextCount,
+      last: durationMs,
+      avg: nextAvg,
+      max: Math.max(current.max, durationMs),
+    };
   }
 
   static startCron() {

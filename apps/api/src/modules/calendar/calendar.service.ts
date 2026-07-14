@@ -9,6 +9,7 @@ import { createHmac, timingSafeEqual } from 'crypto';
 import { google, calendar_v3 } from 'googleapis';
 import { PrismaService } from '../../prisma/prisma.service';
 import { decryptOAuthToken, encryptOAuthToken } from './oauth-token-crypto';
+import { invalidateUserSearchCache } from '../../common/cache/search-answer-cache';
 
 type GoogleConnectInput = {
     supabaseId: string;
@@ -446,6 +447,7 @@ export class CalendarService {
             },
             data: { expires_at: new Date() },
         });
+        await invalidateUserSearchCache(userId);
     }
 
     private async linkCalendarEventsToDiaries(userId: string) {

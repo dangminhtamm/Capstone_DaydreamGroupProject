@@ -5,6 +5,10 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { auditLogMiddleware } from './common/middleware/audit-log.middleware';
+import { rateLimitMiddleware } from './common/middleware/rate-limit.middleware';
+import { requestIdMiddleware } from './common/middleware/request-id.middleware';
+import { securityHeadersMiddleware } from './common/middleware/security-headers.middleware';
 
 function getCorsOrigins() {
   const configuredOrigins = process.env.CORS_ORIGIN?.split(',')
@@ -23,6 +27,10 @@ async function bootstrap() {
   const logger = new Logger('Bootstrap');
 
   app.setGlobalPrefix('api');
+  app.use(requestIdMiddleware);
+  app.use(securityHeadersMiddleware);
+  app.use(auditLogMiddleware);
+  app.use(rateLimitMiddleware);
 
   app.enableCors({
     origin: getCorsOrigins(),
