@@ -1,26 +1,21 @@
 "use client";
 
-import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback, Suspense } from "react";
 import Image from "next/image";
 import { DashboardShell } from "@/components/dashboard-shell";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import {
-  getCalendarEvents,
-  getCalendarStatus,
   getDemoReadiness,
   getIndexingStatus,
-  getGoogleCalendarConnectUrl,
   getSystemHealth,
   requeueDeadLetterIndexingJobs,
   requeueIndexingJob,
-  syncGoogleCalendar,
-  type CalendarConnectionStatus,
-  type CalendarEventRecord,
   type DemoReadiness,
   type IndexingStatus,
   type SystemHealth,
 } from "@/lib/api-client";
+import { GoogleCalendarCard } from "@/components/integrations/google-calendar-card";
 
 type TokenStats = {
   today: number;
@@ -77,12 +72,6 @@ export default function SettingsPage() {
   const [isUpdatingName, setIsUpdatingName] = useState(false);
   const [nameUpdateResult, setNameUpdateResult] = useState<"success" | "error" | null>(null);
   const [responseLang, setResponseLang] = useState<"en" | "vi">("en");
-  const [calendarStatus, setCalendarStatus] = useState<CalendarConnectionStatus | null>(null);
-  const [isLoadingCalendar, setIsLoadingCalendar] = useState(false);
-  const [isConnectingCalendar, setIsConnectingCalendar] = useState(false);
-  const [isSyncingCalendar, setIsSyncingCalendar] = useState(false);
-  const [calendarMsg, setCalendarMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
-  const [calendarEvents, setCalendarEvents] = useState<CalendarEventRecord[]>([]);
   const [systemHealth, setSystemHealth] = useState<SystemHealth | null>(null);
   const [indexingStatus, setIndexingStatus] = useState<IndexingStatus | null>(null);
   const [demoReadiness, setDemoReadiness] = useState<DemoReadiness | null>(null);
@@ -121,30 +110,6 @@ export default function SettingsPage() {
   useEffect(() => {
     setDisplayNameEdit(displayName);
   }, [displayName]);
-
-  const refreshCalendarStatus = useCallback(async () => {
-    if (!isAuthenticated) return;
-
-    setIsLoadingCalendar(true);
-    try {
-      const token = getAccessToken();
-      const status = await getCalendarStatus(token);
-      const events = await getCalendarEvents(token);
-      setCalendarStatus(status);
-      setCalendarEvents(events);
-    } catch (error) {
-      setCalendarMsg({
-        type: "error",
-        text: error instanceof Error ? error.message : "Could not load Calendar status.",
-      });
-    } finally {
-      setIsLoadingCalendar(false);
-    }
-  }, [getAccessToken, isAuthenticated]);
-
-  useEffect(() => {
-    void refreshCalendarStatus();
-  }, [refreshCalendarStatus]);
 
   const refreshSystemStatus = useCallback(async () => {
     setIsLoadingSystemStatus(true);
@@ -210,30 +175,6 @@ export default function SettingsPage() {
       setIsRequeueingIndexing(false);
     }
   }, [getAccessToken, refreshSystemStatus]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    const params = new URLSearchParams(window.location.search);
-    const calendarResult = params.get("calendar");
-    if (!calendarResult) return;
-
-    if (calendarResult === "connected") {
-      setCalendarMsg({ type: "success", text: "Google Calendar connected." });
-      void refreshCalendarStatus();
-    } else {
-      const reason = params.get("reason");
-      setCalendarMsg({
-        type: "error",
-        text: reason ? `Google Calendar connection failed: ${reason}` : "Google Calendar connection failed.",
-      });
-    }
-
-    params.delete("calendar");
-    params.delete("reason");
-    const nextUrl = `${window.location.pathname}${params.toString() ? `?${params}` : ""}`;
-    window.history.replaceState({}, "", nextUrl);
-  }, [refreshCalendarStatus]);
 
   const handleUpdateDisplayName = async () => {
     if (!supabase || !displayNameEdit.trim()) return;
@@ -346,46 +287,7 @@ export default function SettingsPage() {
     setTokenStats({ today: 0, week: 0, month: 0, queriesToday: 0 });
   };
 
-  const handleConnectCalendar = async () => {
-    setIsConnectingCalendar(true);
-    setCalendarMsg(null);
-    try {
-      const url = await getGoogleCalendarConnectUrl(getAccessToken());
-      window.location.href = url;
-    } catch (error) {
-      setCalendarMsg({
-        type: "error",
-        text: error instanceof Error ? error.message : "Could not start Google Calendar connection.",
-      });
-      setIsConnectingCalendar(false);
-    }
-  };
-
-  const handleSyncCalendar = async (limit?: number) => {
-    setIsSyncingCalendar(true);
-    setCalendarMsg(null);
-    try {
-      const result = await syncGoogleCalendar(getAccessToken(), limit);
-      setCalendarMsg({
-        type: "success",
-        text: `Calendar synced: ${result.syncedCount} events, ${result.queuedIndexingJobs ?? 0} indexing jobs queued, ${result.linkedDiaryCount ?? 0} diaries linked to ${result.linkedEventCount ?? 0} events.`,
-      });
-      await refreshCalendarStatus();
-      await refreshSystemStatus();
-    } catch (error) {
-      setCalendarMsg({
-        type: "error",
-        text: error instanceof Error ? error.message : "Could not sync Google Calendar.",
-      });
-    } finally {
-      setIsSyncingCalendar(false);
-    }
-  };
-
   const hasNameChanged = useMemo(() => displayNameEdit.trim() !== displayName, [displayNameEdit, displayName]);
-  const calendarLastSynced = calendarStatus?.lastSyncedAt
-    ? new Date(calendarStatus.lastSyncedAt).toLocaleString()
-    : "Not synced yet";
   const outboxCounts = systemHealth?.indexingOutbox.counts ?? {};
   const userIndexingCounts = indexingStatus?.counts ?? {};
   const environmentChecks: Array<[string, boolean | undefined]> = [
@@ -443,16 +345,6 @@ export default function SettingsPage() {
 
     return "bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300";
   };
-  const formatCalendarEventTime = (event: CalendarEventRecord) => {
-    const start = new Date(event.startTime);
-    const end = new Date(event.endTime);
-
-    return `${start.toLocaleString()} - ${end.toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-    })}`;
-  };
-
   return (
     <DashboardShell
       title="Settings"
@@ -643,132 +535,9 @@ export default function SettingsPage() {
           )}
         </section>
 
-        {/* ─── Integrations ─── */}
-        <section className="rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white via-white to-sky-50/30 p-6 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:from-slate-800 dark:via-slate-800 dark:to-sky-950/20 dark:shadow-slate-900/40">
-          <div className="mb-5">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-600 dark:text-sky-400">Integrations</p>
-            <h3 className="mt-2 text-2xl font-bold tracking-tight text-slate-950 dark:text-slate-100">Google Calendar</h3>
-          </div>
-
-          {isAuthenticated ? (
-            <div className="space-y-4">
-              <div className="grid gap-3 sm:grid-cols-3">
-                <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800/60">
-                  <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Connection</p>
-                  <p className={`mt-1 text-lg font-bold ${calendarStatus?.connected ? "text-emerald-600 dark:text-emerald-400" : "text-slate-900 dark:text-slate-100"}`}>
-                    {isLoadingCalendar ? "Checking..." : calendarStatus?.connected ? "Connected" : "Not connected"}
-                  </p>
-                </div>
-                <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800/60">
-                  <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Events in DB</p>
-                  <p className="mt-1 text-lg font-bold text-slate-900 dark:text-slate-100">
-                    {calendarStatus?.eventCount ?? 0}
-                  </p>
-                </div>
-                <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800/60">
-                  <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Last Sync</p>
-                  <p className="mt-1 truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
-                    {calendarLastSynced}
-                  </p>
-                </div>
-              </div>
-
-              {calendarMsg && (
-                <p className={`text-sm font-medium ${calendarMsg.type === "success" ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
-                  {calendarMsg.text}
-                </p>
-              )}
-
-              <div className="flex flex-wrap gap-3">
-                <button
-                  type="button"
-                  onClick={handleConnectCalendar}
-                  disabled={isConnectingCalendar}
-                  className="cursor-pointer rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {isConnectingCalendar ? "Connecting..." : calendarStatus?.connected ? "Reconnect Calendar" : "Connect Calendar"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void handleSyncCalendar()}
-                  disabled={!calendarStatus?.connected || isSyncingCalendar}
-                  className="cursor-pointer rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600"
-                >
-                  {isSyncingCalendar ? "Syncing..." : "Sync Now"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void handleSyncCalendar(3)}
-                  disabled={!calendarStatus?.connected || isSyncingCalendar}
-                  className="cursor-pointer rounded-xl border border-sky-200 bg-sky-50 px-4 py-2.5 text-sm font-semibold text-sky-700 transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-200 dark:hover:bg-sky-900/50"
-                >
-                  {isSyncingCalendar ? "Syncing..." : "Sync Demo (3)"}
-                </button>
-              </div>
-
-              <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800/60">
-                <div className="mb-3 flex items-center justify-between gap-3">
-                  <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">Synced Events</p>
-                  <button
-                    type="button"
-                    onClick={() => void refreshCalendarStatus()}
-                    disabled={isLoadingCalendar}
-                    className="cursor-pointer text-xs font-semibold text-sky-600 transition hover:text-sky-700 disabled:cursor-not-allowed disabled:opacity-50 dark:text-sky-400 dark:hover:text-sky-300"
-                  >
-                    {isLoadingCalendar ? "Refreshing..." : "Refresh"}
-                  </button>
-                </div>
-
-                {calendarEvents.length > 0 ? (
-                  <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
-                    {calendarEvents.map((event) => (
-                      <div
-                        key={event.id}
-                        className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5 dark:border-slate-700 dark:bg-slate-900/40"
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
-                              {event.title}
-                            </p>
-                            <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-                              {formatCalendarEventTime(event)}
-                            </p>
-                          </div>
-                          {event.htmlLink && (
-                            <a
-                              href={event.htmlLink}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="shrink-0 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
-                            >
-                              Open
-                            </a>
-                          )}
-                        </div>
-                        {event.description && (
-                          <p className="mt-2 line-clamp-2 text-xs leading-5 text-slate-600 dark:text-slate-400">
-                            {event.description}
-                          </p>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="rounded-xl border border-dashed border-slate-200 px-4 py-6 text-center dark:border-slate-700">
-                    <p className="text-sm font-medium text-slate-600 dark:text-slate-300">
-                      {calendarStatus?.connected ? "No synced events yet." : "Connect Calendar to load events."}
-                    </p>
-                  </div>
-                )}
-              </div>
-            </div>
-          ) : (
-            <div className="rounded-2xl border border-dashed border-slate-300 p-6 text-center dark:border-slate-600">
-              <p className="text-sm font-medium text-slate-900 dark:text-slate-200">Sign in to connect Google Calendar.</p>
-            </div>
-          )}
-        </section>
+        <Suspense fallback={null}>
+          <GoogleCalendarCard />
+        </Suspense>
 
         {/* ─── System Health ─── */}
         <section className="rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white via-white to-cyan-50/30 p-6 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:from-slate-800 dark:via-slate-800 dark:to-cyan-950/20 dark:shadow-slate-900/40">

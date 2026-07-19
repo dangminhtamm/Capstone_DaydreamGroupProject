@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --experimental-strip-types --test src/**/*.test.ts"
+    "test": "node --import tsx --test src/lib/api-client.test.ts src/lib/auth-flow.test.ts src/features/google-calendar/google-calendar-api.test.ts src/features/google-calendar/google-calendar-utils.test.ts"
   },
   "dependencies": {
     "@second-brain/shared": "workspace:*",
@@ -24,6 +24,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.4",
     "tailwindcss": "^4",
+    "tsx": "^4.23.1",
     "typescript": "^5"
   }
 }
