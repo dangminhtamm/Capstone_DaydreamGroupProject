@@ -1,7 +1,7 @@
 import { prisma } from '../../lib/prisma';
 import { google, calendar_v3 } from 'googleapis';
 import * as cron from 'node-cron';
-import { decryptOAuthToken, encryptOAuthToken } from '../../lib/oauth-token-crypto';
+import { encryptOAuthToken, decryptOAuthToken } from '@second-brain/shared';
 
 export class SyncCalendarJob {
   private static getApiBaseUrl() {
