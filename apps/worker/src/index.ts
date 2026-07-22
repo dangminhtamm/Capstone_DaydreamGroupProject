@@ -9,7 +9,8 @@ import {
     YearlySummaryPipelineJob,
     SyncCalendarJob,
     SemanticLinkingJob,
-    DataIngestionJob
+    DataIngestionJob,
+    CalendarIndexWorker
 } from './jobs';
 
 console.log('===================================================');
@@ -27,6 +28,9 @@ try {
     // Universal Data Ingestion
     DataIngestionJob.startCron();
     DataIngestionJob.startRealtimeListener();
+
+    // AI Data Indexing Pipeline
+    CalendarIndexWorker.startCron();
 
     // Data Summarization Pipeline
     SummaryPipelineJob.startCron();

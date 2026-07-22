@@ -9,3 +9,4 @@ export {
 export { SyncCalendarJob } from './sync-calendar/sync-calendar';
 export { SemanticLinkingJob } from './linking/linking';
 export { DataIngestionJob } from './ingestion/ingestion';
+export { CalendarIndexWorker } from './calendar-index/calendar-index'
