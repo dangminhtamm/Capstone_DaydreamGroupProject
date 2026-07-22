@@ -9,6 +9,12 @@ import {
   createDefaultEmbeddingProvider,
   type AdvancedEmbeddingProvider,
 } from "./embedding.ts";
+import {
+  coerceDate,
+  normalizeWhitespace,
+  splitTextByBoundary,
+  withEmbeddings,
+} from "./indexing-utils.ts";
 import type { PersistedMemoryChunkPayload } from "./memory-indexer.ts";
 import type { MemoryChunkMetadata } from "./types.ts";
 
@@ -41,12 +47,10 @@ export interface IndexMemoryFromAttachmentResult {
   }>;
 }
 
-const MAX_ATTACHMENT_CHUNK_CHARS = 1200;
-
 export async function indexMemoryFromAttachment(
   input: IndexMemoryFromAttachmentInput,
 ): Promise<IndexMemoryFromAttachmentResult> {
-  const normalizedText = input.extractedText.replace(/\s+/g, " ").trim();
+  const normalizedText = normalizeWhitespace(input.extractedText);
 
   if (!normalizedText) {
     return {
@@ -57,13 +61,12 @@ export async function indexMemoryFromAttachment(
     };
   }
 
-  const occurredAt = normalizeDate(input.occurredAt);
-  const textChunks = splitAttachmentText(normalizedText);
+  const occurredAt = coerceDate(input.occurredAt);
+  const textChunks = splitTextByBoundary(normalizedText);
   const embeddingProvider =
     input.embeddingProvider ?? createDefaultEmbeddingProvider();
-  const persistedChunks: PersistedMemoryChunkPayload[] = [];
 
-  for (const [index, text] of textChunks.entries()) {
+  const chunkPayloads = textChunks.map((text, index) => {
     const metadata: MemoryChunkMetadata = {
       date: occurredAt.toISOString(),
       sourceType: "attachment",
@@ -82,7 +85,7 @@ export async function indexMemoryFromAttachment(
       importance: 3,
     };
 
-    persistedChunks.push({
+    return {
       userId: input.userId,
       sourceType: "attachment",
       sourceId: input.attachmentId,
@@ -92,9 +95,12 @@ export async function indexMemoryFromAttachment(
       evidence: text.slice(0, 500),
       metadata,
       occurredAt,
-      embedding: await embeddingProvider.embedDocument(text),
-    });
-  }
+    } satisfies Omit<PersistedMemoryChunkPayload, "embedding">;
+  });
+  const persistedChunks: PersistedMemoryChunkPayload[] = await withEmbeddings(
+    chunkPayloads,
+    embeddingProvider,
+  );
 
   await (input.insertChunks ?? insertMemoryChunks)(persistedChunks);
 
@@ -113,47 +119,4 @@ export async function indexMemoryFromAttachment(
       embeddingDimension: chunk.embedding.length,
     })),
   };
-}
-
-function splitAttachmentText(text: string): string[] {
-  const chunks: string[] = [];
-  let remaining = text.trim();
-
-  while (remaining.length > MAX_ATTACHMENT_CHUNK_CHARS) {
-    const splitAt = findSplitPoint(remaining);
-    chunks.push(remaining.slice(0, splitAt).trim());
-    remaining = remaining.slice(splitAt).trim();
-  }
-
-  if (remaining) chunks.push(remaining);
-  return chunks;
-}
-
-function findSplitPoint(text: string): number {
-  const window = text.slice(0, MAX_ATTACHMENT_CHUNK_CHARS);
-  const sentenceBreak = Math.max(
-    window.lastIndexOf(". "),
-    window.lastIndexOf("! "),
-    window.lastIndexOf("? "),
-  );
-
-  if (sentenceBreak >= MAX_ATTACHMENT_CHUNK_CHARS * 0.55) {
-    return sentenceBreak + 1;
-  }
-
-  const wordBreak = window.lastIndexOf(" ");
-  return wordBreak >= MAX_ATTACHMENT_CHUNK_CHARS * 0.55
-    ? wordBreak
-    : MAX_ATTACHMENT_CHUNK_CHARS;
-}
-
-function normalizeDate(value: Date | string | null | undefined): Date {
-  if (value instanceof Date && Number.isFinite(value.getTime())) return value;
-
-  if (typeof value === "string") {
-    const parsed = new Date(value);
-    if (Number.isFinite(parsed.getTime())) return parsed;
-  }
-
-  return new Date();
 }

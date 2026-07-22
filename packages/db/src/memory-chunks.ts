@@ -1,5 +1,5 @@
 import { prisma } from './client';
-import { toVectorLiteral } from '../index';
+import { toVectorLiteral } from './vector';
 
 export interface InsertChunkPayload {
   userId: string;

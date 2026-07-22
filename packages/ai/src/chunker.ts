@@ -1,6 +1,7 @@
 import { SchemaType, type ResponseSchema } from "@google/generative-ai";
 import { z } from "zod";
 import { generateGeminiJson } from "./gemini-json.ts";
+import { getGeminiChunkModel } from "./gemini-models.ts";
 import type { MemoryChunkMetadata } from "./types.ts";
 
 const SemanticChunkSchema = z.object({
@@ -126,7 +127,7 @@ ${rawText}
 `.trim();
 
   const output = await generateGeminiJson({
-    model: process.env.GEMINI_CHUNK_MODEL ?? "gemini-2.5-flash",
+    model: getGeminiChunkModel(),
     prompt,
     responseSchema: GeminiSemanticChunkResponseSchema,
     validator: SemanticChunkSchema,

@@ -3,6 +3,10 @@
     "target": "ES2022",
     "module": "CommonJS",
     "moduleResolution": "node",
+    "baseUrl": ".",
+    "paths": {
+      "@second-brain/ai": ["../../packages/ai/dist/index"]
+    },
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,

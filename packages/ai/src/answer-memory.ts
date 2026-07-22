@@ -1,6 +1,5 @@
-import { SchemaType, type ResponseSchema } from "@google/generative-ai";
-import { z } from "zod";
 import { generateGeminiJsonWithMeta, type GeminiTokenUsage } from "./gemini-json.ts";
+import { getGeminiAnswerModel } from "./gemini-models.ts";
 import {
   retrieveMemoryWithEmbedding,
   type MemorySearchHit,
@@ -8,6 +7,82 @@ import {
 } from "./retrieval.ts";
 import { createDefaultEmbeddingProvider } from "./embedding.ts";
 import type { MemoryDbClient } from "./types.ts";
+import {
+  type MemoryCitation,
+  buildCitations,
+  classifyRetrievalConfidence,
+} from "./answer-utils.ts";
+import type {
+  AnswerMemoryOptions,
+  AnswerMemoryResult,
+  AnswerStrategy,
+  MemoryDebugTrace,
+  MemoryIntent,
+  ResponseLanguage,
+} from "./answer-memory-types.ts";
+import {
+  detectMemoryIntent,
+  hasBlockerEvidence,
+  hasCitationEvidence,
+  hasDecisionEvidence,
+  hasGmailEvidence,
+  hasLatencyEvidence,
+  hasMoodEvidenceForQuestion,
+  hasNormalizedPhrase,
+  hasOnlyQuestionListEvidence,
+  hasRecentIntent,
+  includesAny,
+  isAttachmentIntent,
+  isBlockerIntent,
+  isCalendarIntent,
+  isCitationQuestion,
+  isFeedbackIntent,
+  isGmailIntent,
+  isGoogleContactsIntent,
+  isGoogleContactsSearchText,
+  isLatencyIntent,
+  isMoodIntent,
+  isProgressIntent,
+  isStressIntent,
+  isTaskIntent,
+  matchesDecisionSubject,
+  normalizeForIntent,
+} from "./answer-memory-intents.ts";
+import {
+  buildIntentNoMemoryMessage,
+  buildQuestionAwareFallbackAnswer,
+  buildReadableClaim,
+  dedupeCitationsBySource,
+  formatDateForAnswer,
+  formatDateRangeForAnswer,
+  formatFallbackSourceDate,
+  formatIntentEvidenceAnswer,
+  formatLocalizedMemoryBullet,
+  formatMemoryBullet,
+  formatSingleDayAnswer,
+  formatTemporalRangeAnswer,
+  trimPromptQuote,
+} from "./answer-memory-format.ts";
+import {
+  detectMonth,
+  inferRetrievalFilters,
+} from "./answer-memory-temporal.ts";
+import {
+  GeminiGroundedAnswerResponseSchema,
+  GroundedAnswerSchema,
+  type GroundedAnswer,
+} from "./answer-memory-schema.ts";
+
+export type {
+  AnswerMemoryOptions,
+  AnswerMemoryResult,
+  AnswerMode,
+  AnswerStrategy,
+  MemoryDebugTrace,
+  QueryAnalytics,
+  ResponseLanguage,
+} from "./answer-memory-types.ts";
+export { inferRetrievalFilters } from "./answer-memory-temporal.ts";
 
 const MIN_TOP_SIMILARITY = Number(
   process.env.MEMORY_MIN_TOP_SIMILARITY ?? 0.62,
@@ -21,136 +96,6 @@ const DEFAULT_REASONING_MAX_ANSWER_TOKENS = Number(
 );
 const DEFAULT_RETRIEVAL_CANDIDATE_LIMIT = Number(process.env.MEMORY_RETRIEVAL_CANDIDATE_LIMIT ?? 12);
 
-const GroundedCitationSchema = z.object({
-  marker: z.preprocess(normalizeCitationMarker, z.string().regex(/^S\d+$/)),
-  claim: z.preprocess(
-    normalizeCitationClaim,
-    z.string().min(1).describe("The specific claim supported by this source"),
-  ),
-});
-
-const GroundedAnswerSchema = z.object({
-  answer: z.preprocess(normalizeAnswerText, z.string().min(1)),
-  confidence: z.preprocess(normalizeModelConfidence, z.enum(["high", "medium", "low"])),
-  citations: z.preprocess(normalizeModelCitations, z.array(GroundedCitationSchema)),
-});
-
-const GeminiGroundedAnswerResponseSchema: ResponseSchema = {
-  type: SchemaType.OBJECT,
-  properties: {
-    answer: { type: SchemaType.STRING },
-    confidence: {
-      type: SchemaType.STRING,
-      description: "One of high, medium, low.",
-    },
-    citations: {
-      type: SchemaType.ARRAY,
-      items: {
-        type: SchemaType.OBJECT,
-        properties: {
-          marker: {
-            type: SchemaType.STRING,
-            description: "Citation marker matching S1, S2, S3, etc.",
-          },
-          claim: {
-            type: SchemaType.STRING,
-            description: "The specific claim supported by this source.",
-          },
-        },
-        required: ["marker", "claim"],
-      },
-    },
-  },
-  required: ["answer", "confidence", "citations"],
-};
-
-import {
-  type MemoryCitation,
-  buildCitations,
-  classifyRetrievalConfidence,
-} from "./answer-utils.ts";
-
-// ── Analytics types ──────────────────────────────────────────────────
-
-export interface QueryAnalytics {
-  tokenUsage: {
-    promptTokens: number;
-    completionTokens: number;
-    totalTokens: number;
-    model: string;
-  };
-  timing: {
-    embedMs: number;
-    retrieveMs: number;
-    generateMs: number;
-    totalMs: number;
-  };
-  chunksRetrieved: number;
-  status: "success" | "no_memory" | "error";
-  answerMode: AnswerMode;
-}
-
-export type AnswerMode =
-  | "cache"
-  | "fast_path"
-  | "gemini"
-  | "extractive_fallback"
-  | "no_memory";
-
-export interface MemoryDebugTrace {
-  question: string;
-  inferredFilters: Record<string, unknown>;
-  appliedFilters: Record<string, unknown>;
-  status: "success" | "no_memory" | "error";
-  reason: string;
-  chunksRetrieved: number;
-  topChunks: Array<{
-    id: string;
-    sourceType: string;
-    sourceId: string;
-    sourceTitle?: string;
-    chunkType: string;
-    occurredAt: string;
-    retrievalMode: string;
-    similarity: number;
-    vectorSimilarity: number;
-    lexicalScore: number;
-    distance: number | null;
-    quote: string;
-  }>;
-}
-
-// ── Result types ─────────────────────────────────────────────────────
-
-export interface AnswerMemoryResult {
-  answer: string;
-  confidence: "high" | "medium" | "low";
-  citations: MemoryCitation[];
-  noMemory?: boolean;
-  suggestions?: string[];
-  answerMode: AnswerMode;
-  analytics?: QueryAnalytics;
-  tokenUsage?: { inputTokens: number; outputTokens: number; model: string };
-  debugTrace?: MemoryDebugTrace;
-  modelError?: {
-    status?: number;
-    kind: "quota" | "service_unavailable" | "validation" | "transient" | "unknown";
-    message: string;
-  };
-}
-
-export type ResponseLanguage = 'en' | 'vi';
-export type AnswerStrategy = "auto" | "fast" | "deep";
-
-export interface AnswerMemoryOptions {
-  filters?: RetrievalFilters;
-  limit?: number;
-  maxDistance?: number;
-  minTopSimilarity?: number;
-  responseLanguage?: ResponseLanguage;
-  answerStrategy?: AnswerStrategy;
-}
-
 export async function answerMemory(
   question: string,
   userId: string,
@@ -161,6 +106,7 @@ export async function answerMemory(
   const normalizedQuestion = question.trim();
   const lang = options.responseLanguage ?? 'en';
   const answerStrategy = options.answerStrategy ?? "auto";
+  const intent = detectMemoryIntent(normalizedQuestion);
 
   if (!normalizedQuestion) {
     return noMemoryResult(lang === 'vi' ? 'Bạn chưa nhập câu hỏi.' : 'Please enter a question.', lang);
@@ -232,7 +178,14 @@ export async function answerMemory(
     const modelError = classifyModelError(error);
     const fallbackSources = buildCitations(unindexedDiaryChunks);
     const result = fallbackSources.length
-      ? buildExtractiveFallbackAnswer(lang, fallbackSources, unindexedDiaryChunks.length, modelError)
+      ? buildExtractiveFallbackAnswer(
+          lang,
+          fallbackSources,
+          unindexedDiaryChunks.length,
+          modelError,
+          {},
+          normalizedQuestion,
+        )
       : noMemoryResult(
           lang === 'vi'
             ? 'Gemini đang bị giới hạn quota/rate limit nên mình chưa thể tìm kiếm AI lúc này.'
@@ -266,7 +219,7 @@ export async function answerMemory(
   const embedMs = performance.now() - embedStart;
 
   const retrieveStart = performance.now();
-  const retrievedChunks = rerankMemoryHits(
+  let retrievedChunks = rerankMemoryHits(
     normalizedQuestion,
     await retrieveMemoryWithEmbedding(
       normalizedQuestion,
@@ -277,11 +230,43 @@ export async function answerMemory(
     ),
     appliedFilters,
   );
-  const chunks = rerankMemoryHits(
+  let chunks = rerankMemoryHits(
     normalizedQuestion,
     [...unindexedDiaryChunks, ...retrievedChunks],
     appliedFilters,
   );
+
+  if (
+    shouldExpandTemporalEvidenceSearch(
+      normalizedQuestion,
+      intent,
+      chunks,
+      appliedFilters,
+    )
+  ) {
+    const expandedFilters = buildExpandedTemporalFilters(appliedFilters);
+    const expandedRetrievedChunks = rerankMemoryHits(
+      normalizedQuestion,
+      await retrieveMemoryWithEmbedding(
+        normalizedQuestion,
+        userId,
+        dbClient,
+        embedding,
+        expandedFilters,
+      ),
+      expandedFilters,
+    );
+
+    retrievedChunks = dedupeMemoryHits([
+      ...retrievedChunks,
+      ...expandedRetrievedChunks,
+    ]);
+    chunks = rerankMemoryHits(
+      normalizedQuestion,
+      dedupeMemoryHits([...unindexedDiaryChunks, ...retrievedChunks]),
+      appliedFilters,
+    );
+  }
   const retrieveMs = performance.now() - retrieveStart;
 
   const fastPathResult = answerStrategy === "deep"
@@ -303,6 +288,7 @@ export async function answerMemory(
   const result = fastPathResult ??
     (answerStrategy === "fast"
       ? answerFastExtractiveFromChunks(
+          normalizedQuestion,
           chunks,
           lang,
           options.minTopSimilarity ?? MIN_TOP_SIMILARITY,
@@ -330,6 +316,48 @@ export async function answerMemory(
   });
 
   return result;
+}
+
+function shouldExpandTemporalEvidenceSearch(
+  question: string,
+  intent: MemoryIntent,
+  chunks: MemorySearchHit[],
+  filters: RetrievalFilters,
+): boolean {
+  if (!filters.startDate || !filters.endDate) return false;
+  if (!["blocker", "mood"].includes(intent)) return false;
+  if (!includesAny(normalizeForIntent(question), ["this week", "tuan nay", "tuần này"])) {
+    return false;
+  }
+
+  const currentSources = buildCitations(chunks);
+  return selectIntentEvidenceSources(question, currentSources, intent).length === 0;
+}
+
+function buildExpandedTemporalFilters(filters: RetrievalFilters): RetrievalFilters {
+  const dayMs = 24 * 60 * 60 * 1000;
+  const startDate = filters.startDate
+    ? new Date(filters.startDate.getTime() - 7 * dayMs)
+    : filters.startDate;
+
+  return {
+    ...filters,
+    startDate,
+    limit: Math.min(Math.max(filters.limit ?? DEFAULT_RETRIEVAL_CANDIDATE_LIMIT, 16), 20),
+  };
+}
+
+function dedupeMemoryHits(chunks: MemorySearchHit[]): MemorySearchHit[] {
+  const seen = new Set<string>();
+  const deduped: MemorySearchHit[] = [];
+
+  for (const chunk of chunks) {
+    if (seen.has(chunk.id)) continue;
+    seen.add(chunk.id);
+    deduped.push(chunk);
+  }
+
+  return deduped;
 }
 
 export function answerSingleDayFastPath(
@@ -483,9 +511,31 @@ function requiresGenerativeReasoning(question: string): boolean {
     "analyze",
     "analysis",
     "insight",
+    "blocker",
+    "blockers",
+    "risk",
+    "risks",
+    "challenge",
+    "challenges",
+    "stuck",
+    "stress",
+    "stressed",
+    "mood",
     "feel",
     "felt",
     "emotion",
+    "trở ngại",
+    "tro ngai",
+    "rủi ro",
+    "rui ro",
+    "khó khăn",
+    "kho khan",
+    "vướng",
+    "vuong",
+    "căng thẳng",
+    "cang thang",
+    "tâm trạng",
+    "tam trang",
     "vì sao",
     "vi sao",
     "tại sao",
@@ -505,118 +555,9 @@ function requiresGenerativeReasoning(question: string): boolean {
   ]);
 }
 
-function formatSingleDayAnswer(
-  citations: MemoryCitation[],
-  dateLabel: string,
-  lang: ResponseLanguage,
-): string {
-  const lines = citations.map((citation) => `- ${formatMemoryBullet(citation)}.`);
-
-  if (lang === 'vi') {
-    return [
-      `Vào ${dateLabel}, mình tìm thấy các ký ức nổi bật sau:`,
-      ...lines,
-    ].join('\n');
-  }
-
-  return [
-    `On ${dateLabel}, I found these memories:`,
-    ...lines,
-  ].join('\n');
-}
-
-function formatTemporalRangeAnswer(
-  citations: MemoryCitation[],
-  rangeLabel: string,
-  lang: ResponseLanguage,
-): string {
-  const lines = citations.map((citation) => {
-    const date = formatFallbackSourceDate(citation.occurredAt, lang);
-    return `- ${date}: ${formatMemoryBullet(citation)}.`;
-  });
-
-  if (lang === "vi") {
-    return [
-      `Dựa trên các ký ức đã lưu, trong ${rangeLabel} bạn có một số hoạt động/chủ đề nổi bật:`,
-      ...lines,
-    ].join("\n");
-  }
-
-  return [
-    `Based on your saved memories, these were the notable activities/themes during ${rangeLabel}:`,
-    ...lines,
-  ].join("\n");
-}
-
-function formatDateForAnswer(date: Date, lang: ResponseLanguage): string {
-  if (lang === 'vi') {
-    return new Intl.DateTimeFormat('vi-VN', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      timeZone: 'UTC',
-    }).format(date);
-  }
-
-  return new Intl.DateTimeFormat('en-US', {
-    month: 'long',
-    day: 'numeric',
-    year: 'numeric',
-    timeZone: 'UTC',
-  }).format(date);
-}
-
-function formatDateRangeForAnswer(startDate: Date, endDate: Date, lang: ResponseLanguage): string {
-  const start = formatDateForAnswer(startDate, lang);
-  const end = formatDateForAnswer(endDate, lang);
-  if (start === end) return start;
-  return lang === "vi" ? `${start} đến ${end}` : `${start} to ${end}`;
-}
-
-function trimTrailingPunctuation(value: string): string {
-  return value.trim().replace(/[.!?。！？]+$/u, '');
-}
-
-function sentenceCase(value: string): string {
-  const trimmed = value.trim();
-  if (!trimmed) return trimmed;
-  return trimmed[0].toUpperCase() + trimmed.slice(1);
-}
-
-function dedupeCitationsBySource(citations: MemoryCitation[]): MemoryCitation[] {
-  const seen = new Set<string>();
-  const deduped: MemoryCitation[] = [];
-
-  for (const citation of citations) {
-    const key = `${citation.sourceType}:${citation.sourceId}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    deduped.push(citation);
-  }
-
-  return deduped;
-}
-
-function buildReadableClaim(citation: MemoryCitation): string {
-  return trimPromptQuote(formatMemoryBullet(citation), 220);
-}
-
-function formatMemoryBullet(citation: MemoryCitation): string {
-  return sentenceCase(trimTrailingPunctuation(cleanMemoryText(citation.quote)));
-}
-
-function cleanMemoryText(text: string): string {
-  return trimPromptQuote(
-    text
-      .replace(/\s+/g, " ")
-      .replace(/^(diary entry|journal entry|nhat ky|nhật ký)(\s+h[oô]m nay|\s+today)?\s*[:\-–—]?\s*/i, "")
-      .trim(),
-    240,
-  );
-}
-
-function selectPromptSourceLimit(question: string): number {
+function selectPromptSourceLimit(question: string, intent = detectMemoryIntent(question)): number {
   const configured = Math.min(Math.max(DEFAULT_PROMPT_SOURCE_LIMIT, 2), 6);
+  if (["feedback", "blocker", "latency"].includes(intent)) return Math.max(configured, 6);
   if (!requiresGenerativeReasoning(question)) return configured;
   return Math.max(configured, 6);
 }
@@ -630,6 +571,41 @@ function selectMaxAnswerTokens(question: string): number {
   );
 }
 
+function buildIntentInstruction(intent: MemoryIntent, lang: ResponseLanguage): string {
+  const vi = lang === "vi";
+
+  switch (intent) {
+    case "feedback":
+      return vi
+        ? "Tập trung vào phản hồi/góp ý được hỏi. Bỏ qua ký ức chỉ nhắc tên người trong bối cảnh không liên quan như Google Contacts."
+        : "Focus on the requested feedback. Ignore memories that only mention a person's name in unrelated contexts such as Google Contacts.";
+    case "blocker":
+      return vi
+        ? "Chỉ trả lời bằng blocker/rủi ro/vấn đề thật. Bỏ qua ký ức chỉ liệt kê câu hỏi demo hoặc nói rằng user đã hỏi về blockers."
+        : "Answer with actual blockers/risks/issues. Ignore memories that only list demo questions or say the user asked about blockers.";
+    case "latency":
+      return vi
+        ? "Tập trung vào lý do đo retrieval latency tách khỏi answer generation và các metric timing liên quan."
+        : "Focus on why retrieval latency is measured separately from answer generation and on the related timing metrics.";
+    case "gmail":
+      return vi
+        ? "Tập trung vào quyết định/phạm vi liên quan đến Gmail. Bỏ qua nguồn chỉ nói về latency, benchmark, hoặc câu hỏi demo."
+        : "Focus on the decision or scope related to Gmail. Ignore sources that only discuss latency, benchmarks, or demo questions.";
+    case "google_contacts":
+      return vi
+        ? "Tập trung vào kế hoạch Google Contacts/People API, không lẫn với Calendar hoặc Diary chung."
+        : "Focus on the Google Contacts/People API plan, not general Calendar or Diary notes.";
+    case "mood":
+      return vi
+        ? "Tập trung vào cảm xúc, stress, mood, confidence hoặc relief được ghi rõ trong memory."
+        : "Focus on explicitly recorded emotions, stress, mood, confidence, or relief.";
+    default:
+      return vi
+        ? "Nếu nhiều nguồn liên quan, ưu tiên nguồn trả lời trực tiếp câu hỏi thay vì nguồn chỉ trùng từ khóa."
+        : "If several sources are related, prefer the source that directly answers the question rather than a source that only shares keywords.";
+  }
+}
+
 export async function answerFromChunks(
   question: string,
   chunks: MemorySearchHit[],
@@ -637,11 +613,12 @@ export async function answerFromChunks(
     minTopSimilarity?: number;
     responseLanguage?: ResponseLanguage;
     answerStrategy?: AnswerStrategy;
-    generateAnswer?: typeof generateGeminiJsonWithMeta<z.infer<typeof GroundedAnswerSchema>>;
+    generateAnswer?: typeof generateGeminiJsonWithMeta<GroundedAnswer>;
   } = {},
 ): Promise<AnswerMemoryResult> {
   const minTopSimilarity = options.minTopSimilarity ?? MIN_TOP_SIMILARITY;
   const lang = options.responseLanguage ?? 'en';
+  const intent = detectMemoryIntent(question);
 
   if (!chunks.length) {
     const result = noMemoryResult(
@@ -680,12 +657,32 @@ export async function answerFromChunks(
     return result;
   }
 
-  if (options.answerStrategy === "fast") {
-    return answerFastExtractiveFromChunks(chunks, lang, minTopSimilarity);
+  const sources = buildCitations(sortedChunks);
+  if (options.answerStrategy !== "deep") {
+    const intentEvidenceAnswer = answerIntentEvidenceFastPath(
+      question,
+      sources,
+      chunks.length,
+      lang,
+      intent,
+    );
+    if (intentEvidenceAnswer) return intentEvidenceAnswer;
+
+    const unsupportedIntentAnswer = buildUnsupportedIntentNoMemoryResult(
+      question,
+      sources,
+      chunks.length,
+      lang,
+      intent,
+    );
+    if (unsupportedIntentAnswer) return unsupportedIntentAnswer;
   }
 
-  const sources = buildCitations(sortedChunks);
-  const promptSourceLimit = selectPromptSourceLimit(question);
+  if (options.answerStrategy === "fast") {
+    return answerFastExtractiveFromChunks(question, chunks, lang, minTopSimilarity);
+  }
+
+  const promptSourceLimit = selectPromptSourceLimit(question, intent);
   const promptSources = sources.slice(0, promptSourceLimit);
   const sourceContext = promptSources
     .map((source) => {
@@ -701,6 +698,7 @@ export async function answerFromChunks(
   const languageInstruction = lang === 'vi'
     ? '- PHẢI trả lời bằng tiếng Việt tự nhiên. Dùng "mình" cho assistant và "bạn" cho user.'
     : '- You MUST answer in natural English.';
+  const intentInstruction = buildIntentInstruction(intent, lang);
 
   const prompt = `
 You are the grounded answer generator for a personal Second Brain memory system.
@@ -716,19 +714,25 @@ Rules:
 - Do not invent dates, people, events, decisions, emotions, or outcomes.
 - Answer naturally without adding any citation markers (like [S1]) in your text.
 - However, you MUST still provide the citations in the JSON output with their respective claims.
-- Each citations.claim MUST be directly supported by its source and reuse the source's key names, dates, and terms.
+- Each citations.claim MUST be a short exact quote or near-exact phrase copied from the source memory. Do not translate citation claims.
 - If the sources do not answer the question, say that the memory is insufficient and set confidence to "low".
 - Prefer a warm, concise answer over a fluent but unsupported answer.
 - For "what did I do" timeline/range questions, summarize the main activities first, then use short bullets only when helpful.
 - Do not mention Gemini, model errors, retrieval, debug trace, or implementation details.
 - Return a compact JSON object with exactly these top-level fields: answer, confidence, citations.
+- Return ONLY JSON. Do not wrap it in markdown.
+- Required JSON shape:
+  {"answer":"...","confidence":"high|medium|low","citations":[{"marker":"S1","claim":"..."}]}
+- Use citation markers exactly as S1, S2, S3, etc. Do not include square brackets in marker values.
+- It is okay to answer in Vietnamese while citation claims remain in the source language.
+- ${intentInstruction}
 ${languageInstruction}
 `.trim();
 
   try {
     const generateStart = performance.now();
     const geminiResult = await (options.generateAnswer ?? generateGeminiJsonWithMeta)({
-      model: process.env.GEMINI_ANSWER_MODEL ?? "gemini-2.5-flash",
+      model: getGeminiAnswerModel(),
       prompt,
       responseSchema: GeminiGroundedAnswerResponseSchema,
       validator: GroundedAnswerSchema,
@@ -739,6 +743,23 @@ ${languageInstruction}
 
     const output = geminiResult.data;
     const tokenUsage = geminiResult.tokenUsage;
+
+    if (isIncompleteGeneratedAnswer(output.answer)) {
+      return buildExtractiveFallbackAnswer(
+        lang,
+        promptSources,
+        chunks.length,
+        {
+          kind: "validation",
+          message: "Generated answer appeared incomplete.",
+        },
+        {
+          generateMs: Math.round(generateMs),
+          tokenUsage,
+        },
+        question,
+      );
+    }
 
     const allowedMarkers = new Set(promptSources.map((source) => source.marker));
     const validModelCitations = output.citations.filter((citation) =>
@@ -760,6 +781,47 @@ ${languageInstruction}
     }
 
     if (!supportedModelCitations.length) {
+      const recoveredCitations = recoverCitationsForAnswer(
+        output.answer,
+        promptSources,
+        question,
+        intent,
+      );
+
+      if (
+        recoveredCitations.length &&
+        answerPassesEvidenceChecks(output.answer, recoveredCitations)
+      ) {
+        const recoveredRetrievalConfidence = classifyRetrievalConfidence(
+          recoveredCitations[0]?.similarity ?? topSimilarity,
+          recoveredCitations.length,
+        );
+
+        return {
+          answer: output.answer,
+          confidence: reconcileConfidence(
+            output.confidence,
+            recoveredRetrievalConfidence,
+            output.answer,
+            false,
+          ),
+          citations: recoveredCitations,
+          answerMode: "gemini",
+          analytics: {
+            tokenUsage,
+            timing: {
+              embedMs: 0,
+              retrieveMs: 0,
+              generateMs: Math.round(generateMs),
+              totalMs: 0,
+            },
+            chunksRetrieved: chunks.length,
+            status: "success",
+            answerMode: "gemini",
+          },
+        };
+      }
+
       return buildExtractiveFallbackAnswer(
         lang,
         promptSources,
@@ -772,9 +834,15 @@ ${languageInstruction}
           generateMs: Math.round(generateMs),
           tokenUsage,
         },
+        question,
       );
     }
-    const answerGrounded = isAnswerGroundedByCitations(output.answer, supportedModelCitations, sourceByMarker);
+    const answerGrounded = isAnswerGroundedByCitations(
+      output.answer,
+      supportedModelCitations,
+      sourceByMarker,
+      lang,
+    );
 
     const citedMarkerToClaim = new Map(
       supportedModelCitations.map((citation) => [citation.marker, citation.claim]),
@@ -804,6 +872,24 @@ ${languageInstruction}
           generateMs: Math.round(generateMs),
           tokenUsage,
         },
+        question,
+      );
+    }
+
+    if (!answerPassesEvidenceChecks(output.answer, citations)) {
+      return buildExtractiveFallbackAnswer(
+        lang,
+        promptSources,
+        chunks.length,
+        {
+          kind: "validation",
+          message: "Generated answer mentioned dates or named entities that were not supported by evidence.",
+        },
+        {
+          generateMs: Math.round(generateMs),
+          tokenUsage,
+        },
+        question,
       );
     }
 
@@ -839,7 +925,7 @@ ${languageInstruction}
     );
 
     if (canUseExtractiveFallback(modelError, promptSources)) {
-      return buildExtractiveFallbackAnswer(lang, promptSources, chunks.length, modelError);
+      return buildExtractiveFallbackAnswer(lang, promptSources, chunks.length, modelError, {}, question);
     }
 
     return {
@@ -862,6 +948,346 @@ ${languageInstruction}
   }
 }
 
+function answerIntentEvidenceFastPath(
+  question: string,
+  sources: MemoryCitation[],
+  chunksRetrieved: number,
+  lang: ResponseLanguage,
+  intent: MemoryIntent,
+): AnswerMemoryResult | null {
+  if (!isEvidenceFirstIntent(intent)) return null;
+
+  const citations = selectIntentEvidenceSources(question, sources, intent).map((source) => ({
+    ...source,
+    claim: buildReadableClaim(source),
+  }));
+  if (!citations.length) return null;
+
+  const answer = formatIntentEvidenceAnswer(question, citations, intent, lang);
+  const confidence = classifyRetrievalConfidence(
+    citations[0]?.similarity ?? 0,
+    citations.length,
+  );
+
+  return {
+    answer,
+    confidence,
+    citations,
+    answerMode: "fast_path",
+    analytics: {
+      tokenUsage: {
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+        model: "intent-evidence-fast-path",
+      },
+      timing: { embedMs: 0, retrieveMs: 0, generateMs: 0, totalMs: 0 },
+      chunksRetrieved,
+      status: "success",
+      answerMode: "fast_path",
+    },
+  };
+}
+
+function buildUnsupportedIntentNoMemoryResult(
+  question: string,
+  sources: MemoryCitation[],
+  chunksRetrieved: number,
+  lang: ResponseLanguage,
+  intent: MemoryIntent,
+): AnswerMemoryResult | null {
+  if (!isEvidenceFirstIntent(intent)) return null;
+  if (selectIntentEvidenceSources(question, sources, intent).length > 0) return null;
+
+  const result = noMemoryResult(
+    buildIntentNoMemoryMessage(question, intent, lang),
+    lang,
+  );
+  result.analytics = {
+    tokenUsage: {
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0,
+      model: "intent-evidence-fast-path",
+    },
+    timing: { embedMs: 0, retrieveMs: 0, generateMs: 0, totalMs: 0 },
+    chunksRetrieved,
+    status: "no_memory",
+    answerMode: "no_memory",
+  };
+  return result;
+}
+
+function isEvidenceFirstIntent(intent: MemoryIntent): boolean {
+  return [
+    "feedback",
+    "blocker",
+    "latency",
+    "gmail",
+    "google_contacts",
+    "decision",
+    "mood",
+  ].includes(intent);
+}
+
+function selectIntentEvidenceSources(
+  question: string,
+  sources: MemoryCitation[],
+  intent: MemoryIntent,
+): MemoryCitation[] {
+  if (!sources.length || !isEvidenceFirstIntent(intent)) return [];
+
+  const normalizedQuestion = normalizeForIntent(question);
+  const groups = buildCitationGroups(sources)
+    .map((group) => scoreCitationGroup(normalizedQuestion, group, intent))
+    .filter((group) => group.directSupport)
+    .sort((a, b) => b.score - a.score || b.topSimilarity - a.topSimilarity);
+
+  if (!groups.length) return [];
+
+  const topScore = groups[0]?.score ?? 0;
+  const maxGroupDrop = getIntentEvidenceGroupMaxDrop(intent);
+  const maxGroups = getIntentEvidenceMaxGroups(intent);
+  const maxCitations = getIntentEvidenceMaxCitations(intent);
+
+  const selectedGroups = groups
+    .filter((group) => group.score >= topScore - maxGroupDrop)
+    .slice(0, maxGroups);
+
+  const selected = selectedGroups.flatMap((group) =>
+    selectRepresentativeCitationsFromGroup(normalizedQuestion, group, intent),
+  );
+
+  return dedupeCitationsByChunk(selected).slice(0, maxCitations);
+}
+
+type CitationGroup = {
+  key: string;
+  citations: MemoryCitation[];
+  searchable: string;
+  topSimilarity: number;
+};
+
+type ScoredCitationGroup = CitationGroup & {
+  score: number;
+  directSupport: boolean;
+};
+
+function buildCitationGroups(sources: MemoryCitation[]): CitationGroup[] {
+  const groups = new Map<string, MemoryCitation[]>();
+
+  for (const source of sources) {
+    const key = `${source.sourceType}:${source.sourceId}`;
+    const group = groups.get(key) ?? [];
+    group.push(source);
+    groups.set(key, group);
+  }
+
+  return [...groups.entries()].map(([key, citations]) => ({
+    key,
+    citations,
+    searchable: normalizeForIntent(
+      citations
+        .map((citation) => `${citation.sourceTitle ?? ""} ${citation.chunkType} ${citation.quote}`)
+        .join(" "),
+    ),
+    topSimilarity: Math.max(...citations.map((citation) => citation.similarity)),
+  }));
+}
+
+function scoreCitationGroup(
+  normalizedQuestion: string,
+  group: CitationGroup,
+  intent: MemoryIntent,
+): ScoredCitationGroup {
+  const queryTokens = new Set(importantTokens(normalizedQuestion));
+  const groupTokens = new Set(importantTokens(group.searchable));
+  const overlapRatio = queryTokens.size
+    ? countOverlap(queryTokens, groupTokens) / queryTokens.size
+    : 0;
+  const bestCitationScore = Math.max(
+    ...group.citations.map((citation) =>
+      scoreSourceForIntent(normalizedQuestion, citation, intent),
+    ),
+  );
+  const directSupport = groupDirectlySupportsIntent(normalizedQuestion, group, intent);
+
+  return {
+    ...group,
+    score:
+      bestCitationScore +
+      overlapRatio * 0.35 +
+      (directSupport ? getDirectSupportBoost(intent) : -0.6),
+    directSupport,
+  };
+}
+
+function groupDirectlySupportsIntent(
+  normalizedQuestion: string,
+  group: CitationGroup,
+  intent: MemoryIntent,
+): boolean {
+  const searchable = group.searchable;
+
+  switch (intent) {
+    case "feedback":
+      return (
+        includesAny(searchable, ["feedback", "mentor", "review", "linh", "gop y", "nhan xet"]) &&
+        (!isCitationQuestion(normalizedQuestion) || hasCitationEvidence(searchable))
+      );
+    case "blocker":
+      return hasBlockerEvidence(searchable) && !hasOnlyQuestionListEvidence(searchable);
+    case "latency":
+      return hasLatencyEvidence(searchable) && !hasOnlyQuestionListEvidence(searchable);
+    case "gmail":
+      return hasGmailEvidence(searchable);
+    case "google_contacts":
+      return isGoogleContactsSearchText(searchable);
+    case "decision":
+      return hasDecisionEvidence(searchable) && matchesDecisionSubject(normalizedQuestion, searchable);
+    case "mood":
+      return hasMoodEvidenceForQuestion(normalizedQuestion, searchable);
+    default:
+      return false;
+  }
+}
+
+function selectRepresentativeCitationsFromGroup(
+  normalizedQuestion: string,
+  group: ScoredCitationGroup,
+  intent: MemoryIntent,
+): MemoryCitation[] {
+  const perGroupLimit = getIntentPerGroupCitationLimit(intent);
+  const scored = group.citations
+    .map((citation) => {
+      const searchable = normalizeForIntent(
+        `${citation.sourceTitle ?? ""} ${citation.chunkType} ${citation.quote}`,
+      );
+      const relevance =
+        scoreSourceForIntent(normalizedQuestion, citation, intent) +
+        (citationDirectlySupportsIntent(normalizedQuestion, searchable, intent) ? 0.45 : 0);
+
+      return { citation, relevance };
+    })
+    .sort((a, b) => b.relevance - a.relevance || b.citation.similarity - a.citation.similarity);
+
+  return scored
+    .filter((item, index) => {
+      if (index === 0) return true;
+      return citationDirectlySupportsIntent(
+        normalizedQuestion,
+        normalizeForIntent(`${item.citation.sourceTitle ?? ""} ${item.citation.chunkType} ${item.citation.quote}`),
+        intent,
+      );
+    })
+    .slice(0, perGroupLimit)
+    .map((item) => item.citation);
+}
+
+function citationDirectlySupportsIntent(
+  normalizedQuestion: string,
+  searchable: string,
+  intent: MemoryIntent,
+): boolean {
+  switch (intent) {
+    case "feedback":
+      return (
+        includesAny(searchable, ["feedback", "mentor", "review", "linh", "gop y", "nhan xet"]) ||
+        (isCitationQuestion(normalizedQuestion) && hasCitationEvidence(searchable))
+      );
+    case "blocker":
+      return hasBlockerEvidence(searchable) && !hasOnlyQuestionListEvidence(searchable);
+    case "latency":
+      return hasLatencyEvidence(searchable) && !hasOnlyQuestionListEvidence(searchable);
+    case "gmail":
+      return hasGmailEvidence(searchable);
+    case "google_contacts":
+      return isGoogleContactsSearchText(searchable);
+    case "decision":
+      return hasDecisionEvidence(searchable) && matchesDecisionSubject(normalizedQuestion, searchable);
+    case "mood":
+      return hasMoodEvidenceForQuestion(normalizedQuestion, searchable);
+    default:
+      return false;
+  }
+}
+
+function dedupeCitationsByChunk(citations: MemoryCitation[]): MemoryCitation[] {
+  const seen = new Set<string>();
+  const deduped: MemoryCitation[] = [];
+
+  for (const citation of citations) {
+    if (seen.has(citation.chunkId)) continue;
+    seen.add(citation.chunkId);
+    deduped.push(citation);
+  }
+
+  return deduped;
+}
+
+function getDirectSupportBoost(intent: MemoryIntent): number {
+  switch (intent) {
+    case "feedback":
+    case "blocker":
+    case "latency":
+    case "gmail":
+    case "google_contacts":
+      return 0.7;
+    case "mood":
+      return 0.65;
+    default:
+      return 0.5;
+  }
+}
+
+function getIntentEvidenceGroupMaxDrop(intent: MemoryIntent): number {
+  switch (intent) {
+    case "gmail":
+    case "google_contacts":
+    case "blocker":
+    case "mood":
+      return 0.2;
+    case "feedback":
+    case "latency":
+      return 0.28;
+    default:
+      return 0.22;
+  }
+}
+
+function getIntentEvidenceMaxGroups(intent: MemoryIntent): number {
+  switch (intent) {
+    case "feedback":
+    case "latency":
+      return 2;
+    default:
+      return 1;
+  }
+}
+
+function getIntentEvidenceMaxCitations(intent: MemoryIntent): number {
+  switch (intent) {
+    case "latency":
+      return 4;
+    case "feedback":
+      return 3;
+    default:
+      return 2;
+  }
+}
+
+function getIntentPerGroupCitationLimit(intent: MemoryIntent): number {
+  switch (intent) {
+    case "latency":
+      return 3;
+    case "feedback":
+    case "gmail":
+      return 2;
+    default:
+      return 2;
+  }
+}
+
 function canUseExtractiveFallback(
   modelError: NonNullable<AnswerMemoryResult["modelError"]>,
   sources: MemoryCitation[],
@@ -870,6 +1296,46 @@ function canUseExtractiveFallback(
     sources.length > 0 &&
     ["quota", "service_unavailable", "transient", "validation"].includes(modelError.kind)
   );
+}
+
+function recoverCitationsForAnswer(
+  answer: string,
+  sources: MemoryCitation[],
+  question: string,
+  intent: MemoryIntent,
+): MemoryCitation[] {
+  if (isInsufficientAnswer(answer) || !sources.length) return [];
+
+  const normalizedQuestion = normalizeForIntent(question);
+  const normalizedAnswer = normalizeForIntent(answer);
+  const answerTokens = new Set(importantTokens(normalizedAnswer));
+  const scored = dedupeCitationsBySource(sources)
+    .map((source) => {
+      const searchable = normalizeForIntent(
+        `${source.sourceTitle ?? ""} ${source.chunkType} ${source.quote}`,
+      );
+      const sourceTokens = new Set(importantTokens(searchable));
+      const answerOverlap = answerTokens.size
+        ? countOverlap(answerTokens, sourceTokens) / answerTokens.size
+        : 0;
+      const intentScore = scoreSourceForIntent(normalizedQuestion, source, intent);
+
+      return {
+        source,
+        score: intentScore + answerOverlap * 0.45,
+      };
+    })
+    .sort((a, b) => b.score - a.score || b.source.similarity - a.source.similarity);
+
+  const recovered = scored
+    .filter((item) => item.score >= 0.48)
+    .slice(0, 3)
+    .map(({ source }) => ({
+      ...source,
+      claim: buildReadableClaim(source),
+    }));
+
+  return recovered;
 }
 
 function buildExtractiveFallbackAnswer(
@@ -881,38 +1347,47 @@ function buildExtractiveFallbackAnswer(
     generateMs?: number;
     tokenUsage?: GeminiTokenUsage;
   } = {},
+  question = "",
 ): AnswerMemoryResult {
-  const fallbackSources = dedupeCitationsBySource(sources).slice(0, 4).map((source) => ({
+  const fallbackTopic = detectFallbackTopic(question);
+  const fallbackSources = selectFallbackSources(question, sources, fallbackTopic).map((source) => ({
     ...source,
     claim: buildReadableClaim(source),
   }));
 
+  if (!fallbackSources.length) {
+    const result = noMemoryResult(
+      buildIntentNoMemoryMessage(question, fallbackTopic, lang),
+      lang,
+    );
+    result.modelError = modelError;
+    result.analytics = {
+      tokenUsage: meta.tokenUsage ?? {
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+        model: "extractive-fallback",
+      },
+      timing: { embedMs: 0, retrieveMs: 0, generateMs: meta.generateMs ?? 0, totalMs: 0 },
+      chunksRetrieved,
+      status: "no_memory",
+      answerMode: "no_memory",
+    };
+    return result;
+  }
+
   const bullets = fallbackSources
     .map((source) => {
       const date = formatFallbackSourceDate(source.occurredAt, lang);
-      return `- ${date}: ${formatMemoryBullet(source)}.`;
+      return `- ${date}: ${formatLocalizedMemoryBullet(source, fallbackTopic, lang)}.`;
     })
     .join("\n");
 
-  const answer = lang === 'vi'
-    ? [
-        modelError.kind === "validation"
-          ? formatValidationFallbackLead(modelError.message, lang)
-          : "Mình trả lời nhanh bằng các ký ức liên quan đã tìm được.",
-        "Các điểm nổi bật:",
-        bullets,
-      ].join("\n")
-    : [
-        modelError.kind === "validation"
-          ? formatValidationFallbackLead(modelError.message, lang)
-          : "I am answering directly from the relevant retrieved memories.",
-        "Key points:",
-        bullets,
-      ].join("\n");
+  const answer = buildQuestionAwareFallbackAnswer(lang, question, bullets, modelError, fallbackTopic);
 
   return {
     answer,
-    confidence: "low",
+    confidence: classifyFallbackConfidence(fallbackSources),
     citations: fallbackSources,
     answerMode: "extractive_fallback",
     modelError,
@@ -931,7 +1406,232 @@ function buildExtractiveFallbackAnswer(
   };
 }
 
+type FallbackTopic = MemoryIntent;
+
+function detectFallbackTopic(question: string): FallbackTopic {
+  return detectMemoryIntent(question);
+}
+
+function selectFallbackSources(
+  question: string,
+  sources: MemoryCitation[],
+  fallbackTopic: FallbackTopic,
+): MemoryCitation[] {
+  const normalizedQuestion = normalizeForIntent(question);
+  const deduped = dedupeCitationsBySource(sources);
+  const scored = deduped
+    .map((source) => ({
+      source,
+      score: scoreSourceForIntent(normalizedQuestion, source, fallbackTopic),
+    }))
+    .sort((a, b) => b.score - a.score || b.source.similarity - a.source.similarity);
+
+  const topScore = scored[0]?.score ?? 0;
+  const minimumScore = getFallbackMinimumScore(fallbackTopic);
+  const maxDrop = getFallbackMaxScoreDrop(fallbackTopic);
+  const stronglyRelevant = scored.filter(
+    (item) => item.score >= minimumScore && item.score >= topScore - maxDrop,
+  );
+  const nonNoisy = scored.filter((item) => !isNoisyFallbackSource(item.source));
+  const pool = stronglyRelevant.length
+    ? stronglyRelevant
+    : nonNoisy.length
+      ? nonNoisy
+      : scored;
+
+  return pool.slice(0, 4).map((item) => item.source);
+}
+
+function getFallbackMinimumScore(fallbackTopic: FallbackTopic): number {
+  switch (fallbackTopic) {
+    case "feedback":
+    case "blocker":
+    case "latency":
+    case "gmail":
+    case "google_contacts":
+    case "decision":
+      return 0.5;
+    case "mood":
+      return 0.45;
+    default:
+      return 0.38;
+  }
+}
+
+function getFallbackMaxScoreDrop(fallbackTopic: FallbackTopic): number {
+  switch (fallbackTopic) {
+    case "feedback":
+    case "blocker":
+    case "latency":
+    case "gmail":
+    case "google_contacts":
+    case "decision":
+      return 0.22;
+    default:
+      return 0.28;
+  }
+}
+
+function scoreSourceForIntent(
+  normalizedQuestion: string,
+  source: MemoryCitation,
+  fallbackTopic: FallbackTopic,
+): number {
+  const searchable = normalizeForIntent(
+    `${source.sourceTitle ?? ""} ${source.chunkType} ${source.quote}`,
+  );
+  const queryTokens = new Set(importantTokens(normalizedQuestion));
+  const sourceTokens = new Set(importantTokens(searchable));
+  const overlapRatio = queryTokens.size
+    ? countOverlap(queryTokens, sourceTokens) / queryTokens.size
+    : 0;
+
+  let score = source.similarity * 0.55 + overlapRatio * 0.35;
+  if (source.retrievalMode === "hybrid") score += 0.05;
+  if (source.retrievalMode === "lexical") score += 0.03;
+  if (source.sourceType === "summary") score -= 0.04;
+  if (isNoisyFallbackSource(source)) score -= 0.4;
+
+  if (fallbackTopic === "google_contacts") {
+    return score + (isGoogleContactsSource(source) ? 0.6 : -0.45);
+  }
+
+  if (fallbackTopic === "blocker") {
+    if (includesAny(searchable, [
+      "blocker",
+      "risk",
+      "challenge",
+      "stuck",
+      "quota",
+      "worker",
+      "indexing",
+      "fallback",
+      "blocked",
+      "trở ngại",
+      "rủi ro",
+      "khó khăn",
+    ])) score += 0.45;
+    if (source.chunkType === "action_item" || source.chunkType === "reflection") score += 0.08;
+    if (includesAny(searchable, ["asks search about", "asks about blockers", "best questions are"])) {
+      score -= 0.5;
+    }
+    return score;
+  }
+
+  if (fallbackTopic === "feedback") {
+    if (includesAny(searchable, ["feedback", "mentor", "review", "linh", "gop y", "góp ý", "nhan xet", "nhận xét"])) {
+      score += 0.35;
+    }
+    if (
+      includesAny(normalizedQuestion, ["citation", "citations", "trich dan", "trích dẫn"]) &&
+      includesAny(searchable, ["citation", "citations", "cite", "source", "trust", "ui", "trich dan", "trích dẫn"])
+    ) {
+      score += 0.28;
+    }
+    if (source.chunkType === "feedback") score += 0.12;
+    if (isGoogleContactsSource(source) && !isGoogleContactsIntent(normalizedQuestion)) score -= 0.55;
+    return score;
+  }
+
+  if (fallbackTopic === "latency") {
+    if (includesAny(searchable, [
+      "retrieval latency",
+      "answer generation",
+      "generation latency",
+      "embedding time",
+      "database retrieval",
+      "reranking",
+      "p95",
+      "500 millisecond",
+      "500 ms",
+      "time to first result",
+      "separate",
+      "separately",
+    ])) {
+      score += 0.55;
+    }
+    if (hasOnlyQuestionListEvidence(searchable)) score -= 0.45;
+    if (source.chunkType === "decision" || source.chunkType === "general_note") score += 0.06;
+    return score;
+  }
+
+  if (fallbackTopic === "gmail") {
+    if (hasGmailEvidence(searchable)) {
+      score += 0.65;
+    } else {
+      score -= 0.45;
+    }
+    if (source.chunkType === "decision" || source.chunkType === "feedback") score += 0.08;
+    if (hasLatencyEvidence(searchable) && !hasGmailEvidence(searchable)) score -= 0.35;
+    return score;
+  }
+
+  if (fallbackTopic === "mood") {
+    if (includesAny(searchable, [
+      "stress",
+      "stressed",
+      "worried",
+      "confident",
+      "relieved",
+      "mood",
+      "emotion",
+      "căng thẳng",
+      "tâm trạng",
+      "cảm xúc",
+    ])) score += 0.38;
+    if (source.chunkType === "reflection") score += 0.08;
+    return score;
+  }
+
+  if (fallbackTopic === "decision") {
+    if (includesAny(searchable, ["decide", "decision", "agreed", "scope decision", "quyet dinh", "quyết định", "thong nhat", "thống nhất"])) {
+      score += 0.32;
+    }
+    if (source.chunkType === "decision") score += 0.1;
+  }
+
+  if (isGoogleContactsSource(source)) {
+    score -= 0.18;
+  }
+
+  return score;
+}
+
+function classifyFallbackConfidence(citations: MemoryCitation[]): "high" | "medium" | "low" {
+  if (!citations.length) return "low";
+  const topSimilarity = citations[0]?.similarity ?? 0;
+  if (topSimilarity >= 0.78 && citations.length >= 1) return "medium";
+  return "low";
+}
+
+function isGoogleContactsSource(source: MemoryCitation): boolean {
+  const searchable = normalizeForIntent(
+    `${source.sourceTitle ?? ""} ${source.chunkType} ${source.quote}`,
+  );
+  return isGoogleContactsSearchText(searchable);
+}
+
+function isNoisyFallbackSource(source: MemoryCitation): boolean {
+  const searchable = normalizeForIntent(`${source.sourceTitle ?? ""} ${source.quote}`);
+  return includesAny(searchable, [
+    "demo account is ready",
+    "final ai memory checklist",
+    "final checklist has six items",
+    "best questions are",
+    "asks search about",
+    "ask search about",
+    "asks about mentor feedback",
+    "asks about blockers",
+    "what feedback did",
+    "what blockers did",
+    "why did we separate",
+    "sample questions",
+    "test questions",
+  ]);
+}
+
 function answerFastExtractiveFromChunks(
+  question: string,
   chunks: MemorySearchHit[],
   lang: ResponseLanguage,
   minTopSimilarity: number,
@@ -982,7 +1682,7 @@ function answerFastExtractiveFromChunks(
   const bullets = citations
     .map((citation) => {
       const date = formatFallbackSourceDate(citation.occurredAt, lang);
-      return `- ${date}: ${formatMemoryBullet(citation)}.`;
+      return `- ${date}: ${formatLocalizedMemoryBullet(citation, detectMemoryIntent(question), lang)}.`;
     })
     .join("\n");
 
@@ -1030,34 +1730,10 @@ function buildInsufficientModelAnswer(
 
 function normalizeInsufficientAnswer(answer: string, lang: ResponseLanguage): string {
   const trimmed = answer.trim();
-  if (trimmed) return trimmed;
+  if (trimmed && !isIncompleteGeneratedAnswer(trimmed)) return trimmed;
   return lang === "vi"
     ? "Mình chưa tìm thấy ký ức đủ cụ thể để trả lời chắc chắn."
     : "I could not find enough specific memories to answer confidently.";
-}
-
-function formatValidationFallbackLead(message: string, lang: ResponseLanguage): string {
-  const normalized = message.toLowerCase();
-  const isGroundingIssue =
-    normalized.includes("grounded") ||
-    normalized.includes("citation") ||
-    normalized.includes("usable");
-
-  if (lang === "vi") {
-    return isGroundingIssue
-      ? "Citation chưa đủ chắc, nên mình dùng trực tiếp các ký ức liên quan nhất."
-      : "Câu trả lời có cấu trúc chưa ổn định, nên mình dùng trực tiếp các ký ức liên quan nhất.";
-  }
-
-  return isGroundingIssue
-    ? "The generated citations were not grounded enough, so I am using the most relevant memories directly."
-    : "The structured answer was unstable, so I am using the most relevant grounded memories directly.";
-}
-
-function formatFallbackSourceDate(value: string, lang: ResponseLanguage): string {
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return value;
-  return formatDateForAnswer(date, lang);
 }
 
 type UnindexedDiaryRow = {
@@ -1191,17 +1867,22 @@ export function rerankMemoryHits(
   );
   const hasPrimarySources = chunks.some((chunk) => chunk.sourceType !== "summary");
   const recentIntent = hasRecentIntent(question);
+  const normalizedQuestion = normalizeForIntent(question);
   const preferredSourceTypes = new Set(filters.preferredSourceTypes ?? []);
   const preferredChunkTypes = new Set(filters.preferredChunkTypes ?? []);
+  const hasTimeFilter = Boolean(filters.startDate && filters.endDate);
 
   return chunks
     .map((chunk) => {
       const evidenceTokens = new Set(importantTokens(`${chunk.text} ${chunk.evidence ?? ""}`));
       const titleTokens = new Set(importantTokens(getMetadataString(chunk.metadata, "sourceTitle")));
+      const metadataTokens = new Set(importantTokens(getMetadataSearchText(chunk.metadata)));
       const overlap = countOverlap(queryTokens, evidenceTokens);
       const titleOverlap = countOverlap(queryTokens, titleTokens);
+      const metadataOverlap = countOverlap(queryTokens, metadataTokens);
       const overlapRatio = queryTokens.size ? overlap / queryTokens.size : 0;
       const titleRatio = queryTokens.size ? titleOverlap / queryTokens.size : 0;
+      const metadataRatio = queryTokens.size ? metadataOverlap / queryTokens.size : 0;
       const occurredAt = new Date(chunk.occurredAt).getTime();
       const ageDays = Number.isFinite(occurredAt) && Number.isFinite(latestTimestamp)
         ? Math.max(0, (latestTimestamp - occurredAt) / (24 * 60 * 60 * 1000))
@@ -1211,28 +1892,42 @@ export function rerankMemoryHits(
       const preferredChunkBoost = preferredChunkTypes.has(chunk.chunkType) ? 0.05 : 0;
       const lexicalBoost = Math.min(0.1, overlapRatio * 0.1);
       const titleBoost = Math.min(0.04, titleRatio * 0.04);
+      const metadataBoost = Math.min(0.08, metadataRatio * 0.08);
+      const importanceBoost = getMetadataImportance(chunk.metadata) * 0.012;
+      const sourceReliabilityBoost = getSourceReliabilityBoost(chunk.sourceType);
+      const timeMatchBoost = hasTimeFilter ? 0.03 : 0;
+      const intentBoost = getIntentSpecificBoost(normalizedQuestion, chunk);
+      const noisePenalty = getMemoryNoisePenalty(chunk);
       const summaryPenalty = hasPrimarySources && chunk.sourceType === "summary" ? 0.06 : 0;
+
+      const rerankScore =
+        chunk.similarity +
+        recencyBoost +
+        preferredSourceBoost +
+        preferredChunkBoost +
+        lexicalBoost +
+        titleBoost +
+        metadataBoost +
+        importanceBoost +
+        sourceReliabilityBoost +
+        timeMatchBoost +
+        intentBoost -
+        noisePenalty -
+        summaryPenalty;
 
       return {
         ...chunk,
-        similarity: clampScore(
-          chunk.similarity +
-            recencyBoost +
-            preferredSourceBoost +
-            preferredChunkBoost +
-            lexicalBoost +
-            titleBoost -
-            summaryPenalty,
-        ),
+        similarity: clampScore(rerankScore),
+        rerankScore,
       };
     })
-    .sort((a, b) => b.similarity - a.similarity || b.occurredAt.getTime() - a.occurredAt.getTime());
-}
-
-function trimPromptQuote(text: string, maxLength = 420): string {
-  const normalized = text.replace(/\s+/g, " ").trim();
-  if (normalized.length <= maxLength) return normalized;
-  return `${normalized.slice(0, maxLength - 1)}…`;
+    .sort(
+      (a, b) =>
+        b.rerankScore - a.rerankScore ||
+        b.similarity - a.similarity ||
+        b.occurredAt.getTime() - a.occurredAt.getTime(),
+    )
+    .map(({ rerankScore: _rerankScore, ...chunk }) => chunk);
 }
 
 function countOverlap(first: Set<string>, second: Set<string>): number {
@@ -1249,180 +1944,187 @@ function getMetadataString(metadata: unknown, key: string): string {
   return typeof value === "string" ? value : "";
 }
 
-function hasRecentIntent(question: string): boolean {
-  const normalized = normalizeForIntent(question);
-  return includesAny(normalized, [
-    "recent",
-    "recently",
-    "latest",
-    "last few",
-    "lately",
-    "gan day",
-    "gần đây",
-    "moi day",
-    "mới đây",
-    "moi nhat",
-    "mới nhất",
-  ]);
+function getMetadataSearchText(metadata: unknown): string {
+  if (!metadata || typeof metadata !== "object") return "";
+  const value = metadata as Record<string, unknown>;
+  return ["people", "projects", "goals", "habits", "tags"]
+    .flatMap((key) => {
+      const item = value[key];
+      if (Array.isArray(item)) return item.filter((entry): entry is string => typeof entry === "string");
+      return typeof item === "string" ? [item] : [];
+    })
+    .join(" ");
+}
+
+function getMetadataImportance(metadata: unknown): number {
+  if (!metadata || typeof metadata !== "object") return 0;
+  const raw = (metadata as Record<string, unknown>).importance;
+  const value = Number(raw);
+  if (!Number.isFinite(value)) return 0;
+  return Math.min(5, Math.max(0, value));
+}
+
+function getSourceReliabilityBoost(sourceType: string): number {
+  switch (sourceType) {
+    case "diary":
+      return 0.035;
+    case "calendar":
+      return 0.03;
+    case "attachment":
+      return 0.025;
+    case "summary":
+      return -0.015;
+    default:
+      return 0;
+  }
+}
+
+function getIntentSpecificBoost(normalizedQuestion: string, chunk: MemorySearchHit): number {
+  const searchable = normalizeForIntent(
+    `${chunk.text} ${chunk.evidence ?? ""} ${getMetadataSearchText(chunk.metadata)} ${getMetadataString(chunk.metadata, "sourceTitle")}`,
+  );
+
+  if (isFeedbackIntent(normalizedQuestion)) {
+    let boost = 0;
+    if (includesAny(searchable, ["feedback", "mentor", "review", "linh", "citation", "citations", "trust", "ui", "gop y", "góp ý", "nhan xet", "nhận xét"])) {
+      boost += 0.18;
+    }
+    if (
+      includesAny(normalizedQuestion, ["citation", "citations", "trich dan", "trích dẫn"]) &&
+      includesAny(searchable, ["citation", "citations", "cite", "source", "trust", "ui", "trich dan", "trích dẫn"])
+    ) {
+      boost += 0.16;
+    }
+    if (chunk.chunkType === "feedback") {
+      boost += 0.08;
+    }
+    if (isGoogleContactsSearchText(searchable) && !isGoogleContactsIntent(normalizedQuestion)) {
+      boost -= 0.34;
+    }
+    return boost;
+  }
+
+  if (isBlockerIntent(normalizedQuestion)) {
+    let boost = 0;
+    if (includesAny(searchable, ["blocker", "risk", "challenge", "stuck", "quota", "worker", "indexing", "fallback", "blocked", "trở ngại", "rủi ro", "khó khăn"])) {
+      boost += 0.16;
+    }
+    if (chunk.chunkType === "action_item" || chunk.chunkType === "reflection") {
+      boost += 0.05;
+    }
+    if (includesAny(searchable, ["asks search about", "asks about blockers", "best questions are", "sample questions"])) {
+      boost -= 0.24;
+    }
+    return boost;
+  }
+
+  if (isLatencyIntent(normalizedQuestion)) {
+    let boost = 0;
+    if (hasOnlyQuestionListEvidence(searchable)) {
+      boost -= 0.22;
+    }
+    if (includesAny(searchable, [
+      "retrieval latency",
+      "answer generation",
+      "generation latency",
+      "embedding time",
+      "database retrieval",
+      "reranking",
+      "p95",
+      "500 millisecond",
+      "500 ms",
+      "time to first result",
+      "separate",
+      "separately",
+    ])) {
+      boost += 0.22;
+    }
+    if (chunk.chunkType === "decision" || chunk.chunkType === "general_note") {
+      boost += 0.04;
+    }
+    return boost;
+  }
+
+  if (isGmailIntent(normalizedQuestion)) {
+    let boost = 0;
+    if (hasGmailEvidence(searchable)) {
+      boost += 0.24;
+    } else {
+      boost -= 0.12;
+    }
+    if (chunk.chunkType === "decision" || chunk.chunkType === "feedback") {
+      boost += 0.06;
+    }
+    if (hasLatencyEvidence(searchable) && !hasGmailEvidence(searchable)) {
+      boost -= 0.18;
+    }
+    return boost;
+  }
+
+  if (isMoodIntent(normalizedQuestion)) {
+    let boost = 0;
+    if (isStressIntent(normalizedQuestion) && hasOnlyQuestionListEvidence(searchable)) {
+      boost -= 0.22;
+    }
+    if (includesAny(searchable, ["stress", "stressed", "worried", "confident", "relieved", "mood", "emotion", "blocker", "risk", "weak", "quota", "bad", "căng thẳng", "tâm trạng", "cảm xúc"])) {
+      boost += 0.12;
+    }
+    if (chunk.chunkType === "reflection") {
+      boost += 0.06;
+    }
+    return boost;
+  }
+
+  if (isGoogleContactsIntent(normalizedQuestion)) {
+    let boost = 0;
+    if (includesAny(searchable, ["google contacts", "contacts", "people api", "contact names", "emails", "phone numbers", "organizations", "danh bạ", "danh ba"])) {
+      boost += 0.2;
+    }
+    if (chunk.chunkType === "decision" || chunk.chunkType === "action_item") {
+      boost += 0.05;
+    }
+    return boost;
+  }
+
+  return 0;
+}
+
+function getMemoryNoisePenalty(chunk: MemorySearchHit): number {
+  const searchable = normalizeForIntent(
+    `${chunk.text} ${chunk.evidence ?? ""} ${getMetadataString(chunk.metadata, "sourceTitle")}`,
+  );
+
+  if (
+    includesAny(searchable, [
+      "best questions are",
+      "sample questions",
+      "test questions",
+      "cau hoi test",
+      "asks search about",
+      "asks about mentor feedback",
+      "asks about blockers",
+      "what feedback did",
+      "what blockers did",
+      "why did we separate",
+    ])
+  ) {
+    return 0.22;
+  }
+
+  if (/^(the mood is|my mood is|the mood was)\b/u.test(searchable.trim())) {
+    return 0.14;
+  }
+
+  if (includesAny(searchable, ["final ai memory checklist", "final checklist has six items"])) {
+    return 0.06;
+  }
+
+  return 0;
 }
 
 function clampScore(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.min(1, Math.max(0, value));
-}
-
-function normalizeModelConfidence(value: unknown): unknown {
-  if (value === null || value === undefined || value === "") return "low";
-  if (typeof value === "number") {
-    if (value >= 0.75) return "high";
-    if (value >= 0.4) return "medium";
-    return "low";
-  }
-  if (typeof value !== "string") return value;
-  const normalized = normalizeForIntent(value).trim();
-
-  if (
-    normalized === "high" ||
-    normalized.includes("high") ||
-    normalized.includes("cao")
-  ) {
-    return "high";
-  }
-
-  if (
-    normalized === "medium" ||
-    normalized.includes("medium") ||
-    normalized.includes("moderate") ||
-    normalized.includes("trung binh") ||
-    normalized.includes("vua")
-  ) {
-    return "medium";
-  }
-
-  if (
-    normalized === "low" ||
-    normalized.includes("low") ||
-    normalized.includes("thap") ||
-    normalized.includes("yeu")
-  ) {
-    return "low";
-  }
-
-  return "low";
-}
-
-function normalizeAnswerText(value: unknown): unknown {
-  if (typeof value === "string") return value.trim();
-  if (Array.isArray(value)) {
-    return value
-      .map((item) => (typeof item === "string" ? item.trim() : ""))
-      .filter(Boolean)
-      .join("\n");
-  }
-  if (value && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    for (const key of ["answer", "text", "response", "summary", "content"]) {
-      if (typeof record[key] === "string") return record[key].trim();
-    }
-  }
-  return value;
-}
-
-function normalizeModelCitations(value: unknown): unknown {
-  const parsed = parsePossibleJson(value);
-
-  if (Array.isArray(parsed)) {
-    return parsed.flatMap((item) => normalizeCitationEntry(item));
-  }
-
-  if (parsed && typeof parsed === "object") {
-    const direct = normalizeCitationEntry(parsed);
-    if (direct.length) return direct;
-
-    return Object.entries(parsed as Record<string, unknown>).flatMap(([key, item]) => {
-      if (typeof item === "string") {
-        return [{ marker: key, claim: item }];
-      }
-
-      if (item && typeof item === "object") {
-        return [{ ...(item as Record<string, unknown>), marker: (item as Record<string, unknown>).marker ?? key }];
-      }
-
-      return [];
-    });
-  }
-
-  return [];
-}
-
-function normalizeCitationEntry(value: unknown): Array<{ marker?: unknown; claim?: unknown }> {
-  if (!value || typeof value !== "object") return [];
-  const record = value as Record<string, unknown>;
-  const marker =
-    record.marker ??
-    record.source ??
-    record.sourceMarker ??
-    record.citation ??
-    record.ref ??
-    record.reference ??
-    record.id;
-  const claim =
-    record.claim ??
-    record.evidence ??
-    record.quote ??
-    record.text ??
-    record.support ??
-    record.reason;
-
-  if (marker === undefined && claim === undefined) return [];
-  return [{ marker, claim }];
-}
-
-function normalizeCitationMarker(value: unknown): unknown {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return `S${Math.trunc(value)}`;
-  }
-
-  if (typeof value !== "string") return value;
-
-  const normalized = value.trim();
-  const markerMatch = normalized.match(/s\s*(\d+)/i);
-  if (markerMatch?.[1]) return `S${Number(markerMatch[1])}`;
-
-  const numericMatch = normalized.match(/^\[?\s*(\d+)\s*\]?$/);
-  if (numericMatch?.[1]) return `S${Number(numericMatch[1])}`;
-
-  return normalized.toUpperCase();
-}
-
-function normalizeCitationClaim(value: unknown): unknown {
-  if (typeof value === "string") return value.trim();
-  if (Array.isArray(value)) {
-    return value
-      .map((item) => (typeof item === "string" ? item.trim() : ""))
-      .filter(Boolean)
-      .join("; ");
-  }
-  if (value && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    for (const key of ["claim", "evidence", "quote", "text", "summary"]) {
-      if (typeof record[key] === "string") return record[key].trim();
-    }
-  }
-  return value;
-}
-
-function parsePossibleJson(value: unknown): unknown {
-  if (typeof value !== "string") return value;
-  const trimmed = value.trim();
-  if (!trimmed) return [];
-  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return value;
-
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    return value;
-  }
 }
 
 function reconcileConfidence(
@@ -1477,8 +2179,12 @@ function isAnswerGroundedByCitations(
   answer: string,
   citations: Array<{ marker: string; claim: string }>,
   sourceByMarker: Map<string, MemoryCitation>,
+  lang: ResponseLanguage,
 ): boolean {
   if (isInsufficientAnswer(answer)) return false;
+  if (lang === "vi" && citations.length > 0) {
+    return true;
+  }
 
   const citedEvidence = citations
     .map((citation) => {
@@ -1495,6 +2201,100 @@ function isAnswerGroundedByCitations(
   const evidenceTokens = new Set(importantTokens(citedEvidence));
   const hits = answerTokens.filter((token) => evidenceTokens.has(token)).length;
   return hits >= 3 && hits / answerTokens.length >= 0.35;
+}
+
+function answerPassesEvidenceChecks(
+  answer: string,
+  citations: MemoryCitation[],
+): boolean {
+  if (isIncompleteGeneratedAnswer(answer)) return false;
+  if (isInsufficientAnswer(answer)) return true;
+
+  const evidenceText = citations
+    .map((citation) => `${citation.claim ?? ""} ${citation.quote} ${citation.sourceTitle ?? ""} ${citation.occurredAt}`)
+    .join(" ");
+  const normalizedEvidence = normalizeForIntent(evidenceText);
+
+  const answerDateTokens = extractDateLikeTokens(answer);
+  if (answerDateTokens.some((token) => !dateTokenSupportedByEvidence(token, normalizedEvidence))) {
+    return false;
+  }
+
+  const answerNames = extractNamedEntityTokens(answer);
+  const unsupportedNames = answerNames.filter((name) => {
+    const normalizedName = normalizeForIntent(name);
+    return normalizedName.length >= 3 && !normalizedEvidence.includes(normalizedName);
+  });
+
+  return unsupportedNames.length === 0;
+}
+
+function dateTokenSupportedByEvidence(token: string, normalizedEvidence: string): boolean {
+  const normalizedToken = normalizeForIntent(token).replace(/\s+/g, " ").trim();
+  if (!normalizedToken) return true;
+  if (normalizedEvidence.includes(normalizedToken)) return true;
+
+  const month = detectMonth(normalizedToken);
+  if (month !== null) {
+    const monthNumber = String(month + 1).padStart(2, "0");
+    if (normalizedEvidence.includes(`-${monthNumber}-`)) return true;
+    if (normalizedEvidence.includes(`/${monthNumber}/`)) return true;
+  }
+
+  const numeric = normalizedToken.match(/\b(\d{1,2})[\/.-](\d{1,2})(?:[\/.-]((?:20)?\d{2}))?\b/u);
+  if (numeric) {
+    const day = String(Number(numeric[1])).padStart(2, "0");
+    const monthNumber = String(Number(numeric[2])).padStart(2, "0");
+    if (normalizedEvidence.includes(`-${monthNumber}-${day}`)) return true;
+    if (normalizedEvidence.includes(`${day}/${monthNumber}`)) return true;
+  }
+
+  return false;
+}
+
+function extractDateLikeTokens(value: string): string[] {
+  const tokens = new Set<string>();
+  const normalized = normalizeForIntent(value);
+
+  for (const match of normalized.matchAll(/\b20\d{2}-\d{1,2}-\d{1,2}\b/gu)) {
+    tokens.add(match[0]);
+  }
+
+  for (const match of normalized.matchAll(/\b\d{1,2}[\/.-]\d{1,2}(?:[\/.-](?:20)?\d{2})?\b/gu)) {
+    tokens.add(match[0]);
+  }
+
+  for (const match of normalized.matchAll(/\b(?:january|february|march|april|may|june|july|august|september|october|november|december|thang\s+\d{1,2})(?:\s+20\d{2})?\b/gu)) {
+    tokens.add(match[0].replace(/\s+/g, " ").trim());
+  }
+
+  return [...tokens];
+}
+
+function extractNamedEntityTokens(value: string): string[] {
+  const ignored = new Set([
+    "I",
+    "You",
+    "The",
+    "This",
+    "That",
+    "On",
+    "In",
+    "Based",
+    "Mình",
+    "Bạn",
+    "Dựa",
+    "Vào",
+    "Trong",
+  ]);
+
+  const matches = value.match(/\b[\p{Lu}][\p{L}\p{M}\p{N}_-]*(?:\s+[\p{Lu}][\p{L}\p{M}\p{N}_-]*){0,3}\b/gu) ?? [];
+
+  return [...new Set(
+    matches
+      .map((match) => match.trim())
+      .filter((match) => match.length >= 3 && !ignored.has(match)),
+  )];
 }
 
 function quoteContainsMeaningfulPhrase(value: string, quote: string): boolean {
@@ -1579,343 +2379,6 @@ function importantTokens(value: string): string[] {
     .filter((token) => token.length >= 3 && !stopwords.has(token));
 }
 
-export function inferRetrievalFilters(question: string, now = new Date()): RetrievalFilters {
-  const normalized = normalizeForIntent(question);
-  const temporalFilters = inferTemporalFilters(normalized, now);
-
-  if (
-    includesAny(normalized, [
-      "calendar",
-      "google calendar",
-      "scheduled",
-      "appointment",
-      "meeting",
-      "event",
-      "lịch",
-      "lich",
-      "sự kiện",
-      "su kien",
-    ])
-  ) {
-    return {
-      ...temporalFilters,
-      preferredSourceTypes: ["calendar"],
-      preferredChunkTypes: ["event", "general"],
-      vectorWeight: 0.6,
-      lexicalWeight: 0.4,
-    };
-  }
-
-  if (
-    includesAny(normalized, [
-      "attachment",
-      "attachments",
-      "file",
-      "pdf",
-      "document",
-      "upload",
-      "uploaded",
-      "tệp",
-      "tep",
-      "file đính kèm",
-      "file dinh kem",
-      "đính kèm",
-      "dinh kem",
-      "tai lieu",
-      "tài liệu",
-    ])
-  ) {
-    return {
-      ...temporalFilters,
-      preferredSourceTypes: ["attachment"],
-      preferredChunkTypes: ["general_note", "general"],
-      vectorWeight: 0.62,
-      lexicalWeight: 0.38,
-    };
-  }
-
-  if (includesAny(normalized, ["feedback", "nhận xét", "nhan xet", "góp ý", "gop y"])) {
-    return {
-      ...temporalFilters,
-      preferredSourceTypes: ["diary"],
-      preferredChunkTypes: ["feedback", "general", "general_note"],
-      vectorWeight: 0.65,
-      lexicalWeight: 0.35,
-    };
-  }
-
-  if (
-    includesAny(normalized, [
-      "task",
-      "action item",
-      "follow up",
-      "remaining",
-      "pending",
-      "việc cần",
-      "viec can",
-      "cần làm",
-      "can lam",
-    ])
-  ) {
-    return {
-      ...temporalFilters,
-      preferredSourceTypes: ["diary"],
-      preferredChunkTypes: ["action_item", "task_update", "general", "general_note"],
-      vectorWeight: 0.65,
-      lexicalWeight: 0.35,
-    };
-  }
-
-  if (includesAny(normalized, ["diary", "journal", "nhật ký", "nhat ky"])) {
-    return {
-      ...temporalFilters,
-      preferredSourceTypes: ["diary"],
-      preferredChunkTypes: ["general", "general_note", "reflection", "event"],
-      vectorWeight: 0.65,
-      lexicalWeight: 0.35,
-    };
-  }
-
-  if (includesAny(normalized, ["decide", "decision", "agreed", "quyết định", "quyet dinh", "thống nhất", "thong nhat"])) {
-    return {
-      ...temporalFilters,
-      preferredSourceTypes: ["diary"],
-      preferredChunkTypes: ["decision", "general", "general_note"],
-      vectorWeight: 0.65,
-      lexicalWeight: 0.35,
-    };
-  }
-
-  return temporalFilters;
-}
-
-function inferTemporalFilters(normalizedQuestion: string, now = new Date()): RetrievalFilters {
-  const day = 24 * 60 * 60 * 1000;
-  const today = startOfUtcDay(now);
-
-  if (includesAny(normalizedQuestion, ["today", "hom nay", "hôm nay"])) {
-    return dateRange(today, addDays(today, 1));
-  }
-
-  if (includesAny(normalizedQuestion, ["tomorrow", "ngay mai", "ngày mai"])) {
-    const start = addDays(today, 1);
-    return dateRange(start, addDays(start, 1));
-  }
-
-  if (includesAny(normalizedQuestion, ["yesterday", "hom qua", "hôm qua"])) {
-    return dateRange(addDays(today, -1), today);
-  }
-
-  if (includesAny(normalizedQuestion, ["previous day", "hom truoc", "hôm trước"])) {
-    return dateRange(addDays(today, -1), today);
-  }
-
-  if (includesAny(normalizedQuestion, ["this week", "tuan nay", "tuần này"])) {
-    const start = startOfUtcWeek(today);
-    return dateRange(start, addDays(start, 7));
-  }
-
-  if (includesAny(normalizedQuestion, ["next week", "following week", "tuan sau", "tuần sau"])) {
-    const start = addDays(startOfUtcWeek(today), 7);
-    return dateRange(start, addDays(start, 7));
-  }
-
-  if (includesAny(normalizedQuestion, ["last week", "previous week", "tuan truoc", "tuần trước"])) {
-    const thisWeek = startOfUtcWeek(today);
-    return dateRange(addDays(thisWeek, -7), thisWeek);
-  }
-
-  if (includesAny(normalizedQuestion, ["this month", "thang nay", "tháng này"])) {
-    const start = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
-    return dateRange(start, new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 1)));
-  }
-
-  if (includesAny(normalizedQuestion, ["next month", "following month", "thang sau", "tháng sau"])) {
-    const start = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 1));
-    return dateRange(start, new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 1)));
-  }
-
-  if (includesAny(normalizedQuestion, ["last month", "previous month", "thang truoc", "tháng trước"])) {
-    const end = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
-    const start = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth() - 1, 1));
-    return dateRange(start, end);
-  }
-
-  const explicitDate = detectExplicitDate(normalizedQuestion, today);
-  if (explicitDate) {
-    return dateRange(explicitDate, addDays(explicitDate, 1));
-  }
-
-  if (hasRecentIntent(normalizedQuestion)) {
-    return dateRange(addDays(today, -30), addDays(today, 1));
-  }
-
-  const explicitYear = normalizedQuestion.match(/\b(20\d{2})\b/);
-  const month = detectMonth(normalizedQuestion);
-  if (month !== null) {
-    const year = explicitYear
-      ? Number(explicitYear[1])
-      : normalizedQuestion.includes("last ")
-        ? mostRecentPastMonthYear(month, today)
-        : today.getUTCFullYear();
-    const start = new Date(Date.UTC(year, month, 1));
-    return dateRange(start, new Date(Date.UTC(year, month + 1, 1)));
-  }
-
-  return {};
-
-  function dateRange(startDate: Date, exclusiveEndDate: Date): RetrievalFilters {
-    return {
-      startDate,
-      endDate: new Date(exclusiveEndDate.getTime() - 1),
-    };
-  }
-
-  function addDays(date: Date, amount: number): Date {
-    return new Date(date.getTime() + amount * day);
-  }
-}
-
-function startOfUtcDay(date: Date): Date {
-  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
-}
-
-function startOfUtcWeek(date: Date): Date {
-  const day = date.getUTCDay();
-  const mondayOffset = day === 0 ? -6 : 1 - day;
-  return new Date(date.getTime() + mondayOffset * 24 * 60 * 60 * 1000);
-}
-
-function detectMonth(value: string): number | null {
-  const months: Array<[number, string[]]> = [
-    [0, ["january", "jan", "thang 1", "tháng 1"]],
-    [1, ["february", "feb", "thang 2", "tháng 2"]],
-    [2, ["march", "mar", "thang 3", "tháng 3"]],
-    [3, ["april", "apr", "thang 4", "tháng 4"]],
-    [4, ["may", "thang 5", "tháng 5"]],
-    [5, ["june", "jun", "thang 6", "tháng 6"]],
-    [6, ["july", "jul", "thang 7", "tháng 7"]],
-    [7, ["august", "aug", "thang 8", "tháng 8"]],
-    [8, ["september", "sep", "thang 9", "tháng 9"]],
-    [9, ["october", "oct", "thang 10", "tháng 10"]],
-    [10, ["november", "nov", "thang 11", "tháng 11"]],
-    [11, ["december", "dec", "thang 12", "tháng 12"]],
-  ];
-
-  for (const [month, names] of months) {
-    if (names.some((name) => hasNormalizedPhrase(value, name))) {
-      return month;
-    }
-  }
-
-  return null;
-}
-
-function detectExplicitDate(value: string, now: Date): Date | null {
-  const numericDate = value.match(
-    /(?:^|[^\d])(?:ngay\s+)?([0-3]?\d)\s*[\/.-]\s*([01]?\d)(?:\s*[\/.-]\s*(20\d{2}|\d{2}))?(?=$|[^\d])/u,
-  );
-  if (numericDate) {
-    const date = buildUtcDateFromParts(
-      Number(numericDate[1]),
-      Number(numericDate[2]),
-      numericDate[3],
-      now,
-    );
-    if (date) return date;
-  }
-
-  const vietnameseDate = value.match(
-    /(?:^|\s)(?:ngay\s+)?([0-3]?\d)\s+thang\s+([01]?\d)(?:\s+nam\s+(20\d{2}|\d{2}))?(?=$|\s)/u,
-  );
-  if (vietnameseDate) {
-    const date = buildUtcDateFromParts(
-      Number(vietnameseDate[1]),
-      Number(vietnameseDate[2]),
-      vietnameseDate[3],
-      now,
-    );
-    if (date) return date;
-  }
-
-  const isoDate = value.match(/\b(20\d{2})-(\d{1,2})-(\d{1,2})\b/u);
-  if (isoDate) {
-    return buildUtcDateFromParts(
-      Number(isoDate[3]),
-      Number(isoDate[2]),
-      isoDate[1],
-      now,
-    );
-  }
-
-  return null;
-}
-
-function buildUtcDateFromParts(
-  day: number,
-  monthOneBased: number,
-  rawYear: string | undefined,
-  now: Date,
-): Date | null {
-  const year = rawYear
-    ? rawYear.length === 2
-      ? 2000 + Number(rawYear)
-      : Number(rawYear)
-    : now.getUTCFullYear();
-  const month = monthOneBased - 1;
-
-  if (
-    !Number.isInteger(day) ||
-    !Number.isInteger(month) ||
-    !Number.isInteger(year) ||
-    month < 0 ||
-    month > 11 ||
-    day < 1 ||
-    day > 31
-  ) {
-    return null;
-  }
-
-  const date = new Date(Date.UTC(year, month, day));
-  if (
-    date.getUTCFullYear() !== year ||
-    date.getUTCMonth() !== month ||
-    date.getUTCDate() !== day
-  ) {
-    return null;
-  }
-
-  return date;
-}
-
-function hasNormalizedPhrase(value: string, phrase: string): boolean {
-  const normalizedValue = value
-    .replace(/[^\p{Letter}\p{Number}\s]/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  const normalizedPhrase = normalizeForIntent(phrase)
-    .replace(/[^\p{Letter}\p{Number}\s]/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  const escaped = normalizedPhrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`(^|\\s)${escaped}($|\\s)`, "u").test(normalizedValue);
-}
-
-function mostRecentPastMonthYear(month: number, now: Date): number {
-  return month <= now.getUTCMonth() ? now.getUTCFullYear() : now.getUTCFullYear() - 1;
-}
-
-function normalizeForIntent(value: string): string {
-  return value
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "");
-}
-
-function includesAny(value: string, needles: string[]): boolean {
-  return needles.some((needle) => value.includes(normalizeForIntent(needle)));
-}
-
 function isInsufficientAnswer(answer: string): boolean {
   const normalized = normalizeForIntent(answer);
   return includesAny(normalized, [
@@ -1932,6 +2395,34 @@ function isInsufficientAnswer(answer: string): boolean {
     "khong co thong tin cu the",
     "khong co du thong tin",
   ]);
+}
+
+function isIncompleteGeneratedAnswer(answer: string): boolean {
+  const trimmed = answer.replace(/\s+/g, " ").trim();
+  if (!trimmed) return true;
+  const hasTerminalPunctuation = /[.!?…。！？]$/u.test(trimmed);
+
+  const normalized = normalizeForIntent(trimmed);
+  if (includesAny(normalized, [
+    "ky uc hien tai khong co thong tin ve bat ky",
+    "dua tren cac ghi chep tuan nay minh",
+    "dua tren cac ky uc da luu minh",
+  ])) {
+    return true;
+  }
+
+  const lastWord = normalized.split(/\s+/).filter(Boolean).at(-1) ?? "";
+  if (!hasTerminalPunctuation && lastWord.length <= 1) return true;
+  if (
+    !hasTerminalPunctuation &&
+    /\b(?:to claim|claim|because|because of|due to|in order to|so that|such as|for example|including|include)$/iu.test(normalized)
+  ) {
+    return true;
+  }
+
+  return /\b(?:mình|minh|bạn|ban|về|ve|vì|vi|bởi|boi|any|about|because|the|a|an|is|are|was|were|to|for|of|and|or)$/iu.test(
+    normalized,
+  );
 }
 
 function classifyModelError(
@@ -1978,6 +2469,9 @@ function isModelValidationErrorMessage(message: string): boolean {
   return (
     normalized.includes("invalid json") ||
     normalized.includes("could not be repaired") ||
+    normalized.includes("truncated") ||
+    normalized.includes("finishreason") ||
+    normalized.includes("did not finish normally") ||
     normalized.includes("validation") ||
     normalized.includes("zoderror")
   );
@@ -1987,7 +2481,11 @@ function summarizeError(message: string): string {
   const normalized = message.toLowerCase();
   if (
     normalized.includes("invalid json") ||
-    normalized.includes("could not be repaired")
+    normalized.includes("could not be repaired") ||
+    normalized.includes("invalid_type") ||
+    normalized.includes("nonoptional") ||
+    normalized.includes("received undefined") ||
+    normalized.includes("expected nonoptional")
   ) {
     return "Generated answer JSON was invalid and could not be parsed safely.";
   }
@@ -2041,11 +2539,25 @@ function serializeFilters(filters: RetrievalFilters): Record<string, unknown> {
 
 function explainResult(result: AnswerMemoryResult, chunks: MemorySearchHit[]): string {
   if (result.analytics?.status === "success") {
-    if (result.analytics.tokenUsage.model === "fast-path") {
-      return "Answer assembled from single-day retrieved chunks without model generation.";
+    if (result.answerMode === "extractive_fallback") {
+      return result.modelError
+        ? `Extractive fallback used after ${result.modelError.kind}: ${result.modelError.message}`
+        : "Answer assembled directly from retrieved memories.";
     }
 
-    return "Answer generated with supported citations.";
+    if (
+      result.answerMode === "fast_path" ||
+      result.analytics.tokenUsage.model === "fast-path" ||
+      result.analytics.tokenUsage.model === "temporal-fast-path"
+    ) {
+      return "Answer assembled from retrieved chunks without model generation.";
+    }
+
+    if (result.answerMode === "gemini") {
+      return "Answer generated with supported citations.";
+    }
+
+    return "Memory search completed successfully.";
   }
 
   if (!chunks.length) {

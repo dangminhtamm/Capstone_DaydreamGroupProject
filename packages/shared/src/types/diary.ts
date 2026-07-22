@@ -3,6 +3,7 @@ export interface IDiaryEntry {
   title: string;
   content: string;
   mood: "great" | "good" | "neutral" | "bad";
+  tags?: string[];
   createdAt: string;
 }
 
@@ -10,4 +11,5 @@ export interface IDiaryDraft {
   title: string;
   content: string;
   mood: IDiaryEntry["mood"];
+  tags: string[];
 }

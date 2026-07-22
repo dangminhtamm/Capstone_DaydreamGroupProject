@@ -120,6 +120,8 @@ model DiaryEntry {
   entry_date DateTime @default(now())
   raw_text   String   @db.Text
   status     String   @default("draft") // e.g., draft, published
+  mood       String?
+  tags       String[] @default([])
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt

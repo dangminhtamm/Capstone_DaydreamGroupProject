@@ -44,7 +44,7 @@ export class SearchService {
           responseLanguage: lang,
         });
 
-        if (redisCached) {
+        if (redisCached && this.isCacheableCachedAnswer(redisCached)) {
           return {
             ...redisCached,
             debugTrace: null,
@@ -52,6 +52,8 @@ export class SearchService {
             answerMode: 'cache',
             cacheStorage: 'redis',
           };
+        } else if (redisCached) {
+          console.warn('Skipping stale/unsafe Redis search cache entry.');
         }
 
         const cached = await findCachedAnswer(
@@ -62,18 +64,23 @@ export class SearchService {
         );
 
         if (cached) {
-          return {
-            answer: cached.answer,
-            confidence: cached.confidence,
-            sources: this.parseJsonArray(cached.sources_json),
-            noMemory: false,
-            suggestions: [],
-            analytics: this.parseJsonObject(cached.analytics_json),
-            debugTrace: null,
-            cached: true,
-            answerMode: 'cache',
-            cacheStorage: 'database',
-          };
+          const cachedAnalytics = this.parseJsonObject(cached.analytics_json);
+          if (!this.isCacheableStoredAnswer(cachedAnalytics, cached.answer)) {
+            console.warn('Skipping stale/unsafe search cache entry with fallback or model error.');
+          } else {
+            return {
+              answer: cached.answer,
+              confidence: cached.confidence,
+              sources: this.parseJsonArray(cached.sources_json),
+              noMemory: false,
+              suggestions: [],
+              analytics: cachedAnalytics,
+              debugTrace: null,
+              cached: true,
+              answerMode: 'cache',
+              cacheStorage: 'database',
+            };
+          }
         }
       }
 
@@ -111,7 +118,11 @@ export class SearchService {
       };
 
       // ── Persist to search history (async, non-blocking) ──
-      if (this.canUseExactAnswerCache(queryDto) && !includeDebugTrace) {
+      if (
+        this.canUseExactAnswerCache(queryDto) &&
+        !includeDebugTrace &&
+        this.isCacheableLiveResult(result, answerMode)
+      ) {
         setCachedSearchAnswer(
           {
             userId: user.id,
@@ -210,6 +221,80 @@ export class SearchService {
 
   private isDefaultAnswerStrategy(strategy: SearchQueryDto['answerStrategy']) {
     return strategy === undefined || strategy === 'auto';
+  }
+
+  private isCacheableLiveResult(
+    result: {
+      answer?: string;
+      modelError?: unknown;
+      noMemory?: boolean;
+      analytics?: { status?: string; answerMode?: string } | null;
+    },
+    answerMode: string,
+  ) {
+    return (
+      !this.isLikelyIncompleteAnswer(result.answer) &&
+      !result.modelError &&
+      result.noMemory !== true &&
+      result.analytics?.status === 'success' &&
+      ['gemini', 'fast_path'].includes(answerMode)
+    );
+  }
+
+  private isCacheableCachedAnswer(value: {
+    modelError?: unknown;
+    noMemory?: boolean;
+    answerMode?: string;
+    answer?: string;
+    analytics?: unknown;
+  }) {
+    if (this.isLikelyIncompleteAnswer(value.answer)) return false;
+    if (value.modelError || value.noMemory === true) return false;
+
+    const analyticsAnswerMode = this.getAnalyticsAnswerMode(value.analytics);
+    const answerMode = value.answerMode === 'cache' ? analyticsAnswerMode : value.answerMode;
+    return ['gemini', 'fast_path'].includes(answerMode ?? '');
+  }
+
+  private isCacheableStoredAnswer(analytics: Record<string, unknown> | null, answer?: string) {
+    if (this.isLikelyIncompleteAnswer(answer)) return false;
+    if (!analytics) return false;
+
+    const status = typeof analytics.status === 'string' ? analytics.status : undefined;
+    const answerMode = this.getAnalyticsAnswerMode(analytics);
+    return status === 'success' && ['gemini', 'fast_path'].includes(answerMode ?? '');
+  }
+
+  private getAnalyticsAnswerMode(analytics: unknown) {
+    if (!analytics || typeof analytics !== 'object') return undefined;
+
+    const answerMode = (analytics as { answerMode?: unknown }).answerMode;
+    return typeof answerMode === 'string' ? answerMode : undefined;
+  }
+
+  private isLikelyIncompleteAnswer(answer: unknown) {
+    if (typeof answer !== 'string') return false;
+
+    const trimmed = answer.replace(/\s+/g, ' ').trim();
+    if (!trimmed) return true;
+
+    const hasTerminalPunctuation = /[.!?…。！？]$/u.test(trimmed);
+    const normalized = trimmed
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase();
+    const words = normalized.split(/\s+/).filter(Boolean);
+    const lastWord = words.at(-1) ?? '';
+
+    if (!hasTerminalPunctuation && lastWord.length <= 1) return true;
+    if (
+      !hasTerminalPunctuation &&
+      /\b(?:to claim|claim|because|because of|due to|in order to|so that|such as|for example|including|include)$/iu.test(normalized)
+    ) {
+      return true;
+    }
+
+    return /\b(?:minh|ban|ve|vi|boi|any|about|because|the|a|an|is|are|was|were|to|for|of|and|or)$/iu.test(normalized);
   }
 
   private debugTraceEnabled() {

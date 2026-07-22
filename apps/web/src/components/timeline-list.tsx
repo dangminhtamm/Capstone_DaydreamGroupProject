@@ -4,12 +4,14 @@ import { useMemo, useState } from "react";
 import { formatDateTime } from "@second-brain/shared";
 import { EditDiaryModal } from "./edit-diary-modal";
 import { ConfirmDialog } from "./confirm-dialog";
-import type { DiaryAttachment, DiaryCalendarEvent, UpdateDiaryPayload } from "@/lib/api-client";
+import type { DiaryAttachment, DiaryCalendarEvent, DiaryMood, UpdateDiaryPayload } from "@/lib/api-client";
 
 type DiaryEntry = {
   id: string;
   title: string;
   content: string;
+  mood?: DiaryMood | null;
+  tags?: string[];
   attachments?: Array<string | DiaryAttachment>;
   calendarEvents?: DiaryCalendarEvent[];
   createdAt: Date | string;
@@ -23,6 +25,25 @@ type TimelineListProps = {
 };
 
 const PAGE_SIZE = 5;
+
+const MOOD_META: Record<DiaryMood, { label: string; className: string }> = {
+  great: {
+    label: "Great",
+    className: "bg-emerald-50 text-emerald-700 ring-emerald-100 dark:bg-emerald-900/30 dark:text-emerald-300 dark:ring-emerald-800",
+  },
+  good: {
+    label: "Good",
+    className: "bg-sky-50 text-sky-700 ring-sky-100 dark:bg-sky-900/30 dark:text-sky-300 dark:ring-sky-800",
+  },
+  neutral: {
+    label: "Neutral",
+    className: "bg-slate-100 text-slate-700 ring-slate-200 dark:bg-slate-700 dark:text-slate-200 dark:ring-slate-600",
+  },
+  bad: {
+    label: "Bad",
+    className: "bg-rose-50 text-rose-700 ring-rose-100 dark:bg-rose-900/30 dark:text-rose-300 dark:ring-rose-800",
+  },
+};
 
 function isAttachmentObject(value: string | DiaryAttachment): value is DiaryAttachment {
   return typeof value === "object" && value !== null;
@@ -92,7 +113,7 @@ export function TimelineList({ entries, onUpdate, onDelete }: TimelineListProps)
     setTimeout(() => setToast(null), 3000);
   };
 
-  const handleSaveEdit = async (data: { title: string; content: string }) => {
+  const handleSaveEdit = async (data: { title: string; content: string; mood: DiaryMood; tags: string[] }) => {
     if (!editingEntry || !onUpdate) return;
     setIsSaving(true);
     try {
@@ -211,6 +232,24 @@ export function TimelineList({ entries, onUpdate, onDelete }: TimelineListProps)
                   </svg>
                   <time className="font-medium">{formatDateTime(entry.createdAt)}</time>
                 </div>
+                {(entry.mood || entry.tags?.length) && (
+                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                    {entry.mood ? (
+                      <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ring-1 ${MOOD_META[entry.mood].className}`}>
+                        <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                        {MOOD_META[entry.mood].label}
+                      </span>
+                    ) : null}
+                    {entry.tags?.map((tag) => (
+                      <span
+                        key={tag}
+                        className="inline-flex items-center rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700 ring-1 ring-indigo-100 dark:bg-indigo-900/30 dark:text-indigo-300 dark:ring-indigo-800"
+                      >
+                        #{tag}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
               
               {/* Content */}
@@ -368,6 +407,8 @@ export function TimelineList({ entries, onUpdate, onDelete }: TimelineListProps)
         isOpen={editingEntry !== null}
         initialTitle={editingEntry?.title ?? ""}
         initialContent={editingEntry?.content ?? ""}
+        initialMood={editingEntry?.mood ?? "neutral"}
+        initialTags={editingEntry?.tags ?? []}
         isLoading={isSaving}
         onSave={handleSaveEdit}
         onCancel={() => setEditingEntry(null)}

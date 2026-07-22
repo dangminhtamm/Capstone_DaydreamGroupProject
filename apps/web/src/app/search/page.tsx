@@ -26,6 +26,7 @@ type SearchCitation = {
 
 type AnswerMode = "cache" | "fast_path" | "gemini" | "extractive_fallback" | "no_memory";
 type AnswerStrategy = "auto" | "fast" | "deep";
+type SourceScope = "all" | "diary" | "calendar" | "attachment" | "summary";
 
 type QueryAnalytics = {
   tokenUsage: {
@@ -102,6 +103,14 @@ const answerStrategies: Array<{ value: AnswerStrategy; label: string }> = [
   { value: "deep", label: "Deep" },
 ];
 
+const sourceScopes: Array<{ value: SourceScope; label: string }> = [
+  { value: "all", label: "All" },
+  { value: "diary", label: "Diary" },
+  { value: "calendar", label: "Calendar" },
+  { value: "attachment", label: "Files" },
+  { value: "summary", label: "Summary" },
+];
+
 const confidenceStyles = {
   high: "bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:ring-emerald-700",
   medium: "bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:ring-amber-700",
@@ -146,6 +155,52 @@ function formatAnswerMode(value?: AnswerMode) {
   }
 }
 
+function isJsonFormatModelError(error: NonNullable<SearchResponse["modelError"]>) {
+  const message = error.message.toLowerCase();
+  return (
+    error.kind === "validation" &&
+    (message.includes("json") ||
+      message.includes("parse") ||
+      message.includes("schema") ||
+      message.includes("truncated") ||
+      message.includes("finishreason") ||
+      message.includes("max_tokens") ||
+      message.includes("invalid_type") ||
+      message.includes("nonoptional") ||
+      message.includes("expected") ||
+      message.includes("undefined"))
+  );
+}
+
+function formatModelErrorTitle(error: NonNullable<SearchResponse["modelError"]>) {
+  if (error.kind === "quota") return "Gemini quota/rate limit reached";
+  if (error.kind === "service_unavailable") return "Gemini service unavailable";
+  if (error.kind === "validation") {
+    return isJsonFormatModelError(error)
+      ? "Gemini response format issue"
+      : "Grounding/citation validation fallback";
+  }
+  return "Gemini generation unavailable";
+}
+
+function formatModelErrorMessage(error: NonNullable<SearchResponse["modelError"]>) {
+  if (error.kind === "quota") {
+    return "Gemini quota/rate limit was reached. Showing the best retrieved memories instead.";
+  }
+
+  if (error.kind === "validation") {
+    if (error.message.toLowerCase().includes("truncated")) {
+      return "Gemini response was cut off before valid JSON completed. Showing the best grounded memories instead.";
+    }
+
+    return isJsonFormatModelError(error)
+      ? "Gemini returned invalid JSON. Showing the best grounded memories instead."
+      : `${error.message} Showing the best grounded memories instead.`;
+  }
+
+  return error.message;
+}
+
 function highlightQuote(quote: string, claim?: string) {
   const cleanClaim = claim?.replace(/\s+/g, " ").trim();
   if (!cleanClaim || cleanClaim.length < 8) return quote;
@@ -188,6 +243,7 @@ export default function SearchPage() {
   const [isSearching, setIsSearching] = useState(false);
   const [responseLanguage, setResponseLanguage] = useState<ResponseLanguage>("en");
   const [answerStrategy, setAnswerStrategy] = useState<AnswerStrategy>("auto");
+  const [sourceScope, setSourceScope] = useState<SourceScope>("all");
   const [showAuthPrompt, setShowAuthPrompt] = useState(false);
   const [analyticsOpen, setAnalyticsOpen] = useState(false);
   const [searchHistory, setSearchHistory] = useState<SearchHistoryEntry[]>([]);
@@ -201,6 +257,11 @@ export default function SearchPage() {
     const savedStrategy = localStorage.getItem("dd-answer-strategy") as AnswerStrategy | null;
     if (savedStrategy === "auto" || savedStrategy === "fast" || savedStrategy === "deep") {
       setAnswerStrategy(savedStrategy);
+    }
+
+    const savedSourceScope = localStorage.getItem("dd-source-scope") as SourceScope | null;
+    if (savedSourceScope === "all" || savedSourceScope === "diary" || savedSourceScope === "calendar" || savedSourceScope === "attachment" || savedSourceScope === "summary") {
+      setSourceScope(savedSourceScope);
     }
   }, []);
 
@@ -289,6 +350,7 @@ export default function SearchPage() {
           question: normalizedQuestion,
           limit: 8,
           responseLanguage,
+          ...(sourceScope === "all" ? {} : { sourceType: sourceScope }),
           ...(answerStrategy === "auto" ? {} : { answerStrategy }),
         }),
       });
@@ -324,7 +386,7 @@ export default function SearchPage() {
     } finally {
       setIsSearching(false);
     }
-  }, [answerStrategy, getAccessToken, isAuthenticated, loadServerHistory, responseLanguage]);
+  }, [answerStrategy, getAccessToken, isAuthenticated, loadServerHistory, responseLanguage, sourceScope]);
 
   async function handleSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -413,6 +475,32 @@ export default function SearchPage() {
                         }`}
                       >
                         {strategy.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white/70 px-3 py-2 dark:border-slate-700 dark:bg-slate-800/50">
+                <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Source scope</span>
+                <div className="inline-flex flex-wrap rounded-xl border border-slate-200 bg-slate-50 p-1 dark:border-slate-700 dark:bg-slate-900/40">
+                  {sourceScopes.map((scope) => {
+                    const active = sourceScope === scope.value;
+                    return (
+                      <button
+                        key={scope.value}
+                        type="button"
+                        onClick={() => {
+                          setSourceScope(scope.value);
+                          localStorage.setItem("dd-source-scope", scope.value);
+                        }}
+                        className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                          active
+                            ? "bg-sky-600 text-white shadow-sm"
+                            : "text-slate-600 hover:bg-white hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
+                        }`}
+                      >
+                        {scope.label}
                       </button>
                     );
                   })}
@@ -651,16 +739,10 @@ export default function SearchPage() {
             <div className="space-y-4">
               <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4 dark:border-amber-700/60 dark:bg-amber-900/20">
                 <p className="text-sm font-semibold text-amber-900 dark:text-amber-200">
-                  {result.modelError.kind === "validation"
-                    ? "Gemini response format issue"
-                    : "Gemini generation unavailable"}
+                  {formatModelErrorTitle(result.modelError)}
                 </p>
                 <p className="mt-1 text-xs leading-5 text-amber-800 dark:text-amber-300">
-                  {result.modelError.kind === "quota"
-                    ? "Gemini quota/rate limit was reached. Showing the best retrieved memories instead."
-                    : result.modelError.kind === "validation"
-                      ? "Gemini returned invalid JSON. Showing the best grounded memories instead."
-                      : result.modelError.message}
+                  {formatModelErrorMessage(result.modelError)}
                 </p>
               </div>
               <div className="rounded-2xl border border-indigo-100 bg-indigo-50/40 p-4 dark:border-indigo-800 dark:bg-indigo-900/20">

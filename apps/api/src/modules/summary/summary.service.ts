@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { getGeminiSummaryModel } from '@second-brain/ai';
 import { PrismaService } from '../../prisma/prisma.service';
 import { invalidateUserSearchCache } from '../../common/cache/search-answer-cache';
 import type { CreateSummaryDto } from './dto/create-summary.dto';
@@ -368,7 +369,7 @@ export class SummaryService {
     }
 
     const model = this.getGeminiClient(apiKey).getGenerativeModel({
-      model: process.env.GEMINI_SUMMARY_MODEL ?? process.env.GEMINI_ANSWER_MODEL ?? 'gemini-2.5-flash',
+      model: getGeminiSummaryModel(),
     });
 
     const prompt = buildSummaryPrompt(type, period, context);

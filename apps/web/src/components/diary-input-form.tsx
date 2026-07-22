@@ -9,12 +9,15 @@ import {
   uploadDiaryAttachment,
   type AttachmentUploadResponse,
   type CreateDiaryPayload,
+  type DiaryMood,
 } from "@/lib/api-client";
 
 type DiaryDraft = {
   title: string;
   content: string;
   entryDate: string;
+  mood: DiaryMood;
+  tags: string[];
 };
 
 type SaveState = "idle" | "saving" | "success" | "error";
@@ -61,7 +64,50 @@ const initialDraft: DiaryDraft = {
   title: "",
   content: "",
   entryDate: getLocalDateInputValue(),
+  mood: "neutral",
+  tags: [],
 };
+
+const MOOD_OPTIONS: Array<{
+  value: DiaryMood;
+  label: string;
+  description: string;
+  className: string;
+}> = [
+  {
+    value: "great",
+    label: "Great",
+    description: "Energized",
+    className: "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300",
+  },
+  {
+    value: "good",
+    label: "Good",
+    description: "Steady",
+    className: "border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-800 dark:bg-sky-900/30 dark:text-sky-300",
+  },
+  {
+    value: "neutral",
+    label: "Neutral",
+    description: "Balanced",
+    className: "border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-600 dark:bg-slate-700/50 dark:text-slate-200",
+  },
+  {
+    value: "bad",
+    label: "Bad",
+    description: "Difficult",
+    className: "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-800 dark:bg-rose-900/30 dark:text-rose-300",
+  },
+];
+
+function normalizeTag(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/^#+/, "")
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9-_]/g, "");
+}
 
 type TemplateLang = "en" | "vi";
 
@@ -274,6 +320,7 @@ export function DiaryInputForm() {
   const [activeCopilotAction, setActiveCopilotAction] = useState("");
   const [templateLang, setTemplateLang] = useState<TemplateLang>("vi");
   const [attachmentItems, setAttachmentItems] = useState<AttachmentQueueItem[]>([]);
+  const [tagInput, setTagInput] = useState("");
 
   // Sync template language from system preference on mount
   useEffect(() => {
@@ -315,6 +362,32 @@ export function DiaryInputForm() {
 
   function removeAttachment(id: string) {
     setAttachmentItems((current) => current.filter((item) => item.id !== id));
+  }
+
+  function addTag(value = tagInput) {
+    const normalized = normalizeTag(value);
+    if (!normalized) return;
+
+    setDraft((prev) => {
+      if (prev.tags.includes(normalized) || prev.tags.length >= 12) return prev;
+      return { ...prev, tags: [...prev.tags, normalized] };
+    });
+    setTagInput("");
+  }
+
+  function removeTag(tag: string) {
+    setDraft((prev) => ({ ...prev, tags: prev.tags.filter((item) => item !== tag) }));
+  }
+
+  function handleTagInputKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Enter" || event.key === ",") {
+      event.preventDefault();
+      addTag();
+    }
+
+    if (event.key === "Backspace" && !tagInput && draft.tags.length) {
+      setDraft((prev) => ({ ...prev, tags: prev.tags.slice(0, -1) }));
+    }
   }
 
   function getAttachmentMessage(response: AttachmentUploadResponse) {
@@ -436,6 +509,8 @@ export function DiaryInputForm() {
         title: draft.title.trim(),
         content: draft.content.trim(),
         entryDate: new Date(`${draft.entryDate}T12:00:00`).toISOString(),
+        mood: draft.mood,
+        tags: draft.tags,
       };
 
       const diaryEntry = await createDiaryEntry(payload, accessToken);
@@ -478,6 +553,7 @@ export function DiaryInputForm() {
       }
 
       setDraft(initialDraft);
+      setTagInput("");
       if (attachmentHadErrors) {
         setState("error");
         setErrorMessage("Diary saved, but one or more attachments failed. Check the file status above.");
@@ -568,6 +644,76 @@ export function DiaryInputForm() {
             value={draft.entryDate}
             onChange={(event) => setDraft((prev) => ({ ...prev, entryDate: event.target.value }))}
           />
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-[1fr_1.1fr]">
+          <div>
+            <p className="mb-2 text-sm font-semibold text-slate-700 dark:text-slate-300">
+              Mood
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              {MOOD_OPTIONS.map((option) => {
+                const isSelected = draft.mood === option.value;
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setDraft((prev) => ({ ...prev, mood: option.value }))}
+                    className={`min-h-16 rounded-2xl border px-3 py-2 text-left transition ${
+                      isSelected
+                        ? `${option.className} ring-2 ring-indigo-300 dark:ring-indigo-600`
+                        : "border-slate-200 bg-white/70 text-slate-600 hover:border-indigo-200 hover:bg-indigo-50/30 dark:border-slate-600 dark:bg-slate-700/40 dark:text-slate-300 dark:hover:border-indigo-600 dark:hover:bg-indigo-900/20"
+                    }`}
+                    aria-pressed={isSelected}
+                  >
+                    <span className="block text-sm font-semibold">{option.label}</span>
+                    <span className="mt-0.5 block text-xs opacity-75">{option.description}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
+            <label htmlFor="tags" className="mb-2 block text-sm font-semibold text-slate-700 dark:text-slate-300">
+              Tags
+            </label>
+            <div className="min-h-16 rounded-2xl border border-slate-200 bg-white/80 px-3 py-2 shadow-inner transition focus-within:border-indigo-400 focus-within:bg-white focus-within:ring-4 focus-within:ring-indigo-100 dark:border-slate-600 dark:bg-slate-700/60 dark:focus-within:border-indigo-500 dark:focus-within:bg-slate-700 dark:focus-within:ring-indigo-900/40">
+              <div className="flex flex-wrap items-center gap-2">
+                {draft.tags.map((tag) => (
+                  <span
+                    key={tag}
+                    className="inline-flex items-center gap-1.5 rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700 ring-1 ring-indigo-100 dark:bg-indigo-900/30 dark:text-indigo-300 dark:ring-indigo-800"
+                  >
+                    #{tag}
+                    <button
+                      type="button"
+                      onClick={() => removeTag(tag)}
+                      className="rounded-full text-indigo-400 transition hover:text-indigo-700 dark:hover:text-indigo-100"
+                      aria-label={`Remove ${tag} tag`}
+                    >
+                      <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18 18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </span>
+                ))}
+                <input
+                  id="tags"
+                  value={tagInput}
+                  onChange={(event) => setTagInput(event.target.value)}
+                  onKeyDown={handleTagInputKeyDown}
+                  onBlur={() => addTag()}
+                  maxLength={32}
+                  placeholder={draft.tags.length ? "Add another tag" : "project, health, meeting"}
+                  className="min-w-40 flex-1 bg-transparent px-1 py-1.5 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:text-slate-100 dark:placeholder:text-slate-500"
+                />
+              </div>
+            </div>
+            <p className="mt-1.5 text-xs text-slate-400 dark:text-slate-500">
+              {draft.tags.length}/12 tags
+            </p>
+          </div>
         </div>
 
         <div>

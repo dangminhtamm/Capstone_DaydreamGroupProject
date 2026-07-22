@@ -1,10 +1,14 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
+export type DiaryMood = 'great' | 'good' | 'neutral' | 'bad';
+
 // Types - match backend DTO
 export type DiaryEntry = {
   id: string;
   title: string;
   content: string;
+  mood?: DiaryMood | null;
+  tags?: string[];
   attachments?: Array<string | DiaryAttachment>;
   calendarEvents?: DiaryCalendarEvent[];
   entryDate?: string;
@@ -37,6 +41,8 @@ export type DiaryCalendarEvent = {
 export type CreateDiaryPayload = {
   title: string;
   content: string;
+  mood?: DiaryMood | null;
+  tags?: string[];
   attachments?: string[];
   entryDate?: string;
 };
@@ -136,6 +142,8 @@ export async function getDiaryEntry(
 export type UpdateDiaryPayload = {
   title?: string;
   content?: string;
+  mood?: DiaryMood | null;
+  tags?: string[];
   attachments?: string[];
   entryDate?: string;
 };

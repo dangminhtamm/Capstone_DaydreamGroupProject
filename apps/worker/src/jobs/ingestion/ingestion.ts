@@ -8,6 +8,7 @@ import {
   pruneMemoryChunksForSource,
 } from '@second-brain/db';
 import {
+  getGeminiVisionModel,
   indexMemoryFromAttachment,
   indexMemoryFromCalendar,
   indexMemoryFromDiary,
@@ -92,7 +93,7 @@ export class DataIngestionJob {
 
     const ai = new GoogleGenerativeAI(apiKey);
     const model = ai.getGenerativeModel({
-      model: process.env.GEMINI_VISION_MODEL ?? 'gemini-2.5-flash',
+      model: getGeminiVisionModel(),
     });
 
     const prompt = `
@@ -125,6 +126,7 @@ Return only the extracted text or factual description.
   static async processPendingIndexingJobs(batchSize = 10): Promise<DrainResult> {
     const resetStale = await this.resetStaleJobs();
     const jobs = await this.claimJobs(batchSize);
+    const jobDelayMs = this.getInterJobDelayMs();
     const result: DrainResult = {
       found: jobs.length,
       claimed: jobs.length,
@@ -135,7 +137,7 @@ Return only the extracted text or factual description.
     };
     this.metrics.jobs_claimed_total += jobs.length;
 
-    for (const job of jobs) {
+    for (const [index, job] of jobs.entries()) {
       const jobStart = Date.now();
       try {
         await this.processJob(job);
@@ -151,6 +153,10 @@ Return only the extracted text or factual description.
         }
       } finally {
         this.recordJobDuration(Date.now() - jobStart);
+      }
+
+      if (jobDelayMs > 0 && index < jobs.length - 1) {
+        await this.sleep(jobDelayMs);
       }
     }
 
@@ -258,11 +264,20 @@ Return only the extracted text or factual description.
       typeof job.payload?.sourceTitle === 'string'
         ? job.payload.sourceTitle
         : diary.raw_text.split('\n')[0]?.trim() || 'Diary entry';
+    const tags = Array.isArray((diary as any).tags) ? (diary as any).tags : [];
+    const mood = typeof (diary as any).mood === 'string' ? (diary as any).mood : null;
+    const metadataContext = [
+      mood ? `Mood: ${mood}` : '',
+      tags.length ? `Tags: ${tags.join(', ')}` : '',
+    ].filter(Boolean).join('\n');
+    const rawTextForIndex = metadataContext
+      ? `${diary.raw_text}\n\n${metadataContext}`
+      : diary.raw_text;
 
     const indexingResult = await indexMemoryFromDiary({
       userId: job.user_id,
       diaryId: diary.id,
-      rawText: diary.raw_text,
+      rawText: rawTextForIndex,
       entryDate: diary.entry_date,
       sourceTitle: title,
       insertChunks: (chunks) =>
@@ -496,6 +511,32 @@ Return only the extracted text or factual description.
   private static toErrorMessage(error: unknown) {
     if (error instanceof Error) return error.message;
     return String(error);
+  }
+
+  private static getInterJobDelayMs() {
+    const configuredDelay = Number(process.env.INDEXING_JOB_DELAY_MS);
+    if (Number.isFinite(configuredDelay)) {
+      return Math.max(0, Math.floor(configuredDelay));
+    }
+
+    return this.usesLowFreeTierGeminiModel() ? 15_000 : 0;
+  }
+
+  private static usesLowFreeTierGeminiModel() {
+    const configuredModels = [
+      process.env.GEMINI_CHUNK_MODEL,
+      process.env.GEMINI_VISION_MODEL,
+      process.env.GEMINI_SUMMARY_MODEL,
+      process.env.GEMINI_ANSWER_MODEL,
+    ]
+      .filter(Boolean)
+      .join(' ');
+
+    return configuredModels.includes('gemini-2.5-flash');
+  }
+
+  private static sleep(ms: number) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   static getMetrics(): WorkerMetricsSnapshot {

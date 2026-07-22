@@ -5,13 +5,16 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { getGeminiAnswerModel } from '@second-brain/ai';
 import {
   deleteMemoryChunksForSource,
 } from '@second-brain/db';
 import { invalidateUserSearchCache } from '../../common/cache/search-answer-cache';
 import { PrismaService } from '../../prisma/prisma.service'; // Adjust path based on your setup
 import { StorageService } from '../../storage/storage.service';
-import { CreateDiaryDto } from './dto/create-diary.dto';
+import { CreateDiaryDto, DIARY_MOODS } from './dto/create-diary.dto';
+
+type DiaryMood = (typeof DIARY_MOODS)[number];
 
 @Injectable()
 export class DiaryService {
@@ -29,11 +32,15 @@ export class DiaryService {
     if (!user) throw new NotFoundException('User not found');
 
     const entry = await this.prisma.$transaction(async (tx) => {
+      const tags = this.normalizeTags(dto.tags);
+      const mood = this.normalizeMood(dto.mood);
       const created = await tx.diaryEntry.create({
         data: {
           raw_text: `${dto.title}\n\n${dto.content}`,
           user_id: user.id,
           status: 'published',
+          ...(mood ? { mood } : {}),
+          tags,
           ...(dto.entryDate ? { entry_date: new Date(dto.entryDate) } : {}),
         },
       });
@@ -42,7 +49,7 @@ export class DiaryService {
         userId: user.id,
         sourceType: 'diary',
         sourceId: created.id,
-        payload: { sourceTitle: dto.title },
+        payload: { sourceTitle: dto.title, mood, tags },
       });
 
       return created;
@@ -70,6 +77,8 @@ export class DiaryService {
         id: true,
         raw_text: true,
         status: true,
+        mood: true,
+        tags: true,
         entry_date: true,
         created_at: true,
         updated_at: true,
@@ -134,12 +143,16 @@ export class DiaryService {
     const content = dto.content ?? existingClientEntry.content;
     const rawText = this.buildRawText(title, content);
     const entryDate = dto.entryDate ? new Date(dto.entryDate) : undefined;
+    const mood = this.normalizeMood(dto.mood);
+    const tags = dto.tags === undefined ? undefined : this.normalizeTags(dto.tags);
 
     const entry = await this.prisma.$transaction(async (tx) => {
       const updated = await tx.diaryEntry.update({
         where: { id },
         data: {
           raw_text: rawText,
+          ...(dto.mood !== undefined ? { mood } : {}),
+          ...(tags !== undefined ? { tags } : {}),
           ...(entryDate ? { entry_date: entryDate } : {}),
         },
       });
@@ -148,7 +161,11 @@ export class DiaryService {
         userId: user.id,
         sourceType: 'diary',
         sourceId: id,
-        payload: { sourceTitle: title },
+        payload: {
+          sourceTitle: title,
+          mood: dto.mood !== undefined ? mood : existingClientEntry.mood,
+          tags: tags ?? existingClientEntry.tags,
+        },
       });
 
       return updated;
@@ -255,10 +272,45 @@ export class DiaryService {
     return `${title.trim()}\n\n${content.trim()}`;
   }
 
+  private normalizeMood(value?: string | null): DiaryMood | null {
+    if (!value) return null;
+
+    const normalized = value.trim().toLowerCase();
+    return DIARY_MOODS.includes(normalized as DiaryMood)
+      ? (normalized as DiaryMood)
+      : null;
+  }
+
+  private normalizeTags(tags?: string[] | null) {
+    if (!tags?.length) return [];
+
+    const seen = new Set<string>();
+    const normalizedTags: string[] = [];
+
+    for (const tag of tags) {
+      const normalized = tag
+        .trim()
+        .toLowerCase()
+        .replace(/^#+/, '')
+        .replace(/\s+/g, '-')
+        .replace(/[^a-z0-9-_]/g, '');
+
+      if (!normalized || seen.has(normalized)) continue;
+      seen.add(normalized);
+      normalizedTags.push(normalized);
+
+      if (normalizedTags.length >= 12) break;
+    }
+
+    return normalizedTags;
+  }
+
   private async toClientEntry(entry: {
     id: string;
     raw_text: string;
     status: string;
+    mood?: string | null;
+    tags?: string[] | null;
     created_at: Date;
     updated_at: Date;
     entry_date?: Date | null;
@@ -320,6 +372,8 @@ export class DiaryService {
         endTime: event.end_time.toISOString(),
         htmlLink: event.html_link ?? null,
       })),
+      mood: this.normalizeMood(entry.mood) ?? null,
+      tags: entry.tags ?? [],
       status: entry.status,
       entryDate: entry.entry_date?.toISOString(),
       createdAt: entry.created_at.toISOString(),
@@ -399,7 +453,7 @@ export class DiaryService {
   }
 
   async copilot(userId: string, text: string, action: string) {
-    const modelName = process.env.GEMINI_ANSWER_MODEL ?? 'gemini-2.5-flash';
+    const modelName = getGeminiAnswerModel();
     const model = this.getGeminiClient().getGenerativeModel({
       model: modelName,
       generationConfig: { temperature: 0.7 },

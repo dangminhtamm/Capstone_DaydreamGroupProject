@@ -2,7 +2,7 @@ import {
   GoogleGenerativeAI,
   type ResponseSchema,
 } from "@google/generative-ai";
-import type { z } from "zod";
+import { ZodError, type z } from "zod";
 
 export interface GenerateGeminiJsonOptions<T> {
   model: string;
@@ -72,12 +72,23 @@ export async function generateGeminiJsonWithMeta<T>(
   const maxRetries = Number.isFinite(configuredRetries)
     ? Math.max(0, Math.floor(configuredRetries))
     : 2;
+  const configuredFormatRetries = Number(process.env.GEMINI_JSON_FORMAT_RETRIES ?? 1);
+  const maxFormatRetries = Number.isFinite(configuredFormatRetries)
+    ? Math.max(0, Math.floor(configuredFormatRetries))
+    : 1;
+  let formatRetries = 0;
+  let transientRetries = 0;
+  const maxAttempts = maxRetries + maxFormatRetries;
 
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+  for (let attempt = 0; attempt <= maxAttempts; attempt++) {
     try {
-      const result = await model.generateContent(options.prompt);
+      const prompt = formatRetries > 0
+        ? buildJsonOnlyRetryPrompt(options.prompt, lastError)
+        : options.prompt;
+      const result = await model.generateContent(prompt);
       const response = result.response;
       const text = response.text();
+      assertGeminiResponseComplete(response, text);
       const parsed = parseJsonResponse(text);
       const validated = options.validator.parse(parsed);
 
@@ -94,21 +105,96 @@ export async function generateGeminiJsonWithMeta<T>(
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
 
-      // Only retry on transient/network errors, not on validation failures.
+      if (isJsonFormatError(lastError) && formatRetries < maxFormatRetries) {
+        formatRetries++;
+        maybeLogInvalidJson(lastError);
+        continue;
+      }
+
+      // Only retry on transient/network errors after format repair attempts.
       const isTransient = isTransientGeminiError(lastError);
       if (isQuotaExhaustedError(lastError)) break;
 
-      if (!isTransient || attempt === maxRetries) break;
+      if (!isTransient || transientRetries >= maxRetries) break;
 
-      const delayMs = getRetryDelayMs(lastError, attempt);
+      const delayMs = getRetryDelayMs(lastError, transientRetries);
+      transientRetries++;
       console.warn(
-        `[GeminiJSON] ${summarizeTransientError(lastError)}; retrying in ${delayMs}ms (attempt ${attempt + 1}/${maxRetries + 1}).`,
+        `[GeminiJSON] ${summarizeTransientError(lastError)}; retrying in ${delayMs}ms (attempt ${transientRetries}/${maxRetries}).`,
       );
       await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
   }
 
   throw lastError!;
+}
+
+function buildJsonOnlyRetryPrompt(originalPrompt: string, error: Error | null): string {
+  const errorHint = error ? summarizeJsonFormatError(error) : "The previous response was not valid JSON.";
+
+  return `
+${originalPrompt}
+
+The previous response could not be parsed by the application.
+Reason: ${errorHint}
+
+Return ONLY one valid JSON object.
+Do not include markdown fences, prose, comments, trailing commas, or text before/after the JSON.
+The JSON must match the requested schema exactly.
+`.trim();
+}
+
+function isJsonFormatError(error: Error): boolean {
+  return (
+    error instanceof ZodError ||
+    error.message.includes("Gemini returned invalid JSON") ||
+    error.message.includes("could not be repaired") ||
+    error.message.includes("truncated") ||
+    error.message.includes("finishReason") ||
+    error.message.includes("Unexpected token") ||
+    error.message.includes("Unexpected end of JSON input")
+  );
+}
+
+function assertGeminiResponseComplete(response: unknown, text: string): void {
+  const finishReason = getGeminiFinishReason(response);
+  if (!finishReason || finishReason === "STOP") return;
+
+  const preview = text.replace(/\s+/g, " ").slice(0, 180);
+  if (finishReason === "MAX_TOKENS") {
+    throw new Error(
+      `Gemini response was truncated before valid JSON could be completed (finishReason=${finishReason}). Partial output: ${preview}`,
+    );
+  }
+
+  throw new Error(
+    `Gemini response did not finish normally (finishReason=${finishReason}). Partial output: ${preview}`,
+  );
+}
+
+function getGeminiFinishReason(response: unknown): string | undefined {
+  const candidates = (response as { candidates?: unknown })?.candidates;
+  if (!Array.isArray(candidates)) return undefined;
+
+  const finishReason = (candidates[0] as { finishReason?: unknown } | undefined)?.finishReason;
+  return typeof finishReason === "string" ? finishReason : undefined;
+}
+
+function summarizeJsonFormatError(error: Error): string {
+  if (error instanceof ZodError) {
+    const issues = error.issues
+      .slice(0, 3)
+      .map((issue) => `${issue.path.join(".") || "root"}: ${issue.message}`)
+      .join("; ");
+    return `Schema validation failed${issues ? ` (${issues})` : ""}.`;
+  }
+
+  return error.message.replace(/\s+/g, " ").slice(0, 220);
+}
+
+function maybeLogInvalidJson(error: Error): void {
+  if (process.env.GEMINI_JSON_LOG_INVALID !== "1") return;
+  console.warn(`[GeminiJSON] Retrying because JSON output was invalid: ${summarizeJsonFormatError(error)}`);
 }
 
 function isTransientGeminiError(error: Error): boolean {
@@ -210,7 +296,7 @@ function summarizeTransientError(error: Error): string {
   return `${label}: ${error.message.replace(/\s+/g, " ").slice(0, 180)}`;
 }
 
-function parseJsonResponse(text: string): unknown {
+export function parseJsonResponse(text: string): unknown {
   let normalized = text.trim();
 
   // Step 1: Strip markdown fences if present
@@ -226,13 +312,26 @@ function parseJsonResponse(text: string): unknown {
     // continue to fallback
   }
 
-  // Step 3: Attempt to repair truncated JSON by closing open brackets
+  // Step 3: Extract a valid JSON object/array from surrounding prose.
+  const balancedCandidate = extractFirstBalancedJsonCandidate(normalized);
+  if (balancedCandidate !== null && balancedCandidate !== normalized) {
+    try {
+      return JSON.parse(balancedCandidate);
+    } catch {
+      const repairedCandidate = attemptJsonRepair(balancedCandidate);
+      if (repairedCandidate !== null) {
+        return repairedCandidate;
+      }
+    }
+  }
+
+  // Step 4: Attempt to repair truncated JSON by closing open brackets
   const repaired = attemptJsonRepair(normalized);
   if (repaired !== null) {
     return repaired;
   }
 
-  // Step 4: Try to extract the first JSON-like object or array
+  // Step 5: Try to extract the first JSON-like object or array
   const objectMatch = normalized.match(/(\{[\s\S]*)/)
     || normalized.match(/(\[[\s\S]*)/);
   if (objectMatch) {
@@ -244,6 +343,60 @@ function parseJsonResponse(text: string): unknown {
   }
 
   throw new Error(`Gemini returned invalid JSON that could not be repaired: ${normalized.slice(0, 500)}`);
+}
+
+function extractFirstBalancedJsonCandidate(text: string): string | null {
+  const start = findJsonStart(text);
+  if (start === -1) return null;
+
+  const stack: string[] = [];
+  let inString = false;
+  let escape = false;
+
+  for (let index = start; index < text.length; index++) {
+    const char = text[index];
+
+    if (escape) {
+      escape = false;
+      continue;
+    }
+
+    if (char === "\\") {
+      if (inString) escape = true;
+      continue;
+    }
+
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+
+    if (inString) continue;
+
+    if (char === "{" || char === "[") {
+      stack.push(char === "{" ? "}" : "]");
+      continue;
+    }
+
+    if (char === "}" || char === "]") {
+      const expected = stack.pop();
+      if (expected !== char) return null;
+      if (stack.length === 0) {
+        return text.slice(start, index + 1).trim();
+      }
+    }
+  }
+
+  return null;
+}
+
+function findJsonStart(text: string): number {
+  const objectStart = text.indexOf("{");
+  const arrayStart = text.indexOf("[");
+
+  if (objectStart === -1) return arrayStart;
+  if (arrayStart === -1) return objectStart;
+  return Math.min(objectStart, arrayStart);
 }
 
 /**

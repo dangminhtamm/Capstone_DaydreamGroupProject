@@ -1,4 +1,15 @@
-import { IsString, IsNotEmpty, IsOptional, IsArray, IsDateString } from 'class-validator';
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsDateString,
+  IsIn,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from 'class-validator';
+
+export const DIARY_MOODS = ['great', 'good', 'neutral', 'bad'] as const;
 
 export class CreateDiaryDto {
   @IsString()
@@ -17,4 +28,15 @@ export class CreateDiaryDto {
   @IsDateString()
   @IsOptional()
   entryDate?: string;
+
+  @IsIn(DIARY_MOODS)
+  @IsOptional()
+  mood?: (typeof DIARY_MOODS)[number];
+
+  @IsArray()
+  @ArrayMaxSize(12)
+  @IsString({ each: true })
+  @MaxLength(32, { each: true })
+  @IsOptional()
+  tags?: string[];
 }

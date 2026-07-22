@@ -4,6 +4,12 @@ import {
   createDefaultEmbeddingProvider,
   type AdvancedEmbeddingProvider,
 } from "./embedding.ts";
+import {
+  extractEntityMentionsFromMetadata,
+  normalizeOptionalDateToIso,
+  withEmbeddings,
+  type ExtractedEntityMention,
+} from "./indexing-utils.ts";
 import type { MemoryChunkMetadata } from "./types.ts";
 
 export interface PersistedMemoryChunkPayload {
@@ -33,11 +39,7 @@ export interface IndexedMemoryChunk {
   entityMentions?: ExtractedEntityMention[];
 }
 
-/** A single entity mention extracted from a memory chunk's metadata. */
-export interface ExtractedEntityMention {
-  entityType: "person" | "project" | "tag" | "goal" | "habit";
-  entityValue: string;
-}
+export type { ExtractedEntityMention } from "./indexing-utils.ts";
 
 export interface IndexMemoryFromDiaryInput {
   userId: string;
@@ -85,7 +87,7 @@ export async function indexMemoryFromDiary(
     };
   }
 
-  const date = normalizeDate(input.entryDate);
+  const date = normalizeOptionalDateToIso(input.entryDate);
   const semanticChunks = await generateSemanticChunks(rawText, {
     sourceType: "diary",
     sourceId: input.diaryId,
@@ -105,22 +107,22 @@ export async function indexMemoryFromDiary(
 
   const embeddingProvider =
     input.embeddingProvider ?? createDefaultEmbeddingProvider();
-  const persistedChunks: PersistedMemoryChunkPayload[] = [];
 
-  for (const chunk of semanticChunks) {
-    persistedChunks.push({
-      userId: input.userId,
-      sourceType: chunk.metadata.sourceType,
-      sourceId: chunk.metadata.sourceId,
-      chunkIndex: chunk.metadata.chunkIndex,
-      chunkType: chunk.metadata.chunkType,
-      text: chunk.text,
-      evidence: chunk.evidence ?? null,
-      metadata: chunk.metadata,
-      occurredAt: chunk.metadata.date ? new Date(chunk.metadata.date) : new Date(),
-      embedding: await embeddingProvider.embedDocument(chunk.text),
-    });
-  }
+  const chunkPayloads = semanticChunks.map((chunk) => ({
+    userId: input.userId,
+    sourceType: chunk.metadata.sourceType,
+    sourceId: chunk.metadata.sourceId,
+    chunkIndex: chunk.metadata.chunkIndex,
+    chunkType: chunk.metadata.chunkType,
+    text: chunk.text,
+    evidence: chunk.evidence ?? null,
+    metadata: chunk.metadata,
+    occurredAt: chunk.metadata.date ? new Date(chunk.metadata.date) : new Date(),
+  } satisfies Omit<PersistedMemoryChunkPayload, "embedding">));
+  const persistedChunks: PersistedMemoryChunkPayload[] = await withEmbeddings(
+    chunkPayloads,
+    embeddingProvider,
+  );
 
   await (input.insertChunks ?? insertMemoryChunks)(persistedChunks);
 
@@ -204,70 +206,3 @@ export async function indexMemoryFromDiary(
   };
 }
 
-/**
- * Extract entity mentions from chunk metadata.
- * The chunker already produces `people`, `projects`, and `tags` arrays —
- * this function normalizes them into a flat list of EntityMention payloads.
- */
-function extractEntityMentionsFromMetadata(
-  metadata: MemoryChunkMetadata,
-): ExtractedEntityMention[] {
-  const mentions: ExtractedEntityMention[] = [];
-
-  if (metadata.people?.length) {
-    for (const person of metadata.people) {
-      const normalized = person.trim();
-      if (normalized) {
-        mentions.push({ entityType: "person", entityValue: normalized });
-      }
-    }
-  }
-
-  if (metadata.projects?.length) {
-    for (const project of metadata.projects) {
-      const normalized = project.trim();
-      if (normalized) {
-        mentions.push({ entityType: "project", entityValue: normalized });
-      }
-    }
-  }
-
-  if (metadata.tags?.length) {
-    for (const tag of metadata.tags) {
-      const normalized = tag.trim().toLowerCase();
-      if (normalized) {
-        mentions.push({ entityType: "tag", entityValue: normalized });
-      }
-    }
-  }
-
-  if (metadata.goals?.length) {
-    for (const goal of metadata.goals) {
-      const normalized = goal.trim();
-      if (normalized) {
-        mentions.push({ entityType: "goal", entityValue: normalized });
-      }
-    }
-  }
-
-  if (metadata.habits?.length) {
-    for (const habit of metadata.habits) {
-      const normalized = habit.trim().toLowerCase();
-      if (normalized) {
-        mentions.push({ entityType: "habit", entityValue: normalized });
-      }
-    }
-  }
-
-  return mentions;
-}
-
-function normalizeDate(value: Date | string | null | undefined): string | null {
-  if (!value) return null;
-  if (value instanceof Date) return value.toISOString();
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    throw new Error(`Invalid diary entry date: "${value}"`);
-  }
-  return date.toISOString();
-}

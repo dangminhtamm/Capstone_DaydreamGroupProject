@@ -194,6 +194,7 @@ GOOGLE_REDIRECT_URI="http://localhost:3001/api/calendar/oauth/callback"
 GEMINI_API_KEY="your-gemini-api-key"
 GEMINI_EMBEDDING_MODEL="gemini-embedding-001"       # optional, defaults to gemini-embedding-001
 GEMINI_ANSWER_MODEL="gemini-2.5-flash"               # optional, defaults to gemini-2.5-flash
+INDEXING_JOB_DELAY_MS="15000"                        # optional, avoids Gemini Flash free-tier rate limits during local drain
 ```
 
 Create **`apps/web/.env.local`**:

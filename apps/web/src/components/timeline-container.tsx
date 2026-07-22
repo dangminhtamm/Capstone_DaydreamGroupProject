@@ -191,6 +191,26 @@ export function TimelineContainer() {
     return entries.filter((e) => new Date(e.createdAt).toISOString().slice(0, 10) === selectedDate);
   }, [entries, selectedDate]);
 
+  const moodStats = useMemo(() => {
+    return entries.reduce<Record<string, number>>((counts, entry) => {
+      if (entry.mood) counts[entry.mood] = (counts[entry.mood] ?? 0) + 1;
+      return counts;
+    }, {});
+  }, [entries]);
+
+  const topTags = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const entry of entries) {
+      for (const tag of entry.tags ?? []) {
+        counts.set(tag, (counts.get(tag) ?? 0) + 1);
+      }
+    }
+
+    return Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .slice(0, 8);
+  }, [entries]);
+
   if (authLoading) {
     return <SkeletonCards />;
   }
@@ -294,6 +314,45 @@ export function TimelineContainer() {
               </div>
             </div>
           </div>
+          <div className="mt-3 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+            <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Mood tracking</p>
+            <div className="mt-3 space-y-2">
+              {(["great", "good", "neutral", "bad"] as const).map((mood) => {
+                const count = moodStats[mood] ?? 0;
+                const width = entries.length ? Math.round((count / entries.length) * 100) : 0;
+                return (
+                  <div key={mood}>
+                    <div className="mb-1 flex items-center justify-between text-xs">
+                      <span className="capitalize text-slate-600 dark:text-slate-300">{mood}</span>
+                      <span className="font-semibold text-slate-500 dark:text-slate-400">{count}</span>
+                    </div>
+                    <div className="h-1.5 rounded-full bg-slate-100 dark:bg-slate-700">
+                      <div
+                        className="h-1.5 rounded-full bg-indigo-500 transition-all"
+                        style={{ width: `${width}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          {topTags.length > 0 && (
+            <div className="mt-3 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+              <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Top tags</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {topTags.map(([tag, count]) => (
+                  <span
+                    key={tag}
+                    className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700 ring-1 ring-indigo-100 dark:bg-indigo-900/30 dark:text-indigo-300 dark:ring-indigo-800"
+                  >
+                    #{tag}
+                    <span className="text-indigo-400 dark:text-indigo-500">{count}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </aside>
     </div>

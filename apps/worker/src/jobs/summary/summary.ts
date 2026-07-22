@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { getGeminiSummaryModel } from '@second-brain/ai';
 import * as cron from 'node-cron';
 import { prisma } from '../../lib/prisma';
 
@@ -191,7 +192,7 @@ async function callAI(type: SummaryType, period: Period, context: string) {
 
   const ai = new GoogleGenerativeAI(apiKey);
   const model = ai.getGenerativeModel({
-    model: process.env.GEMINI_SUMMARY_MODEL ?? process.env.GEMINI_ANSWER_MODEL ?? 'gemini-2.5-flash',
+    model: getGeminiSummaryModel(),
   });
 
   const result = await model.generateContent(buildSummaryPrompt(type, period, context));

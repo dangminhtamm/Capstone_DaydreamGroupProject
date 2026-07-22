@@ -5,6 +5,7 @@
 // structured citation metadata at the end as a special SSE event.
 
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { getGeminiAnswerModel } from "./gemini-models.ts";
 import {
   retrieveMemory,
   type MemorySearchHit,
@@ -16,7 +17,7 @@ import {
   buildCitations,
   classifyRetrievalConfidence,
 } from "./answer-utils.ts";
-import { inferRetrievalFilters } from "./answer-memory.ts";
+import { inferRetrievalFilters } from "./answer-memory-temporal.ts";
 
 const MIN_TOP_SIMILARITY = Number(
   process.env.MEMORY_MIN_TOP_SIMILARITY ?? 0.55,
@@ -142,7 +143,7 @@ Rules:
   // Phase 2: Stream the answer from Gemini
   const ai = getGeminiClient();
   const model = ai.getGenerativeModel({
-    model: process.env.GEMINI_ANSWER_MODEL ?? "gemini-2.5-flash",
+    model: getGeminiAnswerModel(),
     generationConfig: {
       temperature: 0.1,
       maxOutputTokens: MAX_ANSWER_TOKENS,

@@ -10,6 +10,7 @@
     "demo:drain": "pnpm --filter @second-brain/worker indexing:drain",
     "demo:reset-indexing": "pnpm --filter @second-brain/worker indexing:reset-retries",
     "demo:prepare": "pnpm demo:seed && pnpm demo:drain",
+    "test:seed:ai-memory": "node --env-file=.env --experimental-strip-types packages/db/scripts/seed-ai-memory-test.ts",
     "ci:memory-eval": "pnpm --filter @second-brain/ai eval:retrieval:ci && pnpm --filter @second-brain/ai eval:answer:ci"
   },
   "packageManager": "pnpm@10.33.0",

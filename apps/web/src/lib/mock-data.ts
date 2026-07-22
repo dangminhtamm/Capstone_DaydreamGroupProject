@@ -7,6 +7,7 @@ export const mockTimelineEntries: IDiaryEntry[] = [
     content:
       "Focused deeply on frontend wireframes and finalized the diary input interactions.",
     mood: "great",
+    tags: ["frontend", "focus"],
     createdAt: "2026-04-20T08:15:00.000Z",
   },
   {
@@ -15,6 +16,7 @@ export const mockTimelineEntries: IDiaryEntry[] = [
     content:
       "Aligned with Nhan on explainability blocks and discussed loading and error UI states.",
     mood: "good",
+    tags: ["team-sync", "explainability"],
     createdAt: "2026-04-19T11:45:00.000Z",
   },
   {
@@ -23,6 +25,7 @@ export const mockTimelineEntries: IDiaryEntry[] = [
     content:
       "Got distracted during implementation. Planned tighter task blocks for tomorrow.",
     mood: "neutral",
+    tags: ["focus", "planning"],
     createdAt: "2026-04-18T14:05:00.000Z",
   },
 ];

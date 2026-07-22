@@ -70,3 +70,12 @@ export {
   type GeminiTokenUsage,
   type GeminiJsonResultWithMeta,
 } from "./gemini-json.ts";
+export {
+  DEFAULT_GEMINI_ANSWER_MODEL,
+  DEFAULT_GEMINI_CHUNK_MODEL,
+  DEFAULT_GEMINI_VISION_MODEL,
+  getGeminiAnswerModel,
+  getGeminiChunkModel,
+  getGeminiSummaryModel,
+  getGeminiVisionModel,
+} from "./gemini-models.ts";

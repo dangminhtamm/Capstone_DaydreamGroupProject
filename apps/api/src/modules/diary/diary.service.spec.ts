@@ -67,6 +67,7 @@ describe('DiaryService', () => {
         raw_text: 'Title\n\nContent',
         user_id: 'user-1',
         status: 'published',
+        tags: [],
       },
     });
     expect(result).toMatchObject({
@@ -113,6 +114,7 @@ describe('DiaryService', () => {
         raw_text: 'Backdated\n\nContent',
         user_id: 'user-1',
         status: 'published',
+        tags: [],
         entry_date: new Date(explicitEntryDate),
       },
     });
@@ -146,6 +148,7 @@ describe('DiaryService', () => {
         raw_text: 'Backdated\n\nContent',
         user_id: 'user-1',
         status: 'published',
+        tags: [],
         entry_date: new Date(explicitEntryDate),
       },
     });
@@ -185,6 +188,8 @@ describe('DiaryService', () => {
         id: true,
         raw_text: true,
         status: true,
+        mood: true,
+        tags: true,
         entry_date: true,
         created_at: true,
         updated_at: true,
@@ -214,6 +219,53 @@ describe('DiaryService', () => {
     });
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({ id: 'diary-1', title: 'Title' });
+  });
+
+  it('normalizes and returns diary mood and tags', async () => {
+    const createdAt = new Date('2026-05-18T09:00:00.000Z');
+    prisma.user.findUnique.mockResolvedValue({ id: 'user-1' });
+    prisma.diaryEntry.create.mockResolvedValue({
+      id: 'diary-3',
+      raw_text: 'Mood day\n\nHad a strong focus block.',
+      status: 'published',
+      mood: 'great',
+      tags: ['capstone', 'focus-block'],
+      created_at: createdAt,
+      updated_at: createdAt,
+      entry_date: createdAt,
+    });
+
+    const result = await service.create('supabase-user-1', {
+      title: 'Mood day',
+      content: 'Had a strong focus block.',
+      mood: 'great',
+      tags: [' Capstone ', '#Focus Block', 'capstone', 'bad tag!'],
+    });
+
+    expect(prisma.diaryEntry.create).toHaveBeenCalledWith({
+      data: {
+        raw_text: 'Mood day\n\nHad a strong focus block.',
+        user_id: 'user-1',
+        status: 'published',
+        mood: 'great',
+        tags: ['capstone', 'focus-block', 'bad-tag'],
+      },
+    });
+    expect(result).toMatchObject({
+      mood: 'great',
+      tags: ['capstone', 'focus-block'],
+    });
+    expect(prisma.indexingOutbox.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          payload: {
+            sourceTitle: 'Mood day',
+            mood: 'great',
+            tags: ['capstone', 'focus-block', 'bad-tag'],
+          },
+        }),
+      }),
+    );
   });
 
   it('returns signed attachment urls without exposing storage paths', async () => {

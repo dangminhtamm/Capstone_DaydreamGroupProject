@@ -54,6 +54,27 @@ test("inferRetrievalFilters prefers attachment sources for document questions", 
   assert.ok(filters.preferredChunkTypes?.includes("general_note"));
 });
 
+test("inferRetrievalFilters prefers reflection chunks for mood questions", () => {
+  const filters = inferRetrievalFilters("Phân tích tâm trạng của tôi tuần này");
+
+  assert.deepEqual(filters.preferredSourceTypes, ["diary", "summary"]);
+  assert.ok(filters.preferredChunkTypes?.includes("reflection"));
+});
+
+test("inferRetrievalFilters prefers diary and summary context for risk questions", () => {
+  const filters = inferRetrievalFilters("What were the main blockers and risks this week?");
+
+  assert.deepEqual(filters.preferredSourceTypes, ["diary", "summary"]);
+  assert.ok(filters.preferredChunkTypes?.includes("action_item"));
+});
+
+test("inferRetrievalFilters uses broad source context for progress summaries", () => {
+  const filters = inferRetrievalFilters("Summarize the team's progress across the week.");
+
+  assert.deepEqual(filters.preferredSourceTypes, ["diary", "calendar", "summary"]);
+  assert.ok(filters.preferredChunkTypes?.includes("event"));
+});
+
 test("rerankMemoryHits boosts recent primary sources over older summaries", () => {
   const chunks = rerankMemoryHits(
     "What did I work on recently?",
@@ -81,6 +102,102 @@ test("rerankMemoryHits boosts recent primary sources over older summaries", () =
   );
 
   assert.equal(chunks[0].id, "diary-new");
+});
+
+test("rerankMemoryHits boosts metadata entity matches and importance", () => {
+  const chunks = rerankMemoryHits(
+    "What feedback did Linh give about Second Brain?",
+    [
+      makeHit({
+        id: "generic-feedback",
+        sourceType: "diary",
+        chunkType: "feedback",
+        text: "A mentor gave general feedback about the demo.",
+        similarity: 0.69,
+        vectorSimilarity: 0.69,
+        metadata: {},
+      }),
+      makeHit({
+        id: "metadata-rich-feedback",
+        sourceType: "diary",
+        chunkType: "feedback",
+        text: "The citation UI should be obvious so evaluators can trust the AI.",
+        evidence: "Mentor Linh said the citation UI must be obvious so evaluators can trust the AI.",
+        similarity: 0.65,
+        vectorSimilarity: 0.65,
+        metadata: {
+          people: ["Linh"],
+          projects: ["Second Brain"],
+          importance: 5,
+        },
+      }),
+    ],
+    { preferredSourceTypes: ["diary"], preferredChunkTypes: ["feedback"] },
+  );
+
+  assert.equal(chunks[0].id, "metadata-rich-feedback");
+});
+
+test("rerankMemoryHits penalizes meta question notes for blocker queries", () => {
+  const chunks = rerankMemoryHits(
+    "What blockers did we have recently?",
+    [
+      makeHit({
+        id: "meta-question-note",
+        sourceType: "diary",
+        chunkType: "general",
+        text: "The best questions are: what feedback did Linh give, what blockers did we have this week, and what made me feel stressed.",
+        similarity: 0.76,
+        vectorSimilarity: 0.76,
+        metadata: { tags: ["demo"] },
+        occurredAt: new Date("2026-07-18T00:00:00.000Z"),
+      }),
+      makeHit({
+        id: "actual-blocker",
+        sourceType: "diary",
+        chunkType: "action_item",
+        text: "The main blocker is making sure the worker is running before the final rehearsal. Another risk is Gemini quota during live demo.",
+        similarity: 0.67,
+        vectorSimilarity: 0.67,
+        metadata: { tags: ["risk", "blocker"], importance: 5 },
+        occurredAt: new Date("2026-07-11T00:00:00.000Z"),
+      }),
+    ],
+    { preferredSourceTypes: ["diary", "summary"], preferredChunkTypes: ["action_item", "reflection", "general"] },
+  );
+
+  assert.equal(chunks[0].id, "actual-blocker");
+});
+
+test("rerankMemoryHits boosts Google Contacts plans over generic demo notes", () => {
+  const chunks = rerankMemoryHits(
+    "What was the future plan for Google Contacts?",
+    [
+      makeHit({
+        id: "demo-ready",
+        sourceType: "diary",
+        sourceId: "demo-ready",
+        chunkType: "general",
+        text: "Today the demo account is ready for AI memory testing. We confirmed diary entries and search citations are available.",
+        similarity: 0.78,
+        vectorSimilarity: 0.78,
+        occurredAt: new Date("2026-07-18T00:00:00.000Z"),
+      }),
+      makeHit({
+        id: "contacts-plan",
+        sourceType: "diary",
+        sourceId: "contacts-plan",
+        chunkType: "decision",
+        text: "We wrote down a future plan for Google Contacts. The feature would sync contact names, emails, phone numbers, and organizations from Google People API.",
+        similarity: 0.66,
+        vectorSimilarity: 0.66,
+        metadata: { projects: ["Google Contacts"], importance: 5 },
+        occurredAt: new Date("2026-07-16T00:00:00.000Z"),
+      }),
+    ],
+  );
+
+  assert.equal(chunks[0].id, "contacts-plan");
 });
 
 test("answerFromChunks does not attach citations when top similarity is too low", async () => {
@@ -171,6 +288,7 @@ test("answerFromChunks normalizes loose Gemini JSON formats", async () => {
     ],
     {
       responseLanguage: "vi",
+      answerStrategy: "deep",
       generateAnswer: async (options: any) => ({
         data: options.validator.parse({
           answer: ["Bạn đã làm capstone API và cải thiện memory search experience."],
@@ -216,6 +334,7 @@ test("answerFromChunks accepts insufficient model answers without forcing citati
     ],
     {
       responseLanguage: "vi",
+      answerStrategy: "deep",
       generateAnswer: async (options: any) => ({
         data: options.validator.parse({
           answer: "Dựa trên các mục nhật ký được cung cấp, không có thông tin cụ thể nào về cảm xúc hay tâm trạng của bạn trong tuần này.",
@@ -241,6 +360,93 @@ test("answerFromChunks accepts insufficient model answers without forcing citati
   assert.match(result.answer, /không có thông tin cụ thể/);
 });
 
+test("answerFromChunks accepts Vietnamese answers grounded by English citation claims", async () => {
+  const result = await answerFromChunks(
+    "Điều gì làm tôi căng thẳng tuần này?",
+    [
+      makeHit({
+        id: "stress-note",
+        sourceType: "diary",
+        chunkType: "reflection",
+        text: "This week I felt stressed about the capstone demo but relieved after fixing search.",
+        evidence: "felt stressed about the capstone demo",
+        similarity: 0.86,
+        vectorSimilarity: 0.86,
+        occurredAt: new Date("2026-07-12T00:00:00.000Z"),
+      }),
+    ],
+    {
+      responseLanguage: "vi",
+      answerStrategy: "deep",
+      generateAnswer: async (options: any) => ({
+        data: options.validator.parse({
+          answer: "Bạn cảm thấy căng thẳng vì buổi demo capstone, rồi nhẹ nhõm hơn sau khi sửa phần search.",
+          confidence: "medium",
+          citations: [
+            {
+              marker: "S1",
+              claim: "felt stressed about the capstone demo",
+            },
+          ],
+        }),
+        tokenUsage: {
+          promptTokens: 30,
+          completionTokens: 18,
+          totalTokens: 48,
+          model: "test-model",
+        },
+      }),
+    },
+  );
+
+  assert.equal(result.answerMode, "gemini");
+  assert.equal(result.analytics?.answerMode, "gemini");
+  assert.equal(result.modelError, undefined);
+  assert.equal(result.citations.length, 1);
+  assert.match(result.answer, /căng thẳng/);
+});
+
+test("answerFromChunks recovers citations when Gemini omits them but the answer is supported", async () => {
+  const result = await answerFromChunks(
+    "What feedback did Linh give about citations?",
+    [
+      makeHit({
+        id: "linh-feedback",
+        sourceType: "diary",
+        chunkType: "feedback",
+        text: "Mentor Linh said the citation UI must be obvious so evaluators can trust the AI.",
+        evidence: "Mentor Linh said the citation UI must be obvious",
+        similarity: 0.88,
+        vectorSimilarity: 0.88,
+        occurredAt: new Date("2026-07-12T00:00:00.000Z"),
+      }),
+    ],
+    {
+      responseLanguage: "en",
+      answerStrategy: "deep",
+      generateAnswer: async (options: any) => ({
+        data: options.validator.parse({
+          answer: "Linh said the citation UI must be obvious so evaluators can trust the AI.",
+        }),
+        tokenUsage: {
+          promptTokens: 22,
+          completionTokens: 12,
+          totalTokens: 34,
+          model: "test-model",
+        },
+      }),
+    },
+  );
+
+  assert.equal(result.modelError, undefined);
+  assert.equal(result.answerMode, "gemini");
+  assert.equal(result.analytics?.answerMode, "gemini");
+  assert.equal(result.citations.length, 1);
+  assert.equal(result.citations[0]?.sourceId, "diary-1");
+  assert.match(result.answer, /citation UI must be obvious/);
+  assert.doesNotMatch(result.answer, /invalid_type|nonoptional|undefined/i);
+});
+
 test("answerFromChunks treats malformed Gemini JSON as validation fallback", async () => {
   const result = await answerFromChunks(
     "Phân tích cảm xúc/tâm trạng của tôi trong tuần này dựa trên diary entries.",
@@ -258,6 +464,7 @@ test("answerFromChunks treats malformed Gemini JSON as validation fallback", asy
     ],
     {
       responseLanguage: "vi",
+      answerStrategy: "deep",
       generateAnswer: async () => {
         throw new Error('Gemini returned invalid JSON that could not be repaired: {"answer":"Dựa trên diary entries,');
       },
@@ -273,6 +480,582 @@ test("answerFromChunks treats malformed Gemini JSON as validation fallback", asy
   );
   assert.equal(result.citations.length, 1);
   assert.doesNotMatch(result.answer, /Gemini|invalid JSON|could not be repaired/i);
+});
+
+test("answerFromChunks rejects incomplete generated answers even when citations parse", async () => {
+  const result = await answerFromChunks(
+    "What made me feel stressed this week?",
+    [
+      makeHit({
+        id: "stress-note",
+        sourceType: "diary",
+        sourceId: "stress-note",
+        chunkType: "reflection",
+        text: "I felt stressed because the worker and quota problems could break the live AI memory search demo.",
+        evidence: "felt stressed because the worker and quota problems could break the live AI memory search demo",
+        similarity: 0.84,
+        vectorSimilarity: 0.84,
+        occurredAt: new Date("2026-07-13T00:00:00.000Z"),
+      }),
+    ],
+    {
+      responseLanguage: "vi",
+      answerStrategy: "deep",
+      generateAnswer: async (options: any) => ({
+        data: options.validator.parse({
+          answer: "Dựa trên các ghi chép tuần này, mình",
+          confidence: "medium",
+          citations: [
+            {
+              marker: "S1",
+              claim: "felt stressed because the worker and quota problems",
+            },
+          ],
+        }),
+        tokenUsage: {
+          promptTokens: 20,
+          completionTokens: 8,
+          totalTokens: 28,
+          model: "test-model",
+        },
+      }),
+    },
+  );
+
+  assert.equal(result.answerMode, "extractive_fallback");
+  assert.equal(result.modelError?.kind, "validation");
+  assert.equal(result.citations.length, 1);
+  assert.match(result.answer, /Bạn cảm thấy stress vì worker và quota/);
+});
+
+test("answerFromChunks rejects generated latency answers cut off after a partial p95 claim", async () => {
+  const result = await answerFromChunks(
+    "Why did we separate retrieval latency from answer generation?",
+    [
+      makeHit({
+        id: "latency-note-1",
+        sourceType: "diary",
+        sourceId: "latency-note",
+        chunkType: "decision",
+        text: "We should measure retrieval latency separately from Gemini answer generation. The metrics are embedding time, database retrieval time, reranking time, time to first result, answer generation time, and total answer time.",
+        evidence: "measure retrieval latency separately from Gemini answer generation",
+        similarity: 0.8,
+        vectorSimilarity: 0.8,
+        occurredAt: new Date("2026-07-12T00:00:00.000Z"),
+      }),
+      makeHit({
+        id: "latency-note-2",
+        sourceType: "diary",
+        sourceId: "latency-note",
+        chunkType: "decision",
+        text: "We should claim p95 retrieval latency, not average full answer latency.",
+        evidence: "claim p95 retrieval latency",
+        similarity: 0.79,
+        vectorSimilarity: 0.79,
+        occurredAt: new Date("2026-07-12T00:00:00.000Z"),
+      }),
+    ],
+    {
+      responseLanguage: "en",
+      answerStrategy: "deep",
+      generateAnswer: async (options: any) => ({
+        data: options.validator.parse({
+          answer: "We separated search latency from answer generation to claim p",
+          confidence: "medium",
+          citations: [
+            {
+              marker: "S1",
+              claim: "measure retrieval latency separately from Gemini answer generation",
+            },
+          ],
+        }),
+        tokenUsage: {
+          promptTokens: 700,
+          completionTokens: 12,
+          totalTokens: 712,
+          model: "test-model",
+        },
+      }),
+    },
+  );
+
+  assert.equal(result.answerMode, "extractive_fallback");
+  assert.equal(result.modelError?.kind, "validation");
+  assert.ok(result.citations.length >= 1);
+  assert.doesNotMatch(result.answer, /to claim p$/i);
+  assert.match(result.answer, /retrieval latency/);
+  assert.match(result.answer, /answer generation/);
+});
+
+test("answerFromChunks feedback fallback ignores unrelated Google Contacts memories that only mention Linh", async () => {
+  const result = await answerFromChunks(
+    "What feedback did mentor Linh give about citations?",
+    [
+      makeHit({
+        id: "contacts-plan",
+        sourceType: "diary",
+        sourceId: "contacts-plan",
+        chunkType: "decision",
+        text: "We wrote down a future plan for Google Contacts. It would help the memory engine resolve names like Linh, Quan, or Duc Anh.",
+        evidence: "future plan for Google Contacts",
+        similarity: 0.88,
+        vectorSimilarity: 0.88,
+        occurredAt: new Date("2026-07-16T00:00:00.000Z"),
+      }),
+      makeHit({
+        id: "linh-feedback",
+        sourceType: "diary",
+        sourceId: "linh-feedback",
+        chunkType: "feedback",
+        text: "Mentor Linh said the citation UI must be obvious so evaluators can trust the AI answer.",
+        evidence: "Mentor Linh said the citation UI must be obvious so evaluators can trust the AI answer.",
+        similarity: 0.72,
+        vectorSimilarity: 0.72,
+        occurredAt: new Date("2026-07-13T00:00:00.000Z"),
+      }),
+    ],
+    {
+      responseLanguage: "vi",
+      generateAnswer: async () => {
+        throw new Error("Gemini returned invalid JSON that could not be repaired: {");
+      },
+    },
+  );
+
+  assert.equal(result.answerMode, "fast_path");
+  assert.equal(result.analytics?.answerMode, "fast_path");
+  assert.equal(result.modelError, undefined);
+  assert.equal(result.citations.length, 1);
+  assert.equal(result.citations[0]?.sourceId, "linh-feedback");
+  assert.match(result.answer, /Phản hồi liên quan/);
+  assert.match(result.answer, /citation rõ ràng/);
+  assert.doesNotMatch(result.answer, /Google Contacts|People API/i);
+});
+
+test("answerFromChunks blocker fallback ignores demo question notes and keeps actual blockers", async () => {
+  const result = await answerFromChunks(
+    "What blockers did we have this week?",
+    [
+      makeHit({
+        id: "demo-flow",
+        sourceType: "diary",
+        sourceId: "demo-flow",
+        chunkType: "general",
+        text: "Duc Anh rehearsed the frontend demo flow. The user starts on Diary, then asks Search about mentor feedback and blockers.",
+        evidence: "asks Search about mentor feedback and blockers",
+        similarity: 0.86,
+        vectorSimilarity: 0.86,
+        occurredAt: new Date("2026-07-15T00:00:00.000Z"),
+      }),
+      makeHit({
+        id: "worker-blocker",
+        sourceType: "diary",
+        sourceId: "worker-blocker",
+        chunkType: "action_item",
+        text: "The main blocker this week is making sure the worker is running before the final rehearsal. Another risk is Gemini quota during the live demo.",
+        evidence: "main blocker this week is making sure the worker is running before the final rehearsal. Another risk is Gemini quota during the live demo.",
+        similarity: 0.7,
+        vectorSimilarity: 0.7,
+        occurredAt: new Date("2026-07-11T00:00:00.000Z"),
+      }),
+    ],
+    {
+      responseLanguage: "vi",
+      generateAnswer: async () => {
+        throw new Error("Gemini returned invalid JSON that could not be repaired: {");
+      },
+    },
+  );
+
+  assert.equal(result.answerMode, "fast_path");
+  assert.equal(result.analytics?.answerMode, "fast_path");
+  assert.equal(result.modelError, undefined);
+  assert.equal(result.citations.length, 1);
+  assert.equal(result.citations[0]?.sourceId, "worker-blocker");
+  assert.match(result.answer, /worker chạy trước final rehearsal/);
+  assert.match(result.answer, /Gemini quota/);
+  assert.doesNotMatch(result.answer, /asks Search about/i);
+});
+
+test("answerFromChunks blocker fast path refuses checklist-only evidence", async () => {
+  let generateCalled = false;
+  const result = await answerFromChunks(
+    "What blockers did we have this week?",
+    [
+      makeHit({
+        id: "final-checklist",
+        sourceType: "diary",
+        sourceId: "final-checklist",
+        chunkType: "general",
+        text: "The final AI memory checklist has six items. First, seed realistic diary data. Second, run the worker to create memory chunks. Third, ask questions about feedback, decisions, blockers, mood, Calendar, and attachments. Fourth, verify citations.",
+        evidence: "ask questions about feedback, decisions, blockers, mood, Calendar, and attachments",
+        similarity: 0.86,
+        vectorSimilarity: 0.86,
+        occurredAt: new Date("2026-07-17T00:00:00.000Z"),
+      }),
+      makeHit({
+        id: "demo-ready",
+        sourceType: "diary",
+        sourceId: "demo-ready",
+        chunkType: "general",
+        text: "Today the demo account is ready for AI memory testing. We confirmed that diary entries, mood tags, indexing jobs, and search citations are available.",
+        evidence: "demo account is ready for AI memory testing",
+        similarity: 0.8,
+        vectorSimilarity: 0.8,
+        occurredAt: new Date("2026-07-18T00:00:00.000Z"),
+      }),
+      makeHit({
+        id: "gmail-scope",
+        sourceType: "diary",
+        sourceId: "gmail-scope",
+        chunkType: "decision",
+        text: "We made a scope decision today: Gmail and Google Contacts will stay as future work unless the core demo is already stable.",
+        evidence: "Gmail and Google Contacts will stay as future work unless the core demo is already stable",
+        similarity: 0.74,
+        vectorSimilarity: 0.74,
+        occurredAt: new Date("2026-07-14T00:00:00.000Z"),
+      }),
+    ],
+    {
+      responseLanguage: "en",
+      generateAnswer: async () => {
+        generateCalled = true;
+        throw new Error("Gemini should not be called without real blocker evidence");
+      },
+    },
+  );
+
+  assert.equal(generateCalled, false);
+  assert.equal(result.answerMode, "no_memory");
+  assert.equal(result.analytics?.status, "no_memory");
+  assert.equal(result.citations.length, 0);
+  assert.match(result.answer, /could not find any clearly recorded blockers/i);
+  assert.doesNotMatch(result.answer, /final AI memory checklist/i);
+});
+
+test("answerFromChunks latency fallback explains retrieval timing from latency memories", async () => {
+  const result = await answerFromChunks(
+    "Why did we separate retrieval latency from answer generation?",
+    [
+      makeHit({
+        id: "question-list",
+        sourceType: "diary",
+        sourceId: "question-list",
+        chunkType: "general",
+        text: "The best questions are: what feedback did Linh give, what blockers did we have this week, why did we separate retrieval latency from answer generation.",
+        evidence: "best questions are",
+        similarity: 0.9,
+        vectorSimilarity: 0.9,
+        occurredAt: new Date("2026-07-18T00:00:00.000Z"),
+      }),
+      makeHit({
+        id: "latency-note",
+        sourceType: "diary",
+        sourceId: "latency-note",
+        chunkType: "decision",
+        text: "We should measure retrieval latency separately from Gemini answer generation. The metrics are embedding time, database retrieval time, reranking time, time to first result, answer generation time, and total answer time.",
+        evidence: "measure retrieval latency separately from Gemini answer generation",
+        similarity: 0.74,
+        vectorSimilarity: 0.74,
+        occurredAt: new Date("2026-07-12T00:00:00.000Z"),
+      }),
+    ],
+    {
+      responseLanguage: "vi",
+      generateAnswer: async () => {
+        throw new Error("Gemini returned invalid JSON that could not be repaired: {");
+      },
+    },
+  );
+
+  assert.equal(result.answerMode, "fast_path");
+  assert.equal(result.analytics?.answerMode, "fast_path");
+  assert.equal(result.modelError, undefined);
+  assert.equal(result.citations.length, 1);
+  assert.equal(result.citations[0]?.sourceId, "latency-note");
+  assert.match(result.answer, /retrieval latency/);
+  assert.match(result.answer, /answer generation/);
+  assert.doesNotMatch(result.answer, /best questions are/i);
+});
+
+test("answerFromChunks validation fallback answers Google Contacts questions from matching memories", async () => {
+  const result = await answerFromChunks(
+    "What was the future plan for Google Contacts?",
+    [
+      makeHit({
+        id: "demo-ready",
+        sourceType: "diary",
+        sourceId: "demo-ready",
+        chunkType: "general",
+        text: "Today the demo account is ready for AI memory testing. We confirmed diary entries, mood tags, indexing jobs, and search citations are available.",
+        evidence: "demo account is ready for AI memory testing",
+        similarity: 0.84,
+        vectorSimilarity: 0.84,
+        occurredAt: new Date("2026-07-18T00:00:00.000Z"),
+      }),
+      makeHit({
+        id: "contacts-plan",
+        sourceType: "diary",
+        sourceId: "contacts-plan",
+        chunkType: "decision",
+        text: "We wrote down a future plan for Google Contacts. The feature would sync contact names, emails, phone numbers, and organizations from Google People API.",
+        evidence: "future plan for Google Contacts. The feature would sync contact names, emails, phone numbers, and organizations from Google People API",
+        similarity: 0.75,
+        vectorSimilarity: 0.75,
+        occurredAt: new Date("2026-07-16T00:00:00.000Z"),
+      }),
+    ],
+    {
+      responseLanguage: "vi",
+      generateAnswer: async () => {
+        throw new Error('Gemini returned invalid JSON that could not be repaired: {"answer":"');
+      },
+    },
+  );
+
+  assert.equal(result.answerMode, "fast_path");
+  assert.equal(result.analytics?.answerMode, "fast_path");
+  assert.equal(result.modelError, undefined);
+  assert.equal(result.citations.length, 1);
+  assert.equal(result.citations[0]?.sourceId, "contacts-plan");
+  assert.match(result.answer, /Google Contacts/);
+  assert.match(result.answer, /People API/);
+  assert.doesNotMatch(result.answer, /demo account is ready/i);
+});
+
+test("answerFromChunks validation fallback infers Google Contacts from the top source", async () => {
+  const result = await answerFromChunks(
+    "What was the future plan?",
+    [
+      makeHit({
+        id: "contacts-plan",
+        sourceType: "diary",
+        sourceId: "contacts-plan",
+        chunkType: "decision",
+        text: "We wrote down a future plan for Google Contacts. The feature would sync contact names, emails, phone numbers, and organizations from Google People API.",
+        evidence: "future plan for Google Contacts. The feature would sync contact names, emails, phone numbers, and organizations from Google People API",
+        similarity: 0.82,
+        vectorSimilarity: 0.82,
+        occurredAt: new Date("2026-07-16T00:00:00.000Z"),
+      }),
+      makeHit({
+        id: "frontend-flow",
+        sourceType: "diary",
+        sourceId: "frontend-flow",
+        chunkType: "event",
+        text: "Duc Anh rehearsed the frontend demo flow. The user starts on Diary, writes an entry with mood and tags, uploads an attachment, opens Settings to sync Calendar.",
+        evidence: "Duc Anh rehearsed the frontend demo flow",
+        similarity: 0.74,
+        vectorSimilarity: 0.74,
+        occurredAt: new Date("2026-07-15T00:00:00.000Z"),
+      }),
+    ],
+    {
+      responseLanguage: "vi",
+      generateAnswer: async () => {
+        const error = new Error("429 current quota exceeded");
+        (error as Error & { status?: number }).status = 429;
+        throw error;
+      },
+    },
+  );
+
+  assert.equal(result.answerMode, "fast_path");
+  assert.equal(result.analytics?.answerMode, "fast_path");
+  assert.equal(result.modelError, undefined);
+  assert.equal(result.citations.length, 1);
+  assert.equal(result.citations[0]?.sourceId, "contacts-plan");
+  assert.match(result.answer, /Quyết định\/kế hoạch liên quan/);
+  assert.match(result.answer, /People API/);
+  assert.doesNotMatch(result.answer, /frontend demo flow/i);
+});
+
+test("answerFromChunks Gmail fast path excludes unrelated latency decisions", async () => {
+  let generateCalled = false;
+  const result = await answerFromChunks(
+    "What did we decide about Gmail?",
+    [
+      makeHit({
+        id: "latency-plan",
+        sourceType: "diary",
+        sourceId: "latency-plan",
+        chunkType: "decision",
+        text: "We should claim p95 retrieval latency, not average full answer latency.",
+        evidence: "claim p95 retrieval latency",
+        similarity: 0.88,
+        vectorSimilarity: 0.88,
+        occurredAt: new Date("2026-07-12T00:00:00.000Z"),
+      }),
+      makeHit({
+        id: "gmail-scope",
+        sourceType: "diary",
+        sourceId: "gmail-scope",
+        chunkType: "decision",
+        text: "We made a scope decision today: Gmail and Google Contacts will stay as future work unless the core demo is already stable.",
+        evidence: "Gmail and Google Contacts will stay as future work unless the core demo is already stable",
+        similarity: 0.72,
+        vectorSimilarity: 0.72,
+        occurredAt: new Date("2026-07-14T00:00:00.000Z"),
+      }),
+    ],
+    {
+      responseLanguage: "vi",
+      generateAnswer: async () => {
+        generateCalled = true;
+        throw new Error("Gemini should not be called for supported Gmail evidence");
+      },
+    },
+  );
+
+  assert.equal(generateCalled, false);
+  assert.equal(result.answerMode, "fast_path");
+  assert.equal(result.analytics?.tokenUsage.totalTokens, 0);
+  assert.equal(result.citations.length, 1);
+  assert.equal(result.citations[0]?.sourceId, "gmail-scope");
+  assert.match(result.answer, /Gmail/);
+  assert.match(result.answer, /future work/);
+  assert.doesNotMatch(result.answer, /p95 retrieval latency/);
+});
+
+test("answerFromChunks stress questions refuse positive mood and test-question notes", async () => {
+  let generateCalled = false;
+  const result = await answerFromChunks(
+    "What made me feel stressed this week?",
+    [
+      makeHit({
+        id: "good-mood",
+        sourceType: "diary",
+        sourceId: "good-mood",
+        chunkType: "reflection",
+        text: "Felt great during the demo day readiness check.",
+        evidence: "Felt great during the demo day readiness check",
+        similarity: 0.86,
+        vectorSimilarity: 0.86,
+        occurredAt: new Date("2026-07-18T00:00:00.000Z"),
+      }),
+      makeHit({
+        id: "question-note",
+        sourceType: "diary",
+        sourceId: "question-note",
+        chunkType: "general",
+        text: "This helps us test questions like what made me stressed this week.",
+        evidence: "test questions like what made me stressed this week",
+        similarity: 0.82,
+        vectorSimilarity: 0.82,
+        occurredAt: new Date("2026-07-10T00:00:00.000Z"),
+      }),
+    ],
+    {
+      responseLanguage: "vi",
+      generateAnswer: async () => {
+        generateCalled = true;
+        throw new Error("Gemini should not be called without stress evidence");
+      },
+    },
+  );
+
+  assert.equal(generateCalled, false);
+  assert.equal(result.answerMode, "no_memory");
+  assert.equal(result.analytics?.status, "no_memory");
+  assert.equal(result.citations.length, 0);
+  assert.match(result.answer, /chưa tìm thấy/i);
+});
+
+test("answerFromChunks stress fast path uses explicit stress evidence", async () => {
+  let generateCalled = false;
+  const result = await answerFromChunks(
+    "What made me feel stressed this week?",
+    [
+      makeHit({
+        id: "worker-stress",
+        sourceType: "diary",
+        sourceId: "worker-stress",
+        chunkType: "reflection",
+        text: "I felt stressed because the worker and quota problems could break the live AI memory search demo.",
+        evidence: "felt stressed because the worker and quota problems could break the live AI memory search demo",
+        similarity: 0.84,
+        vectorSimilarity: 0.84,
+        occurredAt: new Date("2026-07-13T00:00:00.000Z"),
+      }),
+    ],
+    {
+      responseLanguage: "vi",
+      generateAnswer: async () => {
+        generateCalled = true;
+        throw new Error("Gemini should not be called for supported stress evidence");
+      },
+    },
+  );
+
+  assert.equal(generateCalled, false);
+  assert.equal(result.answerMode, "fast_path");
+  assert.equal(result.citations.length, 1);
+  assert.match(result.answer, /Bạn cảm thấy stress vì worker và quota/);
+});
+
+test("answerFromChunks fast path localizes evidence bullets in Vietnamese", async () => {
+  let generateCalled = false;
+  const result = await answerFromChunks(
+    "What did we decide about Gmail?",
+    [
+      makeHit({
+        id: "gmail-scope",
+        sourceType: "diary",
+        sourceId: "gmail-scope",
+        chunkType: "decision",
+        text: "We made a scope decision today: Gmail and Google Contacts will stay as future work unless the core demo is already stable.",
+        evidence: "Gmail and Google Contacts will stay as future work unless the core demo is already stable",
+        similarity: 0.78,
+        vectorSimilarity: 0.78,
+        occurredAt: new Date("2026-07-14T00:00:00.000Z"),
+      }),
+    ],
+    {
+      responseLanguage: "vi",
+      generateAnswer: async () => {
+        generateCalled = true;
+        throw new Error("Gemini should not be called for supported Gmail evidence");
+      },
+    },
+  );
+
+  assert.equal(generateCalled, false);
+  assert.equal(result.answerMode, "fast_path");
+  assert.match(result.answer, /Quyết định về Gmail/);
+  assert.match(result.answer, /Nhóm quyết định để Gmail và Google Contacts ở future work/);
+});
+
+test("answerFromChunks fast path keeps English evidence bullets when requested", async () => {
+  let generateCalled = false;
+  const result = await answerFromChunks(
+    "What did we decide about Gmail?",
+    [
+      makeHit({
+        id: "gmail-scope",
+        sourceType: "diary",
+        sourceId: "gmail-scope",
+        chunkType: "decision",
+        text: "We made a scope decision today: Gmail and Google Contacts will stay as future work unless the core demo is already stable.",
+        evidence: "Gmail and Google Contacts will stay as future work unless the core demo is already stable",
+        similarity: 0.78,
+        vectorSimilarity: 0.78,
+        occurredAt: new Date("2026-07-14T00:00:00.000Z"),
+      }),
+    ],
+    {
+      responseLanguage: "en",
+      generateAnswer: async () => {
+        generateCalled = true;
+        throw new Error("Gemini should not be called for supported Gmail evidence");
+      },
+    },
+  );
+
+  assert.equal(generateCalled, false);
+  assert.equal(result.answerMode, "fast_path");
+  assert.match(result.answer, /The Gmail decision was/);
+  assert.match(result.answer, /Gmail and Google Contacts will stay as future work/);
+  assert.doesNotMatch(result.answer, /Nhóm quyết định/);
 });
 
 test("answerFromChunks uses extractive fallback when model citations are unusable", async () => {
@@ -315,6 +1098,50 @@ test("answerFromChunks uses extractive fallback when model citations are unusabl
   assert.match(result.answer, /API build pipeline/);
 });
 
+test("answerFromChunks rejects generated names that are not supported by evidence", async () => {
+  const result = await answerFromChunks(
+    "What feedback did Linh give about citation UI?",
+    [
+      makeHit({
+        id: "linh-feedback",
+        sourceType: "diary",
+        chunkType: "feedback",
+        text: "Mentor Linh said the citation UI must be obvious so evaluators can trust the AI.",
+        evidence: "Mentor Linh said the citation UI must be obvious so evaluators can trust the AI.",
+        similarity: 0.86,
+        vectorSimilarity: 0.86,
+        occurredAt: new Date("2026-05-13T00:00:00.000Z"),
+      }),
+    ],
+    {
+      answerStrategy: "deep",
+      generateAnswer: async (options: any) => ({
+        data: options.validator.parse({
+          answer: "Alex said the citation UI must be obvious so evaluators can trust the AI.",
+          confidence: "high",
+          citations: [
+            {
+              marker: "S1",
+              claim: "Mentor Linh said the citation UI must be obvious so evaluators can trust the AI.",
+            },
+          ],
+        }),
+        tokenUsage: {
+          promptTokens: 20,
+          completionTokens: 10,
+          totalTokens: 30,
+          model: "test-model",
+        },
+      }),
+    },
+  );
+
+  assert.equal(result.answerMode, "extractive_fallback");
+  assert.equal(result.modelError?.kind, "validation");
+  assert.doesNotMatch(result.answer, /Alex/);
+  assert.match(result.answer, /Linh/);
+});
+
 test("answerFromChunks returns a natural source-based answer when Gemini quota is exhausted", async () => {
   const result = await answerFromChunks(
     "Tháng 6 tôi làm gì?",
@@ -342,7 +1169,7 @@ test("answerFromChunks returns a natural source-based answer when Gemini quota i
 
   assert.equal(result.analytics?.status, "success");
   assert.equal(result.modelError?.kind, "quota");
-  assert.match(result.answer, /trả lời nhanh bằng các ký ức liên quan|ký ức liên quan đã tìm được/);
+  assert.match(result.answer, /ký ức liên quan nhất/);
   assert.match(result.answer, /API build pipeline/);
 });
 
@@ -470,6 +1297,28 @@ test("answerSingleDayFastPath skips reasoning-heavy temporal questions", () => {
     {
       startDate: new Date("2026-05-18T00:00:00.000Z"),
       endDate: new Date("2026-05-18T23:59:59.999Z"),
+    },
+    "en",
+    0.62,
+  );
+
+  assert.equal(result, null);
+});
+
+test("answerTemporalRangeFastPath skips blocker questions so Auto can generate a focused answer", () => {
+  const result = answerTemporalRangeFastPath(
+    "What blockers did we have this week?",
+    [
+      makeHit({
+        text: "The main blocker is making sure the worker is running before rehearsal.",
+        chunkType: "action_item",
+        similarity: 0.8,
+        vectorSimilarity: 0.8,
+      }),
+    ],
+    {
+      startDate: new Date("2026-07-13T00:00:00.000Z"),
+      endDate: new Date("2026-07-19T23:59:59.999Z"),
     },
     "en",
     0.62,

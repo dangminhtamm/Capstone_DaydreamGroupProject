@@ -5,6 +5,12 @@ import {
   createDefaultEmbeddingProvider,
   type AdvancedEmbeddingProvider,
 } from "./embedding.ts";
+import {
+  coerceDate,
+  normalizeWhitespace,
+  splitTextByBoundary,
+  withEmbeddings,
+} from "./indexing-utils.ts";
 import type { PersistedMemoryChunkPayload } from "./memory-indexer.ts";
 import type { MemoryChunkMetadata } from "./types.ts";
 
@@ -25,12 +31,10 @@ export interface IndexMemoryFromSummaryResult {
   chunkCount: number;
 }
 
-const MAX_SUMMARY_CHUNK_CHARS = 1200;
-
 export async function indexMemoryFromSummary(
   input: IndexMemoryFromSummaryInput,
 ): Promise<IndexMemoryFromSummaryResult> {
-  const content = input.content.replace(/\s+/g, " ").trim();
+  const content = normalizeWhitespace(input.content);
 
   if (!content) {
     return {
@@ -40,13 +44,12 @@ export async function indexMemoryFromSummary(
     };
   }
 
-  const periodStart = normalizeDate(input.periodStart);
-  const periodEnd = normalizeDate(input.periodEnd);
+  const periodStart = coerceDate(input.periodStart);
+  const periodEnd = coerceDate(input.periodEnd);
   const embeddingProvider =
     input.embeddingProvider ?? createDefaultEmbeddingProvider();
-  const persistedChunks: PersistedMemoryChunkPayload[] = [];
 
-  for (const [index, text] of splitSummaryText(content).entries()) {
+  const chunkPayloads = splitTextByBoundary(content).map((text, index) => {
     const metadata: MemoryChunkMetadata = {
       date: periodStart.toISOString(),
       sourceType: "summary",
@@ -62,7 +65,7 @@ export async function indexMemoryFromSummary(
       importance: 4,
     };
 
-    persistedChunks.push({
+    return {
       userId: input.userId,
       sourceType: "summary",
       sourceId: input.summaryId,
@@ -77,9 +80,12 @@ export async function indexMemoryFromSummary(
         summaryType: input.summaryType,
       } as MemoryChunkMetadata,
       occurredAt: periodStart,
-      embedding: await embeddingProvider.embedDocument(text),
-    });
-  }
+    } satisfies Omit<PersistedMemoryChunkPayload, "embedding">;
+  });
+  const persistedChunks: PersistedMemoryChunkPayload[] = await withEmbeddings(
+    chunkPayloads,
+    embeddingProvider,
+  );
 
   await (input.insertChunks ?? insertMemoryChunks)(persistedChunks);
 
@@ -88,42 +94,4 @@ export async function indexMemoryFromSummary(
     sourceId: input.summaryId,
     chunkCount: persistedChunks.length,
   };
-}
-
-function splitSummaryText(text: string): string[] {
-  const chunks: string[] = [];
-  let remaining = text.trim();
-
-  while (remaining.length > MAX_SUMMARY_CHUNK_CHARS) {
-    const splitAt = findSplitPoint(remaining);
-    chunks.push(remaining.slice(0, splitAt).trim());
-    remaining = remaining.slice(splitAt).trim();
-  }
-
-  if (remaining) chunks.push(remaining);
-  return chunks;
-}
-
-function findSplitPoint(text: string): number {
-  const window = text.slice(0, MAX_SUMMARY_CHUNK_CHARS);
-  const paragraphBreak = window.lastIndexOf("\n");
-  if (paragraphBreak >= MAX_SUMMARY_CHUNK_CHARS * 0.55) return paragraphBreak;
-
-  const sentenceBreak = Math.max(
-    window.lastIndexOf(". "),
-    window.lastIndexOf("! "),
-    window.lastIndexOf("? "),
-  );
-  if (sentenceBreak >= MAX_SUMMARY_CHUNK_CHARS * 0.55) return sentenceBreak + 1;
-
-  const wordBreak = window.lastIndexOf(" ");
-  return wordBreak >= MAX_SUMMARY_CHUNK_CHARS * 0.55
-    ? wordBreak
-    : MAX_SUMMARY_CHUNK_CHARS;
-}
-
-function normalizeDate(value: Date | string): Date {
-  const date = value instanceof Date ? value : new Date(value);
-  if (!Number.isFinite(date.getTime())) return new Date();
-  return date;
 }

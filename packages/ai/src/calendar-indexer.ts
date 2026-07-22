@@ -10,6 +10,7 @@ import {
   createDefaultEmbeddingProvider,
   type AdvancedEmbeddingProvider,
 } from "./embedding.ts";
+import { withEmbeddings } from "./indexing-utils.ts";
 import type { PersistedMemoryChunkPayload } from "./memory-indexer.ts";
 import type { MemoryChunkMetadata } from "./types.ts";
 
@@ -75,12 +76,10 @@ export async function indexMemoryFromCalendar(
       const chunks = buildCalendarChunks(input.userId, event);
       if (!chunks.length) continue;
 
-      // Generate embeddings for each chunk
-      const persistedChunks: PersistedMemoryChunkPayload[] = [];
-      for (const chunk of chunks) {
-        const embedding = await embeddingProvider.embedDocument(chunk.text);
-        persistedChunks.push({ ...chunk, embedding });
-      }
+      const persistedChunks: PersistedMemoryChunkPayload[] = await withEmbeddings(
+        chunks,
+        embeddingProvider,
+      );
 
       await doInsert(persistedChunks);
       totalChunkCount += persistedChunks.length;
