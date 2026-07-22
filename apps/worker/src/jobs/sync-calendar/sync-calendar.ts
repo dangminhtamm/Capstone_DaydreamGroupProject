@@ -75,6 +75,7 @@ export class SyncCalendarJob {
         timeMax: timeMax.toISOString(),
         maxResults: 250,
         singleEvents: true,
+        showDeleted: true,
         orderBy: 'startTime',
       });
 
@@ -84,6 +85,17 @@ export class SyncCalendarJob {
         const events = [];
 
         for (const event of rawEvents) {
+
+          if (event.status === 'cancelled') {
+            await tx.calendarEvent.deleteMany({
+              where: {
+                external_id: event.id as string,
+                user_id: user.id,
+              },
+            });
+            console.log(`Cancelled event removed from Google Calendar: [${event.id}]`);
+            continue;
+          }
           const normalizedData = this.normalizeEvent(event, user.id);
           const syncedEvent = await tx.calendarEvent.upsert({
             where: {

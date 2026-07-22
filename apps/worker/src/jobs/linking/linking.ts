@@ -20,7 +20,9 @@ export class SemanticLinkingJob {
 
       if (dailyEvents.length === 0) return;
 
-      const diaryKeywords = extractKeywords(diary.raw_text);
+      const diaryText = `${diary.title || ''} ${diary.raw_text || ''}`;
+      const diaryKeywords = extractKeywords(diaryText);
+
       const linkedEvents = [];
 
       for (const event of dailyEvents) {
@@ -31,7 +33,8 @@ export class SemanticLinkingJob {
         else if (timeDiffHours <= 3) matchScore += 30;
         else if (timeDiffHours <= 12) matchScore += 10;
 
-        const eventKeywords = extractKeywords(`${event.title} ${event.description || ''}`);
+        const eventText = `${event.title || ''} ${event.description || ''}`;
+        const eventKeywords = extractKeywords(eventText);
         const matchedWords = eventKeywords.filter((k) => diaryKeywords.includes(k));
 
         if (matchedWords.length > 0) {
@@ -63,23 +66,23 @@ export class SemanticLinkingJob {
         });
 
         await prisma.$executeRaw`
-          UPDATE memory_chunks
-          SET metadata = jsonb_set(
+        UPDATE memory_chunks
+        SET metadata = jsonb_set(
             jsonb_set(
-              COALESCE(metadata, '{}'::jsonb),
-              '{calendarEventIds}',
-              ${JSON.stringify(linkedEventIds)}::jsonb,
-              true
+                COALESCE(metadata, '{}'::jsonb),
+                '{calendarEventIds}',
+                CAST(${JSON.stringify(linkedEventIds)} AS jsonb),
+                true
             ),
             '{calendarEvents}',
-            ${JSON.stringify(memoryEventContext)}::jsonb,
+            CAST(${JSON.stringify(memoryEventContext)} AS jsonb),
             true
-          ),
-          updated_at = now()
-          WHERE user_id = ${diary.user_id}
-            AND source_type = 'diary'
-            AND source_id = ${diary.id}
-        `;
+        ),
+        updated_at = now()
+        WHERE user_id = ${diary.user_id}
+          AND source_type = 'diary'
+          AND source_id = ${diary.id}
+      `;
 
         console.log(`[Worker - Semantic Link] Success! Linked ${linkedEventIds.length} events to Diary [${diary.id}].`);
       }
@@ -90,7 +93,7 @@ export class SemanticLinkingJob {
   }
 
   static startCron() {
-    cron.schedule('*/15 * * * *', async () => {
+    cron.schedule('*/5 * * * *', async () => {
       console.log('[Cron] Triggering Semantic Linking Scan');
 
       try {
