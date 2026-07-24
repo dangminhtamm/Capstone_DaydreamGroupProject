@@ -31,6 +31,16 @@ export function inferRetrievalFilters(question: string, now = new Date()): Retri
     };
   }
 
+  if (intent === "google_contacts") {
+    return {
+      ...temporalFilters,
+      preferredSourceTypes: ["contact", "diary"],
+      preferredChunkTypes: ["general_note", "general", "decision"],
+      vectorWeight: 0.58,
+      lexicalWeight: 0.42,
+    };
+  }
+
   if (intent === "calendar") {
     return {
       ...temporalFilters,
@@ -38,6 +48,16 @@ export function inferRetrievalFilters(question: string, now = new Date()): Retri
       preferredChunkTypes: ["event", "general"],
       vectorWeight: 0.6,
       lexicalWeight: 0.4,
+    };
+  }
+
+  if (includesAny(normalized, ["google drive", "drive file", "drive files", "drive", "tệp drive", "tep drive"])) {
+    return {
+      ...temporalFilters,
+      preferredSourceTypes: ["drive"],
+      preferredChunkTypes: ["general_note", "general"],
+      vectorWeight: 0.62,
+      lexicalWeight: 0.38,
     };
   }
 
@@ -142,7 +162,7 @@ export function inferRetrievalFilters(question: string, now = new Date()): Retri
   ) {
     return {
       ...temporalFilters,
-      preferredSourceTypes: ["diary", "calendar"],
+      preferredSourceTypes: ["diary", "calendar", "contact"],
       preferredChunkTypes: ["event", "feedback", "decision", "general", "general_note"],
       vectorWeight: 0.6,
       lexicalWeight: 0.4,

@@ -124,6 +124,16 @@ async function readStatus() {
       EXISTS (
         SELECT 1 FROM pg_indexes
         WHERE schemaname = 'public'
+          AND indexname = 'google_contacts_user_external_key'
+      ) AS google_contacts_user_external_key,
+      EXISTS (
+        SELECT 1 FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND indexname = 'google_drive_files_user_external_key'
+      ) AS google_drive_files_user_external_key,
+      EXISTS (
+        SELECT 1 FROM pg_indexes
+        WHERE schemaname = 'public'
           AND indexname = 'summaries_user_type_period_key'
       ) AS summaries_user_type_period_key,
       EXISTS (

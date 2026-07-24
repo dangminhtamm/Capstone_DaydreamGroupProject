@@ -15,7 +15,7 @@ import {
   type IndexingStatus,
   type SystemHealth,
 } from "@/lib/api-client";
-import { GoogleCalendarCard } from "@/components/integrations/google-calendar-card";
+import { GoogleWorkspaceCard } from "@/components/integrations/google-workspace-card";
 
 type TokenStats = {
   today: number;
@@ -23,6 +23,19 @@ type TokenStats = {
   month: number;
   queriesToday: number;
 };
+
+type SettingsTab = "profile" | "google" | "memory" | "preferences";
+
+const settingsTabs: Array<{
+  id: SettingsTab;
+  label: string;
+  description: string;
+}> = [
+  { id: "profile", label: "Profile", description: "Account and password" },
+  { id: "google", label: "Google Workspace", description: "Calendar, Contacts, Drive" },
+  { id: "memory", label: "Memory & Indexing", description: "Health, jobs, readiness" },
+  { id: "preferences", label: "Preferences", description: "Theme, language, usage" },
+];
 
 function getTokenStats(): TokenStats {
   try {
@@ -78,6 +91,7 @@ export default function SettingsPage() {
   const [isLoadingSystemStatus, setIsLoadingSystemStatus] = useState(false);
   const [isRequeueingIndexing, setIsRequeueingIndexing] = useState(false);
   const [systemStatusMsg, setSystemStatusMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [activeTab, setActiveTab] = useState<SettingsTab>("profile");
 
   // Avatar upload
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -105,6 +119,12 @@ export default function SettingsPage() {
     setTokenStats(getTokenStats());
     const saved = localStorage.getItem("dd-response-lang") as "en" | "vi" | null;
     if (saved === "en" || saved === "vi") setResponseLang(saved);
+
+    if (window.location.hash === "#google-workspace") {
+      setActiveTab("google");
+    } else if (window.location.hash === "#memory-status") {
+      setActiveTab("memory");
+    }
   }, []);
 
   useEffect(() => {
@@ -350,8 +370,34 @@ export default function SettingsPage() {
       title="Settings"
       description="Manage your profile, preferences, and application settings."
     >
-      <div className="mx-auto max-w-3xl space-y-6">
+      <div className="mx-auto max-w-5xl space-y-6">
+        <div className="rounded-3xl border border-slate-200/80 bg-white p-2 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:bg-slate-800 dark:shadow-slate-900/40">
+          <div className="grid gap-2 md:grid-cols-4">
+            {settingsTabs.map((tab) => {
+              const isActive = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`cursor-pointer rounded-2xl px-4 py-3 text-left transition ${
+                    isActive
+                      ? "bg-indigo-50 text-indigo-700 ring-1 ring-indigo-100 dark:bg-indigo-900/40 dark:text-indigo-300 dark:ring-indigo-800"
+                      : "text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-700/60 dark:hover:text-slate-100"
+                  }`}
+                >
+                  <span className="block text-sm font-bold">{tab.label}</span>
+                  <span className={`mt-0.5 block text-xs ${isActive ? "text-indigo-500 dark:text-indigo-300" : "text-slate-400 dark:text-slate-500"}`}>
+                    {tab.description}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         {/* ─── Profile Section ─── */}
+        {activeTab === "profile" ? (
         <section className="rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white via-white to-indigo-50/30 p-6 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:from-slate-800 dark:via-slate-800 dark:to-indigo-950/30 dark:shadow-slate-900/40">
           <div className="mb-5">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600 dark:text-indigo-400">Account</p>
@@ -534,13 +580,17 @@ export default function SettingsPage() {
             </div>
           )}
         </section>
+        ) : null}
 
+        {activeTab === "google" ? (
         <Suspense fallback={null}>
-          <GoogleCalendarCard />
+          <GoogleWorkspaceCard indexingStatus={indexingStatus} />
         </Suspense>
+        ) : null}
 
         {/* ─── System Health ─── */}
-        <section className="rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white via-white to-cyan-50/30 p-6 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:from-slate-800 dark:via-slate-800 dark:to-cyan-950/20 dark:shadow-slate-900/40">
+        {activeTab === "memory" ? (
+        <section id="memory-status" className="scroll-mt-24 rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white via-white to-cyan-50/30 p-6 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:from-slate-800 dark:via-slate-800 dark:to-cyan-950/20 dark:shadow-slate-900/40">
           <div className="mb-5 flex items-start justify-between gap-4">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-600 dark:text-cyan-400">System</p>
@@ -868,8 +918,11 @@ export default function SettingsPage() {
             ) : null}
           </div>
         </section>
+        ) : null}
 
         {/* ─── Appearance ─── */}
+        {activeTab === "preferences" ? (
+        <>
         <section className="rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white via-white to-purple-50/30 p-6 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:from-slate-800 dark:via-slate-800 dark:to-purple-950/20 dark:shadow-slate-900/40">
           <div className="mb-5">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-purple-600 dark:text-purple-400">Appearance</p>
@@ -960,6 +1013,8 @@ export default function SettingsPage() {
             </button>
           </div>
         </section>
+        </>
+        ) : null}
       </div>
     </DashboardShell>
   );

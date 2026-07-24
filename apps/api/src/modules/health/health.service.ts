@@ -43,6 +43,8 @@ export class HealthService {
       ? await this.checkRelations({
           indexing_outbox: true,
           calendar_events: true,
+          google_contacts: true,
+          google_drive_files: true,
           summaries: true,
           memory_chunks: true,
         })
@@ -50,6 +52,8 @@ export class HealthService {
     const indexes = database.ok
       ? await this.checkRelations({
           calendar_events_user_external_key: true,
+          google_contacts_user_external_key: true,
+          google_drive_files_user_external_key: true,
           summaries_user_type_period_key: true,
           indexing_outbox_job_source_key: true,
           memory_chunks_user_source_chunk_key: true,

@@ -5,9 +5,11 @@ import { useAuth } from "@/contexts/AuthContext";
 import {
   createDiaryEntry,
   copilotDiaryText,
+  getCalendarEvents,
   processDiaryAttachment,
   uploadDiaryAttachment,
   type AttachmentUploadResponse,
+  type CalendarEventRecord,
   type CreateDiaryPayload,
   type DiaryMood,
 } from "@/lib/api-client";
@@ -38,6 +40,21 @@ function getLocalDateInputValue(date = new Date()) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function isSameLocalDate(isoDate: string, localDate: string) {
+  return getLocalDateInputValue(new Date(isoDate)) === localDate;
+}
+
+function formatCompactEventTime(event: CalendarEventRecord) {
+  const start = new Date(event.startTime);
+  const end = new Date(event.endTime);
+  const timeFormat = new Intl.DateTimeFormat(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  return `${timeFormat.format(start)}-${timeFormat.format(end)}`;
 }
 
 function getAttachmentStatusClass(status: AttachmentStatus) {
@@ -320,6 +337,8 @@ export function DiaryInputForm() {
   const [activeCopilotAction, setActiveCopilotAction] = useState("");
   const [templateLang, setTemplateLang] = useState<TemplateLang>("vi");
   const [attachmentItems, setAttachmentItems] = useState<AttachmentQueueItem[]>([]);
+  const [calendarEvents, setCalendarEvents] = useState<CalendarEventRecord[]>([]);
+  const [isCalendarLoading, setIsCalendarLoading] = useState(false);
   const [tagInput, setTagInput] = useState("");
 
   // Sync template language from system preference on mount
@@ -328,11 +347,43 @@ export function DiaryInputForm() {
     if (saved === "en" || saved === "vi") setTemplateLang(saved);
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadCalendarPreview() {
+      if (!isAuthenticated) {
+        setCalendarEvents([]);
+        return;
+      }
+
+      setIsCalendarLoading(true);
+      try {
+        const events = await getCalendarEvents(getAccessToken());
+        if (!cancelled) setCalendarEvents(events);
+      } catch {
+        if (!cancelled) setCalendarEvents([]);
+      } finally {
+        if (!cancelled) setIsCalendarLoading(false);
+      }
+    }
+
+    void loadCalendarPreview();
+    return () => {
+      cancelled = true;
+    };
+  }, [getAccessToken, isAuthenticated]);
+
   function toggleTemplateLang() {
     setTemplateLang((prev) => (prev === "en" ? "vi" : "en"));
   }
 
   const activeTemplates = TEMPLATES_MAP[templateLang];
+
+  const linkedCalendarEvents = useMemo(() => {
+    return calendarEvents
+      .filter((event) => isSameLocalDate(event.startTime, draft.entryDate))
+      .slice(0, 3);
+  }, [calendarEvents, draft.entryDate]);
 
   const canSubmit = useMemo(() => {
     return draft.title.trim().length > 0 && draft.content.trim().length > 0 && draft.entryDate.trim().length > 0;
@@ -580,141 +631,128 @@ export function DiaryInputForm() {
 
   return (
     <div className="w-full">
-      {/* Prompt Templates */}
-      <div className="mb-6">
-        <div className="mb-3 flex items-center justify-between">
-          <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-            {templateLang === "vi" ? "Bắt đầu nhanh với mẫu gợi ý" : "Kickstart your entry with a template"}
-          </p>
-          <button
-            type="button"
-            onClick={toggleTemplateLang}
-            className="inline-flex cursor-pointer items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold shadow-sm transition hover:border-indigo-300 hover:shadow-md dark:border-slate-600 dark:bg-slate-700 dark:hover:border-indigo-500"
-          >
-            <span className={`rounded-full px-1.5 py-0.5 transition ${templateLang === "en" ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300" : "text-slate-400 dark:text-slate-500"}`}>🇺🇸 EN</span>
-            <span className="text-slate-300 dark:text-slate-600">|</span>
-            <span className={`rounded-full px-1.5 py-0.5 transition ${templateLang === "vi" ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300" : "text-slate-400 dark:text-slate-500"}`}>🇻🇳 VI</span>
-          </button>
-        </div>
-        <div className="flex gap-4 overflow-x-auto pb-4 scrollbar-hide">
-          {activeTemplates.map((tpl) => (
-            <button
-              key={`${templateLang}-${tpl.id}`}
-              type="button"
-              onClick={() => applyTemplate(tpl)}
-              className="group flex w-[180px] shrink-0 cursor-pointer flex-col items-start gap-3 rounded-3xl border border-slate-200/80 bg-white/60 p-5 text-left shadow-sm shadow-slate-200/50 backdrop-blur-sm transition-all hover:-translate-y-1.5 hover:border-indigo-300 hover:bg-white hover:shadow-lg hover:shadow-indigo-100 dark:border-slate-700/60 dark:bg-slate-800/40 dark:shadow-slate-900/40 dark:hover:border-indigo-500/50 dark:hover:bg-slate-800/80 dark:hover:shadow-indigo-900/30"
-            >
-              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-indigo-50 transition-colors group-hover:bg-indigo-100 dark:bg-slate-700 dark:group-hover:bg-indigo-900/50">
-                <span className="text-xl transition-transform group-hover:scale-110">{tpl.icon}</span>
-              </div>
-              <span className="text-sm font-bold text-slate-700 dark:text-slate-300 group-hover:text-indigo-600 dark:group-hover:text-indigo-400">
-                {tpl.name}
-              </span>
-              <span className="text-[11px] leading-snug text-slate-400 dark:text-slate-500">
-                {tpl.description}
-              </span>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <form className="space-y-6 rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white via-white to-indigo-50/30 p-6 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:from-slate-800 dark:via-slate-800 dark:to-indigo-950/30 dark:shadow-slate-900/40" onSubmit={onSubmit}>
-        <div>
-          <label htmlFor="title" className="mb-2 block text-sm font-semibold text-slate-700 dark:text-slate-300">
-            Title
-          </label>
-          <input
-            id="title"
-            className="w-full rounded-2xl border border-slate-200 bg-white/80 px-4 py-3 text-sm text-slate-900 shadow-inner outline-none transition placeholder:text-slate-400 focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-100 dark:border-slate-600 dark:bg-slate-700/60 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-indigo-500 dark:focus:bg-slate-700 dark:focus:ring-indigo-900/40"
-            placeholder="What happened today?"
-            value={draft.title}
-            onChange={(event) => setDraft((prev) => ({ ...prev, title: event.target.value }))}
-          />
-        </div>
-
-        <div>
-          <label htmlFor="entryDate" className="mb-2 block text-sm font-semibold text-slate-700 dark:text-slate-300">
-            Memory date
-          </label>
-          <input
-            id="entryDate"
-            type="date"
-            required
-            className="w-full rounded-2xl border border-slate-200 bg-white/80 px-4 py-3 text-sm text-slate-900 shadow-inner outline-none transition placeholder:text-slate-400 focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-100 dark:border-slate-600 dark:bg-slate-700/60 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-indigo-500 dark:focus:bg-slate-700 dark:focus:ring-indigo-900/40"
-            value={draft.entryDate}
-            onChange={(event) => setDraft((prev) => ({ ...prev, entryDate: event.target.value }))}
-          />
-        </div>
-
-        <div className="grid gap-4 lg:grid-cols-[1fr_1.1fr]">
+      <form className="space-y-4 rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white via-white to-indigo-50/30 p-5 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:from-slate-800 dark:via-slate-800 dark:to-indigo-950/30 dark:shadow-slate-900/40 sm:p-6" onSubmit={onSubmit}>
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_180px]">
           <div>
-            <p className="mb-2 text-sm font-semibold text-slate-700 dark:text-slate-300">
-              Mood
-            </p>
-            <div className="grid grid-cols-2 gap-2">
-              {MOOD_OPTIONS.map((option) => {
-                const isSelected = draft.mood === option.value;
-                return (
-                  <button
-                    key={option.value}
-                    type="button"
-                    onClick={() => setDraft((prev) => ({ ...prev, mood: option.value }))}
-                    className={`min-h-16 rounded-2xl border px-3 py-2 text-left transition ${
-                      isSelected
-                        ? `${option.className} ring-2 ring-indigo-300 dark:ring-indigo-600`
-                        : "border-slate-200 bg-white/70 text-slate-600 hover:border-indigo-200 hover:bg-indigo-50/30 dark:border-slate-600 dark:bg-slate-700/40 dark:text-slate-300 dark:hover:border-indigo-600 dark:hover:bg-indigo-900/20"
-                    }`}
-                    aria-pressed={isSelected}
-                  >
-                    <span className="block text-sm font-semibold">{option.label}</span>
-                    <span className="mt-0.5 block text-xs opacity-75">{option.description}</span>
-                  </button>
-                );
-              })}
-            </div>
+            <label htmlFor="title" className="mb-1.5 block text-sm font-semibold text-slate-700 dark:text-slate-300">
+              Title
+            </label>
+            <input
+              id="title"
+              autoFocus
+              className="w-full rounded-2xl border border-slate-200 bg-white/80 px-4 py-3 text-sm text-slate-900 shadow-inner outline-none transition placeholder:text-slate-400 focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-100 dark:border-slate-600 dark:bg-slate-700/60 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-indigo-500 dark:focus:bg-slate-700 dark:focus:ring-indigo-900/40"
+              placeholder="What happened today?"
+              value={draft.title}
+              onChange={(event) => setDraft((prev) => ({ ...prev, title: event.target.value }))}
+            />
           </div>
 
           <div>
-            <label htmlFor="tags" className="mb-2 block text-sm font-semibold text-slate-700 dark:text-slate-300">
+            <label htmlFor="entryDate" className="mb-1.5 block text-sm font-semibold text-slate-700 dark:text-slate-300">
+              Date
+            </label>
+            <input
+              id="entryDate"
+              type="date"
+              required
+              className="w-full rounded-2xl border border-slate-200 bg-white/80 px-4 py-3 text-sm text-slate-900 shadow-inner outline-none transition placeholder:text-slate-400 focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-100 dark:border-slate-600 dark:bg-slate-700/60 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-indigo-500 dark:focus:bg-slate-700 dark:focus:ring-indigo-900/40"
+              value={draft.entryDate}
+              onChange={(event) => setDraft((prev) => ({ ...prev, entryDate: event.target.value }))}
+            />
+          </div>
+        </div>
+
+        <div>
+          <p className="mb-1.5 text-sm font-semibold text-slate-700 dark:text-slate-300">
+            Mood
+          </p>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {MOOD_OPTIONS.map((option) => {
+              const isSelected = draft.mood === option.value;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setDraft((prev) => ({ ...prev, mood: option.value }))}
+                  className={`min-h-12 rounded-2xl border px-3 py-2 text-left transition ${
+                    isSelected
+                      ? `${option.className} ring-2 ring-indigo-300 dark:ring-indigo-600`
+                      : "border-slate-200 bg-white/70 text-slate-600 hover:border-indigo-200 hover:bg-indigo-50/30 dark:border-slate-600 dark:bg-slate-700/40 dark:text-slate-300 dark:hover:border-indigo-600 dark:hover:bg-indigo-900/20"
+                  }`}
+                  aria-pressed={isSelected}
+                >
+                  <span className="block text-sm font-semibold">{option.label}</span>
+                  <span className="mt-0.5 block text-[11px] opacity-75">{option.description}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div>
+          <div className="mb-1.5 flex items-center justify-between">
+            <label htmlFor="tags" className="block text-sm font-semibold text-slate-700 dark:text-slate-300">
               Tags
             </label>
-            <div className="min-h-16 rounded-2xl border border-slate-200 bg-white/80 px-3 py-2 shadow-inner transition focus-within:border-indigo-400 focus-within:bg-white focus-within:ring-4 focus-within:ring-indigo-100 dark:border-slate-600 dark:bg-slate-700/60 dark:focus-within:border-indigo-500 dark:focus-within:bg-slate-700 dark:focus-within:ring-indigo-900/40">
-              <div className="flex flex-wrap items-center gap-2">
-                {draft.tags.map((tag) => (
-                  <span
-                    key={tag}
-                    className="inline-flex items-center gap-1.5 rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700 ring-1 ring-indigo-100 dark:bg-indigo-900/30 dark:text-indigo-300 dark:ring-indigo-800"
+            <span className="text-xs text-slate-400 dark:text-slate-500">{draft.tags.length}/12</span>
+          </div>
+          <div className="min-h-12 rounded-2xl border border-slate-200 bg-white/80 px-3 py-2 shadow-inner transition focus-within:border-indigo-400 focus-within:bg-white focus-within:ring-4 focus-within:ring-indigo-100 dark:border-slate-600 dark:bg-slate-700/60 dark:focus-within:border-indigo-500 dark:focus-within:bg-slate-700 dark:focus-within:ring-indigo-900/40">
+            <div className="flex flex-wrap items-center gap-2">
+              {draft.tags.map((tag) => (
+                <span
+                  key={tag}
+                  className="inline-flex items-center gap-1.5 rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700 ring-1 ring-indigo-100 dark:bg-indigo-900/30 dark:text-indigo-300 dark:ring-indigo-800"
+                >
+                  #{tag}
+                  <button
+                    type="button"
+                    onClick={() => removeTag(tag)}
+                    className="rounded-full text-indigo-400 transition hover:text-indigo-700 dark:hover:text-indigo-100"
+                    aria-label={`Remove ${tag} tag`}
                   >
-                    #{tag}
-                    <button
-                      type="button"
-                      onClick={() => removeTag(tag)}
-                      className="rounded-full text-indigo-400 transition hover:text-indigo-700 dark:hover:text-indigo-100"
-                      aria-label={`Remove ${tag} tag`}
-                    >
-                      <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18 18 6M6 6l12 12" />
-                      </svg>
-                    </button>
-                  </span>
-                ))}
-                <input
-                  id="tags"
-                  value={tagInput}
-                  onChange={(event) => setTagInput(event.target.value)}
-                  onKeyDown={handleTagInputKeyDown}
-                  onBlur={() => addTag()}
-                  maxLength={32}
-                  placeholder={draft.tags.length ? "Add another tag" : "project, health, meeting"}
-                  className="min-w-40 flex-1 bg-transparent px-1 py-1.5 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:text-slate-100 dark:placeholder:text-slate-500"
-                />
-              </div>
+                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18 18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </span>
+              ))}
+              <input
+                id="tags"
+                value={tagInput}
+                onChange={(event) => setTagInput(event.target.value)}
+                onKeyDown={handleTagInputKeyDown}
+                onBlur={() => addTag()}
+                maxLength={32}
+                placeholder={draft.tags.length ? "Add another tag" : "project, health, meeting"}
+                className="min-w-40 flex-1 bg-transparent px-1 py-1.5 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:text-slate-100 dark:placeholder:text-slate-500"
+              />
             </div>
-            <p className="mt-1.5 text-xs text-slate-400 dark:text-slate-500">
-              {draft.tags.length}/12 tags
-            </p>
           </div>
         </div>
+
+        {(isCalendarLoading || linkedCalendarEvents.length > 0) && (
+          <div className="rounded-2xl border border-sky-100 bg-sky-50/70 px-3 py-2 dark:border-sky-900/60 dark:bg-sky-950/30">
+            <div className="flex flex-wrap items-center gap-2 text-xs text-sky-800 dark:text-sky-200">
+              <span className="font-semibold">Calendar context</span>
+              {isCalendarLoading ? (
+                <span className="text-sky-600 dark:text-sky-300">Loading synced events...</span>
+              ) : (
+                linkedCalendarEvents.map((event) => (
+                  <a
+                    key={event.id}
+                    href={event.htmlLink ?? undefined}
+                    target={event.htmlLink ? "_blank" : undefined}
+                    rel={event.htmlLink ? "noopener noreferrer" : undefined}
+                    className="inline-flex max-w-full items-center gap-1 rounded-full bg-white/80 px-2.5 py-1 font-medium text-sky-700 ring-1 ring-sky-100 transition hover:bg-white dark:bg-slate-800/70 dark:text-sky-200 dark:ring-sky-800"
+                  >
+                    <span className="truncate">{event.title}</span>
+                    <span className="shrink-0 text-sky-500 dark:text-sky-300">{formatCompactEventTime(event)}</span>
+                  </a>
+                ))
+              )}
+            </div>
+          </div>
+        )}
 
         <div>
           <div className="mb-2 flex items-center justify-between">
@@ -771,85 +809,16 @@ export function DiaryInputForm() {
           )}
         </div>
 
-        <div>
-          <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-            <label htmlFor="attachments" className="block text-sm font-semibold text-slate-700 dark:text-slate-300">
-              Attach files
-            </label>
-            <span className="text-xs font-medium text-slate-400 dark:text-slate-500">
-              PDF, image, Word, or plain text · up to 5MB each
-            </span>
-          </div>
-          <label
-            htmlFor="attachments"
-            className="flex cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white/70 px-4 py-6 text-center transition hover:border-indigo-300 hover:bg-indigo-50/40 dark:border-slate-600 dark:bg-slate-700/40 dark:hover:border-indigo-500 dark:hover:bg-indigo-900/20"
-          >
-            <svg className="h-8 w-8 text-indigo-500 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 16V4m0 0L8 8m4-4 4 4M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
-            </svg>
-            <span className="mt-2 text-sm font-semibold text-slate-700 dark:text-slate-200">
-              Choose attachments for this diary
-            </span>
-            <span className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-              Text files index immediately; PDF/image/doc files are extracted and indexed after upload.
-            </span>
-          </label>
-          <input
-            id="attachments"
-            type="file"
-            multiple
-            accept=".txt,.pdf,.png,.jpg,.jpeg,.doc,.docx,text/plain,application/pdf,image/png,image/jpeg,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            className="sr-only"
-            onChange={handleAttachmentSelection}
-          />
+        <input
+          id="attachments"
+          type="file"
+          multiple
+          accept=".txt,.pdf,.png,.jpg,.jpeg,.doc,.docx,text/plain,application/pdf,image/png,image/jpeg,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          className="sr-only"
+          onChange={handleAttachmentSelection}
+        />
 
-          {attachmentItems.length ? (
-            <div className="mt-3 space-y-2">
-              {attachmentItems.map((item) => (
-                <div
-                  key={item.id}
-                  className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white/80 px-4 py-3 dark:border-slate-700 dark:bg-slate-800/70 sm:flex-row sm:items-center sm:justify-between"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-slate-800 dark:text-slate-200">{item.file.name}</p>
-                    <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-                      {(item.file.size / 1024).toFixed(1)} KB · {item.file.type || "unknown type"}
-                    </p>
-                  </div>
-                  <div className="flex shrink-0 flex-wrap items-center gap-2">
-                    <span className={`rounded-full px-3 py-1 text-xs font-semibold ring-1 ${getAttachmentStatusClass(item.status)}`}>
-                      {item.status}
-                    </span>
-                    <span className="max-w-[220px] truncate text-xs text-slate-500 dark:text-slate-400">
-                      {item.message}
-                    </span>
-                    {item.signedUrl ? (
-                      <a
-                        href={item.signedUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="rounded-lg px-2 py-1 text-xs font-semibold text-indigo-600 transition hover:bg-indigo-50 hover:text-indigo-800 dark:text-indigo-300 dark:hover:bg-indigo-900/30"
-                      >
-                        Open
-                      </a>
-                    ) : null}
-                    {item.status === "queued" ? (
-                      <button
-                        type="button"
-                        onClick={() => removeAttachment(item.id)}
-                        className="rounded-lg px-2 py-1 text-xs font-semibold text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-100"
-                      >
-                        Remove
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : null}
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3 border-t border-slate-100 pt-5 dark:border-slate-700">
+        <div className="flex flex-wrap items-center gap-3 border-t border-slate-100 pt-4 dark:border-slate-700">
           <button
             type="submit"
             disabled={!canSubmit || state === "saving"}
@@ -857,6 +826,25 @@ export function DiaryInputForm() {
           >
             {state === "saving" ? "Saving..." : "Save Diary Entry"}
           </button>
+
+          <label
+            htmlFor="attachments"
+            className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-indigo-300 hover:bg-indigo-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-indigo-500 dark:hover:bg-indigo-950/40"
+          >
+            <svg className="h-4 w-4 text-indigo-500 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21.44 11.05 12 20.5a6 6 0 1 1-8.49-8.49l9.9-9.9a4 4 0 0 1 5.66 5.66l-9.9 9.9a2 2 0 0 1-2.83-2.83l8.49-8.49" />
+            </svg>
+            Attach
+            {attachmentItems.length > 0 && (
+              <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-200">
+                {attachmentItems.length}
+              </span>
+            )}
+          </label>
+
+          <span className="text-xs text-slate-400 dark:text-slate-500">
+            PDF, image, Word, or text files
+          </span>
 
           {state === "success" && (
             <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:ring-emerald-700">
@@ -891,7 +879,89 @@ export function DiaryInputForm() {
             </div>
           )}
         </div>
+
+        {attachmentItems.length ? (
+          <div className="space-y-2">
+            {attachmentItems.map((item) => (
+              <div
+                key={item.id}
+                className="flex flex-col gap-2 rounded-2xl border border-slate-200 bg-white/80 px-3 py-2 dark:border-slate-700 dark:bg-slate-800/70 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-slate-800 dark:text-slate-200">{item.file.name}</p>
+                  <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                    {(item.file.size / 1024).toFixed(1)} KB · {item.file.type || "unknown type"}
+                  </p>
+                </div>
+                <div className="flex shrink-0 flex-wrap items-center gap-2">
+                  <span className={`rounded-full px-3 py-1 text-xs font-semibold ring-1 ${getAttachmentStatusClass(item.status)}`}>
+                    {item.status}
+                  </span>
+                  <span className="max-w-[220px] truncate text-xs text-slate-500 dark:text-slate-400">
+                    {item.message}
+                  </span>
+                  {item.signedUrl ? (
+                    <a
+                      href={item.signedUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="rounded-lg px-2 py-1 text-xs font-semibold text-indigo-600 transition hover:bg-indigo-50 hover:text-indigo-800 dark:text-indigo-300 dark:hover:bg-indigo-900/30"
+                    >
+                      Open
+                    </a>
+                  ) : null}
+                  {item.status === "queued" ? (
+                    <button
+                      type="button"
+                      onClick={() => removeAttachment(item.id)}
+                      className="rounded-lg px-2 py-1 text-xs font-semibold text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-100"
+                    >
+                      Remove
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : null}
       </form>
+
+      <details className="mt-5 rounded-3xl border border-slate-200/70 bg-white/60 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-800/50">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold text-slate-700 dark:text-slate-200">
+          <span>{templateLang === "vi" ? "Mẫu viết nhanh" : "Quick writing templates"}</span>
+          <button
+            type="button"
+            onClick={(event) => {
+              event.preventDefault();
+              toggleTemplateLang();
+            }}
+            className="inline-flex cursor-pointer items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold shadow-sm transition hover:border-indigo-300 hover:shadow-md dark:border-slate-600 dark:bg-slate-700 dark:hover:border-indigo-500"
+          >
+            <span className={`rounded-full px-1.5 py-0.5 transition ${templateLang === "en" ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300" : "text-slate-400 dark:text-slate-500"}`}>EN</span>
+            <span className="text-slate-300 dark:text-slate-600">|</span>
+            <span className={`rounded-full px-1.5 py-0.5 transition ${templateLang === "vi" ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300" : "text-slate-400 dark:text-slate-500"}`}>VI</span>
+          </button>
+        </summary>
+
+        <div className="mt-4 flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
+          {activeTemplates.map((tpl) => (
+            <button
+              key={`${templateLang}-${tpl.id}`}
+              type="button"
+              onClick={() => applyTemplate(tpl)}
+              className="group flex w-[170px] shrink-0 cursor-pointer flex-col items-start gap-2 rounded-2xl border border-slate-200/80 bg-white/70 p-4 text-left shadow-sm shadow-slate-200/50 transition-all hover:-translate-y-1 hover:border-indigo-300 hover:bg-white hover:shadow-md dark:border-slate-700/60 dark:bg-slate-800/60 dark:shadow-slate-900/40 dark:hover:border-indigo-500/50 dark:hover:bg-slate-800/90"
+            >
+              <span className="text-sm font-bold text-slate-700 dark:text-slate-300 group-hover:text-indigo-600 dark:group-hover:text-indigo-400">
+                {tpl.name}
+              </span>
+              <span className="text-[11px] leading-snug text-slate-400 dark:text-slate-500">
+                {tpl.description}
+              </span>
+            </button>
+          ))}
+        </div>
+      </details>
+
       <div className="mx-auto mt-6 grid max-w-3xl grid-cols-1 gap-3 sm:grid-cols-3">
         {[
           {

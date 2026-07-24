@@ -42,6 +42,17 @@ export {
   type IndexMemoryFromCalendarResult,
 } from "./calendar-indexer.ts";
 export {
+  indexMemoryFromContact,
+  type GoogleContactInput,
+  type IndexMemoryFromContactInput,
+  type IndexMemoryFromContactResult,
+} from "./contact-indexer.ts";
+export {
+  indexMemoryFromDrive,
+  type IndexMemoryFromDriveInput,
+  type IndexMemoryFromDriveResult,
+} from "./drive-indexer.ts";
+export {
   indexMemoryFromAttachment,
   type IndexMemoryFromAttachmentInput,
   type IndexMemoryFromAttachmentResult,

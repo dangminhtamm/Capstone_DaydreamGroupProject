@@ -1605,6 +1605,7 @@ function classifyFallbackConfidence(citations: MemoryCitation[]): "high" | "medi
 }
 
 function isGoogleContactsSource(source: MemoryCitation): boolean {
+  if (source.sourceType === "contact") return true;
   const searchable = normalizeForIntent(
     `${source.sourceTitle ?? ""} ${source.chunkType} ${source.quote}`,
   );
@@ -2077,6 +2078,9 @@ function getIntentSpecificBoost(normalizedQuestion: string, chunk: MemorySearchH
 
   if (isGoogleContactsIntent(normalizedQuestion)) {
     let boost = 0;
+    if (chunk.sourceType === "contact") {
+      boost += 0.28;
+    }
     if (includesAny(searchable, ["google contacts", "contacts", "people api", "contact names", "emails", "phone numbers", "organizations", "danh bạ", "danh ba"])) {
       boost += 0.2;
     }

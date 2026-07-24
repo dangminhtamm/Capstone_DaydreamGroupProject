@@ -2,6 +2,8 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { createClient } from '@supabase/supabase-js';
 import { Client as PgClient } from 'pg';
 import * as cron from 'node-cron';
+import { google } from 'googleapis';
+import { decryptOAuthToken, encryptOAuthToken } from '@second-brain/shared';
 import {
   deleteMemoryChunksForSource,
   insertMemoryChunks,
@@ -11,7 +13,9 @@ import {
   getGeminiVisionModel,
   indexMemoryFromAttachment,
   indexMemoryFromCalendar,
+  indexMemoryFromContact,
   indexMemoryFromDiary,
+  indexMemoryFromDrive,
   indexMemoryFromSummary,
 } from '@second-brain/ai';
 import { prisma } from '../../lib/prisma';
@@ -221,6 +225,12 @@ Return only the extracted text or factual description.
       case 'calendar':
         await this.processCalendarEvent({ ...job, source_type: sourceType });
         return;
+      case 'contact':
+        await this.processContact({ ...job, source_type: sourceType });
+        return;
+      case 'drive':
+        await this.processDriveFile({ ...job, source_type: sourceType });
+        return;
       case 'summary':
         await this.processSummary({ ...job, source_type: sourceType });
         return;
@@ -240,6 +250,13 @@ Return only the extracted text or factual description.
       calendar_event: 'calendar',
       calendarevent: 'calendar',
       google_calendar: 'calendar',
+      google_contact: 'contact',
+      google_contacts: 'contact',
+      contacts: 'contact',
+      people: 'contact',
+      google_drive: 'drive',
+      drive_file: 'drive',
+      google_drive_file: 'drive',
       generated_summary: 'summary',
     };
 
@@ -420,6 +437,200 @@ Return only the extracted text or factual description.
     if (result.errors.length) {
       throw new Error(result.errors.map((item) => item.error).join('; '));
     }
+  }
+
+  private static async processContact(job: IndexingJob) {
+    const contact = await prisma.googleContact.findFirst({
+      where: { id: job.source_id, user_id: job.user_id },
+    });
+
+    if (!contact) {
+      await deleteMemoryChunksForSource(prisma as any, {
+        userId: job.user_id,
+        sourceType: 'contact',
+        sourceId: job.source_id,
+      });
+      return;
+    }
+
+    const result = await indexMemoryFromContact({
+      userId: job.user_id,
+      contacts: [
+        {
+          contactId: contact.id,
+          externalId: contact.external_id,
+          displayName: contact.display_name,
+          emailAddresses: contact.email_addresses,
+          phoneNumbers: contact.phone_numbers,
+          organizations: contact.organizations,
+          photoUrl: contact.photo_url,
+          updatedAt: contact.updated_at,
+        },
+      ],
+      insertChunks: (chunks) =>
+        prisma.$transaction(async (tx: any) => {
+          await insertMemoryChunks(tx, chunks);
+          await pruneMemoryChunksForSource(tx, {
+            userId: job.user_id,
+            sourceType: 'contact',
+            sourceId: contact.id,
+            keepChunkCount: chunks.length,
+          });
+        }),
+    });
+
+    if (result.errors.length) {
+      throw new Error(result.errors.map((item) => item.error).join('; '));
+    }
+  }
+
+  private static async processDriveFile(job: IndexingJob) {
+    const driveFile = await prisma.googleDriveFile.findFirst({
+      where: { id: job.source_id, user_id: job.user_id },
+      include: {
+        user: {
+          select: {
+            id: true,
+            google_access_token: true,
+            google_refresh_token: true,
+          },
+        },
+      },
+    });
+
+    if (!driveFile) {
+      await deleteMemoryChunksForSource(prisma as any, {
+        userId: job.user_id,
+        sourceType: 'drive',
+        sourceId: job.source_id,
+      });
+      return;
+    }
+
+    let extractedText = driveFile.extracted_text?.trim() ?? '';
+    if (!extractedText) {
+      extractedText = await this.extractGoogleDriveFileText(driveFile);
+      await prisma.googleDriveFile.update({
+        where: { id: driveFile.id },
+        data: { extracted_text: extractedText },
+      });
+    }
+
+    const result = await indexMemoryFromDrive({
+      userId: job.user_id,
+      driveFileId: driveFile.id,
+      externalId: driveFile.external_id,
+      name: driveFile.name,
+      mimeType: driveFile.mime_type,
+      extractedText,
+      webViewLink: driveFile.web_view_link,
+      modifiedTime: driveFile.modified_time,
+      insertChunks: (chunks) =>
+        prisma.$transaction(async (tx: any) => {
+          await insertMemoryChunks(tx, chunks);
+          await pruneMemoryChunksForSource(tx, {
+            userId: job.user_id,
+            sourceType: 'drive',
+            sourceId: driveFile.id,
+            keepChunkCount: chunks.length,
+          });
+        }),
+    });
+
+    if (result.chunkCount === 0) {
+      await deleteMemoryChunksForSource(prisma as any, {
+        userId: job.user_id,
+        sourceType: 'drive',
+        sourceId: driveFile.id,
+      });
+    }
+  }
+
+  private static async extractGoogleDriveFileText(driveFile: {
+    external_id: string;
+    name: string;
+    mime_type: string;
+    user: {
+      id: string;
+      google_access_token: string | null;
+      google_refresh_token: string | null;
+    };
+  }) {
+    if (!driveFile.user.google_access_token && !driveFile.user.google_refresh_token) {
+      throw new Error('Google token is missing for Drive extraction.');
+    }
+
+    const oauth2Client = new google.auth.OAuth2(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+    );
+    oauth2Client.setCredentials({
+      access_token: decryptOAuthToken(driveFile.user.google_access_token),
+      refresh_token: decryptOAuthToken(driveFile.user.google_refresh_token),
+    });
+    oauth2Client.on('tokens', async (tokens) => {
+      await prisma.user.update({
+        where: { id: driveFile.user.id },
+        data: {
+          ...(tokens.access_token && { google_access_token: encryptOAuthToken(tokens.access_token) }),
+          ...(tokens.refresh_token && { google_refresh_token: encryptOAuthToken(tokens.refresh_token) }),
+        },
+      });
+    });
+
+    const drive = google.drive({ version: 'v3', auth: oauth2Client });
+    const exportMimeType = this.getDriveExportMimeType(driveFile.mime_type);
+
+    if (exportMimeType) {
+      const response = await drive.files.export(
+        {
+          fileId: driveFile.external_id,
+          mimeType: exportMimeType,
+        },
+        { responseType: 'arraybuffer' },
+      );
+      return Buffer.from(response.data as ArrayBuffer).toString('utf8').trim();
+    }
+
+    const response = await drive.files.get(
+      {
+        fileId: driveFile.external_id,
+        alt: 'media',
+        supportsAllDrives: true,
+      },
+      { responseType: 'arraybuffer' },
+    );
+    const buffer = Buffer.from(response.data as ArrayBuffer);
+    if (this.isPlainTextMimeType(driveFile.mime_type)) {
+      return buffer.toString('utf8').trim();
+    }
+
+    const base64Data = buffer.toString('base64');
+    return this.extractTextFromBlob(base64Data, driveFile.mime_type);
+  }
+
+  private static getDriveExportMimeType(mimeType: string) {
+    const exportMimeTypes: Record<string, string> = {
+      'application/vnd.google-apps.document': 'text/plain',
+      'application/vnd.google-apps.spreadsheet': 'text/csv',
+      'application/vnd.google-apps.presentation': 'text/plain',
+      'application/vnd.google-apps.drawing': 'application/pdf',
+    };
+
+    return exportMimeTypes[mimeType] ?? null;
+  }
+
+  private static isPlainTextMimeType(mimeType: string) {
+    return (
+      mimeType.startsWith('text/') ||
+      [
+        'application/json',
+        'application/xml',
+        'application/javascript',
+        'application/typescript',
+        'application/csv',
+      ].includes(mimeType)
+    );
   }
 
   private static async processSummary(job: IndexingJob) {

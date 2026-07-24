@@ -129,6 +129,46 @@ function getTopKeywords(entries: DiaryEntry[]) {
     .map(([word]) => word);
 }
 
+function getTopTags(entries: DiaryEntry[]) {
+  const counts = new Map<string, number>();
+
+  entries.forEach((entry) => {
+    (entry.tags ?? []).forEach((tag) => {
+      counts.set(tag, (counts.get(tag) ?? 0) + 1);
+    });
+  });
+
+  return [...counts.entries()]
+    .sort((first, second) => second[1] - first[1])
+    .slice(0, 5)
+    .map(([tag]) => tag);
+}
+
+function getDominantMood(entries: DiaryEntry[]) {
+  const counts = new Map<string, number>();
+
+  entries.forEach((entry) => {
+    if (entry.mood) {
+      counts.set(entry.mood, (counts.get(entry.mood) ?? 0) + 1);
+    }
+  });
+
+  const dominant = [...counts.entries()].sort((first, second) => second[1] - first[1])[0];
+  if (!dominant) return null;
+
+  const labelMap: Record<string, string> = {
+    great: "Great",
+    good: "Good",
+    neutral: "Neutral",
+    bad: "Difficult",
+  };
+
+  return {
+    label: labelMap[dominant[0]] ?? dominant[0],
+    count: dominant[1],
+  };
+}
+
 function buildDailySummaries(entries: DiaryEntry[]) {
   const grouped = new Map<string, DiaryEntry[]>();
 
@@ -273,6 +313,98 @@ function ActivityBars({ summaries }: { summaries: DailySummary[] }) {
   );
 }
 
+function InsightSnapshot({
+  latestDay,
+  latestWeek,
+  latestAiSummary,
+  topTags,
+  mood,
+}: {
+  latestDay?: DailySummary;
+  latestWeek?: WeeklySummary;
+  latestAiSummary?: SummaryRecord;
+  topTags: string[];
+  mood: { label: string; count: number } | null;
+}) {
+  const focusTerms = latestWeek ? getTopKeywords(latestWeek.entries).slice(0, 5) : [];
+
+  return (
+    <section className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:bg-slate-800 dark:shadow-slate-900/40">
+      <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
+        <div className="max-w-2xl">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600 dark:text-indigo-400">
+            Insight snapshot
+          </p>
+          <h3 className="mt-3 text-2xl font-bold tracking-tight text-slate-950 dark:text-slate-100">
+            {latestWeek ? `Week of ${latestWeek.label}` : "Your memory overview is waiting"}
+          </h3>
+          <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-400">
+            {latestWeek
+              ? `${latestWeek.entries.length} entries across ${latestWeek.activeDays} active day${latestWeek.activeDays === 1 ? "" : "s"}, with ${latestWeek.wordCount.toLocaleString()} words captured.`
+              : "Add diary entries or sync calendar activity to build weekly focus, mood, and AI summary insights."}
+          </p>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-3 xl:w-[520px]">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-700 dark:bg-slate-900/40">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Latest day</p>
+            <p className="mt-2 text-lg font-bold text-slate-950 dark:text-slate-100">
+              {latestDay?.label ?? "No entries"}
+            </p>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              {latestDay ? `${latestDay.entries.length} entries · ${latestDay.wordCount} words` : "Start from Diary"}
+            </p>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-700 dark:bg-slate-900/40">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Mood trend</p>
+            <p className="mt-2 text-lg font-bold text-slate-950 dark:text-slate-100">
+              {mood?.label ?? "Not enough data"}
+            </p>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              {mood ? `${mood.count} tagged entr${mood.count === 1 ? "y" : "ies"}` : "Add mood in Diary"}
+            </p>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-700 dark:bg-slate-900/40">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Next step</p>
+            <p className="mt-2 text-lg font-bold text-slate-950 dark:text-slate-100">
+              {latestAiSummary ? "Review summary" : "Generate summary"}
+            </p>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              {latestAiSummary ? "Use it as memory evidence" : "Create one from this period"}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.7fr)]">
+        <div className="rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4 dark:border-indigo-900/60 dark:bg-indigo-950/30">
+          <p className="text-sm font-semibold text-indigo-950 dark:text-indigo-100">This period focused on</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {[...focusTerms, ...topTags.map((tag) => `#${tag}`)].slice(0, 8).map((term) => (
+              <span
+                key={term}
+                className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-indigo-700 ring-1 ring-indigo-100 dark:bg-slate-800 dark:text-indigo-300 dark:ring-indigo-800"
+              >
+                {term}
+              </span>
+            ))}
+            {!focusTerms.length && !topTags.length ? (
+              <span className="text-sm text-indigo-700/80 dark:text-indigo-300/80">Keywords and tags will appear after more entries.</span>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-700 dark:bg-slate-900/40">
+          <p className="text-sm font-semibold text-slate-950 dark:text-slate-100">Latest AI reflection</p>
+          <p className="mt-2 line-clamp-4 text-sm leading-6 text-slate-600 dark:text-slate-400">
+            {latestAiSummary?.content ?? "No generated summary yet. Generate one after adding diary entries or syncing calendar activity."}
+          </p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export function SummaryDashboard() {
   const { getAccessToken, isAuthenticated, isLoading: authLoading } = useAuth();
   const [entries, setEntries] = useState<DiaryEntry[]>([]);
@@ -338,6 +470,11 @@ export function SummaryDashboard() {
   );
   const activeDays = dailySummaries.length;
   const latestEntry = sortedEntries[0];
+  const latestDay = dailySummaries[0];
+  const latestWeek = weeklySummaries[0];
+  const topTags = useMemo(() => getTopTags(sortedEntries), [sortedEntries]);
+  const dominantMood = useMemo(() => getDominantMood(sortedEntries), [sortedEntries]);
+  const latestAiSummary = aiSummaries[0];
   const visibleAiSummaries = useMemo(
     () => aiSummaries.filter((summary) => summary.type === summaryType).slice(0, 5),
     [aiSummaries, summaryType],
@@ -437,24 +574,16 @@ export function SummaryDashboard() {
 
   return (
     <div className="space-y-6">
-      <section className="rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white via-white to-indigo-50/30 p-6 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:from-slate-800 dark:via-slate-800 dark:to-indigo-950/30 dark:shadow-slate-900/40">
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600 dark:text-indigo-400">Personal insights</p>
-            <h3 className="mt-3 text-2xl font-bold tracking-tight text-slate-950 dark:text-slate-100">Your activity at a glance</h3>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600 dark:text-slate-400">
-              Track diary volume, writing consistency, and weekly activity patterns from your saved entries.
-            </p>
-          </div>
-          <div className="rounded-2xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-700 dark:border-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300">
-            <span className="font-semibold">Latest update:</span>{" "}
-            {latestEntry ? weekdayFormatter.format(new Date(getEntryActivityDate(latestEntry))) : "No entries yet"}
-          </div>
-        </div>
-      </section>
+      <InsightSnapshot
+        latestDay={latestDay}
+        latestWeek={latestWeek}
+        latestAiSummary={latestAiSummary}
+        topTags={topTags}
+        mood={dominantMood}
+      />
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Total entries" value={String(sortedEntries.length)} helper="Diary memories saved" tone="bg-indigo-500" />
+        <StatCard label="Total entries" value={String(sortedEntries.length)} helper={latestEntry ? `Latest: ${weekdayFormatter.format(new Date(getEntryActivityDate(latestEntry)))}` : "Diary memories saved"} tone="bg-indigo-500" />
         <StatCard label="Active days" value={String(activeDays)} helper="Days with at least one entry" tone="bg-sky-500" />
         <StatCard label="Total words" value={totalWords.toLocaleString()} helper="Across titles and content" tone="bg-emerald-500" />
         <StatCard

@@ -34,6 +34,8 @@ export class CalendarService {
 
     private readonly oauthScopes = [
         'https://www.googleapis.com/auth/calendar.readonly',
+        'https://www.googleapis.com/auth/contacts.readonly',
+        'https://www.googleapis.com/auth/drive.readonly',
     ];
 
     private getFrontendUrl() {

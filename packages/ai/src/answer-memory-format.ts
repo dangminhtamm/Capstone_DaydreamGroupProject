@@ -381,6 +381,9 @@ function summarizeCitationInVietnamese(
   }
 
   if (intent === "google_contacts") {
+    if (citation.sourceType === "contact") {
+      return citation.quote;
+    }
     if (isGoogleContactsSearchText(searchable)) {
       return "Kế hoạch Google Contacts là sync contact names, emails, phone numbers và organizations từ Google People API để memory engine nhận diện người như Linh, Quan hoặc Duc Anh tốt hơn";
     }

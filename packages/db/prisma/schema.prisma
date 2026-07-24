@@ -39,6 +39,53 @@ model CalendarEvent {
   @@map("calendar_events")
 }
 
+model GoogleContact {
+  id             String   @id @default(uuid())
+  user_id        String
+  external_id    String
+  display_name   String
+  email_addresses String[] @default([])
+  phone_numbers   String[] @default([])
+  organizations   String[] @default([])
+  photo_url       String?
+  raw_json        Json?
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  // Relations
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, external_id], map: "google_contacts_user_external_key")
+  @@index([user_id, display_name], map: "google_contacts_user_display_name_idx")
+  @@map("google_contacts")
+}
+
+model GoogleDriveFile {
+  id             String   @id @default(uuid())
+  user_id        String
+  external_id    String
+  name           String
+  mime_type      String
+  web_view_link  String?
+  icon_link      String?
+  thumbnail_link String?
+  size           BigInt?
+  modified_time  DateTime?
+  extracted_text String?  @db.Text
+  raw_json       Json?
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  // Relations
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, external_id], map: "google_drive_files_user_external_key")
+  @@index([user_id, modified_time], map: "google_drive_files_user_modified_time_idx")
+  @@map("google_drive_files")
+}
+
 model Summary {
   id           String   @id @default(uuid())
   user_id      String
@@ -107,6 +154,8 @@ model User {
   memory_chunks   MemoryChunk[]
   summaries       Summary[]
   calendar_events CalendarEvent[]
+  google_contacts GoogleContact[]
+  google_drive_files GoogleDriveFile[]
   gmail_messages  GmailMessage[]
   search_history  SearchHistory[]
   indexing_outbox IndexingOutbox[]

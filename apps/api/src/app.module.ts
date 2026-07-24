@@ -19,6 +19,8 @@ import { HealthController } from './modules/health/health.controller';
 import { HealthService } from './modules/health/health.service';
 import { IndexingController } from './modules/indexing/indexing.controller';
 import { IndexingService } from './modules/indexing/indexing.service';
+import { ContactsModule } from './modules/contacts/contacts.module';
+import { DriveModule } from './modules/drive/drive.module';
 
 @Module({
   imports: [
@@ -28,6 +30,8 @@ import { IndexingService } from './modules/indexing/indexing.service';
     }),
     AuthModule,
     CalendarModule,
+    ContactsModule,
+    DriveModule,
   ],
   controllers: [
     AppController,
