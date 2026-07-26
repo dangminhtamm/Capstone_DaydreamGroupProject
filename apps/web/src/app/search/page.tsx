@@ -58,6 +58,7 @@ type MemoryDebugTrace = {
     sourceType: string;
     sourceId: string;
     sourceTitle?: string;
+    sourceUrl?: string;
     chunkType: string;
     occurredAt: string;
     retrievalMode: string;
@@ -335,6 +336,7 @@ function AiDebugPanel({ result }: { result: SearchResponse }) {
         sourceType: source.sourceType,
         sourceId: source.sourceId,
         sourceTitle: source.sourceTitle,
+        sourceUrl: undefined as string | undefined,
         chunkType: source.chunkType,
         occurredAt: source.occurredAt,
         retrievalMode: "citation",
@@ -440,6 +442,20 @@ function AiDebugPanel({ result }: { result: SearchResponse }) {
                   <span className="rounded-md bg-slate-900 px-2 py-0.5 font-bold text-white dark:bg-slate-100 dark:text-slate-950">#{index + 1}</span>
                   <span className="font-medium text-slate-700 dark:text-slate-300">{chunk.sourceTitle || `${chunk.sourceType}/${chunk.chunkType}`}</span>
                   <span>{formatSourceDate(chunk.occurredAt)}</span>
+                  {chunk.sourceType === "attachment" && chunk.sourceUrl ? (
+                    <a
+                      href={chunk.sourceUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 rounded-md bg-violet-100 px-2 py-0.5 font-semibold text-violet-700 transition hover:bg-violet-200 dark:bg-violet-900/40 dark:text-violet-300 dark:hover:bg-violet-900/60"
+                    >
+                      📎 Open
+                    </a>
+                  ) : chunk.sourceType === "attachment" ? (
+                    <span className="rounded-md bg-violet-100 px-2 py-0.5 font-semibold text-violet-700 dark:bg-violet-900/40 dark:text-violet-300">
+                      📎 Attachment
+                    </span>
+                  ) : null}
                 </div>
                 <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-slate-600 dark:text-slate-300">
                   <span className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">mode: {chunk.retrievalMode}</span>

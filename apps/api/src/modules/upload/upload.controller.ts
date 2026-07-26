@@ -3,6 +3,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   NotFoundException,
   Param,
@@ -99,7 +100,7 @@ export class UploadController {
         validators: [
           new MaxFileSizeValidator({ maxSize: 5 * 1024 * 1024 }), // 5MB limit
           new FileTypeValidator({
-            fileType: /^(image\/png|image\/jpeg|application\/pdf|application\/msword|application\/vnd\.openxmlformats-officedocument\.wordprocessingml\.document|text\/plain)$/,
+            fileType: /^(image\/png|image\/jpe?g|application\/pdf|application\/msword|application\/vnd\.openxmlformats-officedocument\.wordprocessingml\.document|text\/plain)$/,
           }),
         ],
       }),
@@ -213,6 +214,160 @@ export class UploadController {
       memoryChunkCount: 0,
       attachment: await this.toClientAttachment(attachment),
     };
+  }
+
+  @Delete('attachment/:id')
+  async deleteAttachment(
+    @Request() req: { user: { userId: string } },
+    @Param('id') attachmentId: string,
+  ) {
+    const user = await this.findUserOrThrow(req.user.userId);
+
+    const attachment = await this.prisma.attachment.findFirst({
+      where: {
+        id: attachmentId,
+        diary_entry: { user_id: user.id },
+      },
+    });
+
+    if (!attachment) {
+      throw new NotFoundException('Attachment not found.');
+    }
+
+    // Delete from Supabase Storage first
+    await this.storageService
+      .deleteFile('attachments-bucket', attachment.storage_path)
+      .catch((err) => console.warn('Failed to delete file from storage (non-fatal):', err));
+
+    // Delete memory chunks for this attachment
+    await this.prisma.memoryChunk.deleteMany({
+      where: {
+        userId: user.id,
+        sourceType: 'attachment',
+        sourceId: attachment.id,
+      },
+    }).catch(() => { /* non-fatal */ });
+
+    // Delete indexing outbox jobs
+    await this.prisma.indexingOutbox.deleteMany({
+      where: {
+        source_type: 'attachment',
+        source_id: attachment.id,
+      },
+    }).catch(() => { /* non-fatal */ });
+
+    // Delete the DB record
+    await this.prisma.attachment.delete({ where: { id: attachment.id } });
+
+    // Invalidate search cache
+    await invalidateUserSearchCache(user.id);
+
+    return { message: 'Attachment deleted successfully.' };
+  }
+
+  @Post('attachment/:id/analyze')
+  async analyzeAttachment(
+    @Request() req: { user: { userId: string } },
+    @Param('id') attachmentId: string,
+  ) {
+    const user = await this.findUserOrThrow(req.user.userId);
+
+    const attachment = await this.prisma.attachment.findFirst({
+      where: {
+        id: attachmentId,
+        diary_entry: { user_id: user.id },
+      },
+    });
+
+    if (!attachment) {
+      throw new NotFoundException('Attachment not found.');
+    }
+
+    // Get extracted text — either from DB or download & extract
+    let text = attachment.extracted_text?.trim() ?? '';
+
+    if (!text) {
+      // Download file from storage and extract text via Gemini Vision
+      const fileBuffer = await this.storageService.downloadFile(
+        'attachments-bucket',
+        attachment.storage_path,
+      );
+      const base64Data = fileBuffer.toString('base64');
+
+      const { GoogleGenerativeAI } = await import('@google/generative-ai');
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) throw new BadRequestException('AI key not configured.');
+
+      const ai = new GoogleGenerativeAI(apiKey);
+      const model = ai.getGenerativeModel({ model: process.env.GEMINI_ANSWER_MODEL || 'gemini-2.5-flash' });
+
+      const extractResult = await model.generateContent([
+        'Extract all readable text from this file. Return only the extracted text.',
+        { inlineData: { data: base64Data, mimeType: attachment.file_type } },
+      ]);
+      text = extractResult.response.text().trim();
+
+      // Persist extracted text for future use
+      if (text) {
+        await this.prisma.attachment.update({
+          where: { id: attachment.id },
+          data: { extracted_text: text },
+        });
+      }
+    }
+
+    if (!text) {
+      return {
+        summary: 'Could not extract any readable text from this file.',
+        keyTakeaways: [],
+        actionItems: [],
+      };
+    }
+
+    // Analyze with Gemini
+    const { GoogleGenerativeAI } = await import('@google/generative-ai');
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) throw new BadRequestException('AI key not configured.');
+
+    const ai = new GoogleGenerativeAI(apiKey);
+    const model = ai.getGenerativeModel({ model: process.env.GEMINI_ANSWER_MODEL || 'gemini-2.5-flash' });
+
+    const analyzePrompt = `You are a smart personal assistant for a Second Brain app.
+Analyze the following document content and produce a structured analysis.
+
+Respond in this EXACT JSON format (no markdown fences):
+{
+  "summary": "2-3 sentence overview of the document contents",
+  "keyTakeaways": ["key point 1", "key point 2", "key point 3"],
+  "actionItems": ["action 1", "action 2"]
+}
+
+If there are no action items, return an empty array.
+Keep the summary concise and factual.
+
+Document content:
+${text.slice(0, 8000)}`;
+
+    const analyzeResult = await model.generateContent(analyzePrompt);
+    const rawResponse = analyzeResult.response.text().trim();
+
+    try {
+      // Strip markdown code fences if present
+      const cleaned = rawResponse.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
+      const parsed = JSON.parse(cleaned);
+      return {
+        summary: parsed.summary ?? '',
+        keyTakeaways: Array.isArray(parsed.keyTakeaways) ? parsed.keyTakeaways : [],
+        actionItems: Array.isArray(parsed.actionItems) ? parsed.actionItems : [],
+      };
+    } catch {
+      // Fallback: return the raw text as summary
+      return {
+        summary: rawResponse.slice(0, 500),
+        keyTakeaways: [],
+        actionItems: [],
+      };
+    }
   }
 
   private extractPlainText(file: Express.Multer.File) {

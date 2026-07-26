@@ -250,6 +250,27 @@ export async function processDiaryAttachment(
   return response.json();
 }
 
+export type AttachmentAnalysis = {
+  summary: string;
+  keyTakeaways: string[];
+  actionItems: string[];
+};
+
+export async function analyzeAttachment(
+  attachmentId: string,
+  accessToken: string | null,
+): Promise<AttachmentAnalysis> {
+  const response = await authFetch(`/api/upload/attachment/${attachmentId}/analyze`, {
+    method: 'POST',
+  }, accessToken);
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response, 'Failed to analyze attachment'));
+  }
+
+  return response.json();
+}
+
 type AskPayload = {
   question: string;
 };

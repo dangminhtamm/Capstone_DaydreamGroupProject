@@ -54,7 +54,7 @@ export class StorageService {
     };
   }
 
-  async createSignedUrl(bucket: string, path: string, expiresInSeconds = 300) {
+  async createSignedUrl(bucket: string, path: string, expiresInSeconds = 3600) {
     const supabase = this.getSupabaseClient();
     const { data, error } = await supabase.storage
       .from(bucket)

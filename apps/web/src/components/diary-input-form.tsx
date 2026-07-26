@@ -8,6 +8,8 @@ import {
   getCalendarEvents,
   processDiaryAttachment,
   uploadDiaryAttachment,
+  analyzeAttachment,
+  type AttachmentAnalysis,
   type AttachmentUploadResponse,
   type CalendarEventRecord,
   type CreateDiaryPayload,
@@ -337,6 +339,8 @@ export function DiaryInputForm() {
   const [activeCopilotAction, setActiveCopilotAction] = useState("");
   const [templateLang, setTemplateLang] = useState<TemplateLang>("vi");
   const [attachmentItems, setAttachmentItems] = useState<AttachmentQueueItem[]>([]);
+  const [attachmentAnalyses, setAttachmentAnalyses] = useState<Record<string, AttachmentAnalysis | null>>({});
+  const [analyzingAttachmentId, setAnalyzingAttachmentId] = useState<string | null>(null);
   const [calendarEvents, setCalendarEvents] = useState<CalendarEventRecord[]>([]);
   const [isCalendarLoading, setIsCalendarLoading] = useState(false);
   const [tagInput, setTagInput] = useState("");
@@ -910,41 +914,125 @@ export function DiaryInputForm() {
             {attachmentItems.map((item) => (
               <div
                 key={item.id}
-                className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900/70 sm:flex-row sm:items-center sm:justify-between"
+                className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900/70"
               >
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold text-slate-800 dark:text-slate-200">{item.file.name}</p>
-                  <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-                    {(item.file.size / 1024).toFixed(1)} KB · {item.file.type || "unknown type"}
-                  </p>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-slate-800 dark:text-slate-200">{item.file.name}</p>
+                    <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                      {(item.file.size / 1024).toFixed(1)} KB · {item.file.type || "unknown type"}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 flex-wrap items-center gap-2">
+                    <span className={`status-badge ${getAttachmentStatusClass(item.status)}`}>
+                      {item.status}
+                    </span>
+                    <span className="max-w-[220px] truncate text-xs text-slate-500 dark:text-slate-400">
+                      {item.message}
+                    </span>
+                    {item.signedUrl ? (
+                      <a
+                        href={item.signedUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="rounded-lg px-2 py-1 text-xs font-semibold text-indigo-600 transition hover:bg-indigo-50 hover:text-indigo-800 dark:text-indigo-300 dark:hover:bg-indigo-900/30"
+                      >
+                        Open
+                      </a>
+                    ) : null}
+                    {item.attachmentId && item.status !== "queued" ? (
+                      <button
+                        type="button"
+                        disabled={analyzingAttachmentId === item.attachmentId}
+                        onClick={async () => {
+                          if (!item.attachmentId || !isAuthenticated) return;
+                          setAnalyzingAttachmentId(item.attachmentId);
+                          try {
+                            const result = await analyzeAttachment(item.attachmentId, getAccessToken());
+                            setAttachmentAnalyses((prev) => ({ ...prev, [item.attachmentId!]: result }));
+                          } catch (err) {
+                            setAttachmentAnalyses((prev) => ({
+                              ...prev,
+                              [item.attachmentId!]: {
+                                summary: err instanceof Error ? err.message : "Analysis failed.",
+                                keyTakeaways: [],
+                                actionItems: [],
+                              },
+                            }));
+                          } finally {
+                            setAnalyzingAttachmentId(null);
+                          }
+                        }}
+                        className="rounded-lg bg-violet-50 px-2 py-1 text-xs font-semibold text-violet-700 transition hover:bg-violet-100 disabled:opacity-50 dark:bg-violet-900/30 dark:text-violet-300 dark:hover:bg-violet-900/50"
+                      >
+                        {analyzingAttachmentId === item.attachmentId ? "Analyzing..." : "\uD83D\uDD0D Analyze with AI"}
+                      </button>
+                    ) : null}
+                    {item.status === "queued" ? (
+                      <button
+                        type="button"
+                        onClick={() => removeAttachment(item.id)}
+                        className="rounded-lg px-2 py-1 text-xs font-semibold text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-100"
+                      >
+                        Remove
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
-                <div className="flex shrink-0 flex-wrap items-center gap-2">
-                  <span className={`status-badge ${getAttachmentStatusClass(item.status)}`}>
-                    {item.status}
-                  </span>
-                  <span className="max-w-[220px] truncate text-xs text-slate-500 dark:text-slate-400">
-                    {item.message}
-                  </span>
-                  {item.signedUrl ? (
-                    <a
-                      href={item.signedUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="rounded-lg px-2 py-1 text-xs font-semibold text-indigo-600 transition hover:bg-indigo-50 hover:text-indigo-800 dark:text-indigo-300 dark:hover:bg-indigo-900/30"
-                    >
-                      Open
-                    </a>
-                  ) : null}
-                  {item.status === "queued" ? (
-                    <button
-                      type="button"
-                      onClick={() => removeAttachment(item.id)}
-                      className="rounded-lg px-2 py-1 text-xs font-semibold text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-100"
-                    >
-                      Remove
-                    </button>
-                  ) : null}
-                </div>
+
+                {/* AI Analysis Results */}
+                {item.attachmentId && attachmentAnalyses[item.attachmentId] ? (
+                  <div className="mt-3 space-y-2 rounded-lg border border-violet-200 bg-violet-50/70 p-3 dark:border-violet-800 dark:bg-violet-950/30">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-violet-600 dark:text-violet-300">
+                        \uD83E\uDDE0 AI File Analysis
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const analysis = attachmentAnalyses[item.attachmentId!];
+                          if (!analysis) return;
+                          const insertText = [
+                            `\n\n---\n**\uD83D\uDD0D AI Analysis of ${item.file.name}:**`,
+                            `\n${analysis.summary}`,
+                            analysis.keyTakeaways.length ? `\n\n**Key Takeaways:**\n${analysis.keyTakeaways.map((t) => `- ${t}`).join("\n")}` : "",
+                            analysis.actionItems.length ? `\n\n**Action Items:**\n${analysis.actionItems.map((a) => `- [ ] ${a}`).join("\n")}` : "",
+                          ].filter(Boolean).join("");
+                          setDraft((prev) => ({ ...prev, content: prev.content.trimEnd() + insertText }));
+                        }}
+                        className="rounded-lg bg-violet-100 px-2.5 py-1 text-xs font-semibold text-violet-700 transition hover:bg-violet-200 dark:bg-violet-900/50 dark:text-violet-200 dark:hover:bg-violet-900/70"
+                      >
+                        \u2B07\uFE0F Insert into Diary
+                      </button>
+                    </div>
+
+                    <p className="text-sm leading-relaxed text-slate-700 dark:text-slate-300">
+                      {attachmentAnalyses[item.attachmentId]!.summary}
+                    </p>
+
+                    {attachmentAnalyses[item.attachmentId]!.keyTakeaways.length > 0 && (
+                      <div>
+                        <p className="mb-1 text-xs font-bold text-violet-700 dark:text-violet-300">\uD83C\uDFAF Key Takeaways</p>
+                        <ul className="list-inside list-disc space-y-0.5 text-xs leading-5 text-slate-700 dark:text-slate-300">
+                          {attachmentAnalyses[item.attachmentId]!.keyTakeaways.map((t, i) => (
+                            <li key={i}>{t}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {attachmentAnalyses[item.attachmentId]!.actionItems.length > 0 && (
+                      <div>
+                        <p className="mb-1 text-xs font-bold text-violet-700 dark:text-violet-300">\uD83D\uDCCB Action Items</p>
+                        <ul className="list-inside list-disc space-y-0.5 text-xs leading-5 text-slate-700 dark:text-slate-300">
+                          {attachmentAnalyses[item.attachmentId]!.actionItems.map((a, i) => (
+                            <li key={i}>{a}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                ) : null}
               </div>
             ))}
           </div>
