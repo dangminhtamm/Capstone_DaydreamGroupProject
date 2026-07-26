@@ -14,7 +14,7 @@ export type DiaryEntry = {
   entryDate?: string;
   createdAt: string;
   updatedAt: string;
-  userId: string;
+  userId?: string;
 };
 
 export type DiaryAttachment = {

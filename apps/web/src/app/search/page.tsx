@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useMemo, useState, useEffect } from "react";
 import Link from "next/link";
 import { DashboardShell } from "@/components/dashboard-shell";
+import { MarkdownContent } from "@/components/markdown-content";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   getSearchHistory,
@@ -826,7 +827,7 @@ export default function SearchPage() {
           ) : result?.modelError ? (
             <div className="space-y-4">
               <div className="enterprise-panel bg-white p-4 dark:bg-slate-950">
-                <p className="whitespace-pre-wrap text-base leading-8 text-slate-800 dark:text-slate-200">{result.answer}</p>
+                <MarkdownContent>{result.answer}</MarkdownContent>
               </div>
               <div className="flex items-start gap-2 rounded-2xl border border-amber-100 bg-amber-50/60 px-3 py-2 dark:border-amber-900/60 dark:bg-amber-950/20">
                 <svg className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -886,7 +887,7 @@ export default function SearchPage() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setQuestion(suggestedQuestions[0])}
+                    onClick={() => { if (suggestedQuestions[0]) setQuestion(suggestedQuestions[0]); }}
                     className="flex w-full cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 dark:border-slate-600 dark:bg-slate-700/50 dark:text-slate-300 dark:hover:border-indigo-500 dark:hover:bg-indigo-900/30 dark:hover:text-indigo-400"
                   >
                     <svg className="h-5 w-5 shrink-0 text-slate-500 dark:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
@@ -897,7 +898,7 @@ export default function SearchPage() {
             </div>
           ) : result ? (
             <div className="enterprise-panel bg-white p-4 dark:bg-slate-950">
-              <p className="whitespace-pre-wrap text-base leading-8 text-slate-800 dark:text-slate-200">{result.answer}</p>
+              <MarkdownContent>{result.answer}</MarkdownContent>
             </div>
           ) : (
             <div className="rounded-lg border border-dashed border-slate-300 p-6 text-center dark:border-slate-700">

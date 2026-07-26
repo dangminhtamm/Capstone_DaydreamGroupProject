@@ -21,6 +21,7 @@ import {
   indexMemoryFromDrive,
   indexMemoryFromGmail,
   indexMemoryFromSummary,
+  type PersistedMemoryChunkPayload,
 } from '@second-brain/ai';
 import { prisma } from '../../lib/prisma';
 
@@ -612,7 +613,7 @@ Return only the extracted text or factual description.
         body: message.body,
         receivedAt: message.received_at,
       },
-      insertChunks: (chunks) =>
+      insertChunks: (chunks: PersistedMemoryChunkPayload[]) =>
         prisma.$transaction(async (tx: any) => {
           await insertMemoryChunks(tx, chunks);
           await pruneMemoryChunksForSource(tx, {

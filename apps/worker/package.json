@@ -22,7 +22,8 @@
     "dotenv": "^17.4.2",
     "googleapis": "^171.4.0",
     "node-cron": "^4.2.1",
-    "pg": "^8.20.0"
+    "pg": "^8.20.0",
+    "qs": "6.15.3"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

@@ -29,7 +29,9 @@
     "prisma": "^7.8.0"
   },
   "dependencies": {
-    "@prisma/client": "^7.8.0"
+    "@prisma/client": "^7.8.0",
+    "@types/qs": "^6.15.1",
+    "qs": "6.15.3"
   },
   "pnpm": {
     "overrides": {

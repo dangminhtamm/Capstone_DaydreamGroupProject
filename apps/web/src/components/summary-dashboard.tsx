@@ -10,6 +10,7 @@ import {
   type SummaryRecord,
   type SummaryType,
 } from "@/lib/api-client";
+import { MarkdownContent } from "@/components/markdown-content";
 
 type LoadState = "idle" | "loading" | "success" | "error";
 type OverviewMode = "daily" | "weekly";
@@ -263,9 +264,9 @@ function AiSummaryList({ summaries }: { summaries: SummaryRecord[] }) {
               {formatSummaryPeriod(summary)}
             </span>
           </div>
-          <p className="whitespace-pre-wrap text-sm leading-6 text-slate-700 dark:text-slate-300">
+          <MarkdownContent className="text-sm leading-6">
             {summary.content}
-          </p>
+          </MarkdownContent>
         </article>
       ))}
     </div>
