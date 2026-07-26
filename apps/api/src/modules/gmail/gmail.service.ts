@@ -1,8 +1,12 @@
 import {
+  BadRequestException,
   ForbiddenException,
+  HttpException,
+  HttpStatus,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { gmail_v1, google } from 'googleapis';
@@ -19,6 +23,12 @@ type GmailMessageRow = {
   body: string;
   received_at: Date | null;
   raw_json: gmail_v1.Schema$Message;
+};
+
+type GoogleApiErrorDetails = {
+  status?: number;
+  reason?: string;
+  message: string;
 };
 
 @Injectable()
@@ -72,14 +82,20 @@ export class GmailService {
 
     if (!user) throw new NotFoundException('User not found');
 
-    const [messageCount, latestMessage] = await Promise.all([
-      this.prisma.gmailMessage.count({ where: { user_id: user.id } }),
-      this.prisma.gmailMessage.findFirst({
-        where: { user_id: user.id },
-        orderBy: [{ received_at: 'desc' }, { updated_at: 'desc' }],
-        select: { updated_at: true, received_at: true },
-      }),
-    ]);
+    let messageCount = 0;
+    let latestMessage: { updated_at: Date; received_at: Date | null } | null = null;
+    try {
+      [messageCount, latestMessage] = await Promise.all([
+        this.prisma.gmailMessage.count({ where: { user_id: user.id } }),
+        this.prisma.gmailMessage.findFirst({
+          where: { user_id: user.id },
+          orderBy: [{ received_at: 'desc' }, { updated_at: 'desc' }],
+          select: { updated_at: true, received_at: true },
+        }),
+      ]);
+    } catch (error) {
+      this.throwGmailDatabaseException(error, 'Could not load Gmail status from database.');
+    }
 
     return {
       connected: user.google_connected && Boolean(user.google_refresh_token || user.google_access_token),
@@ -96,11 +112,15 @@ export class GmailService {
 
     if (!user) throw new NotFoundException('User not found');
 
-    return this.prisma.gmailMessage.findMany({
-      where: { user_id: user.id },
-      orderBy: [{ received_at: 'desc' }, { updated_at: 'desc' }],
-      take: 50,
-    });
+    try {
+      return await this.prisma.gmailMessage.findMany({
+        where: { user_id: user.id },
+        orderBy: [{ received_at: 'desc' }, { updated_at: 'desc' }],
+        take: 50,
+      });
+    } catch (error) {
+      this.throwGmailDatabaseException(error, 'Could not load Gmail messages from database.');
+    }
   }
 
   async syncGmailMessages(supabaseId: string, options: { limit?: number } = {}) {
@@ -196,11 +216,10 @@ export class GmailService {
         memoryIndexingStatus: 'queued',
       };
     } catch (error) {
-      if (this.isInsufficientScopeError(error)) {
-        throw new ForbiddenException('Reconnect Google to grant Gmail permission.');
-      }
-      console.error('Failed to sync Gmail messages:', error);
-      throw new InternalServerErrorException('Could not sync Gmail messages to database');
+      this.throwGoogleApiException(error);
+      this.throwGmailDatabaseException(error, 'Could not sync Gmail messages to database.');
+      console.error('Failed to sync Gmail messages:', this.getSafeErrorContext(error));
+      throw new InternalServerErrorException('Could not sync Gmail messages. Check API logs for details.');
     }
   }
 
@@ -208,8 +227,8 @@ export class GmailService {
     if (!message.id) return null;
 
     const headers = message.payload?.headers ?? [];
-    const sender = this.getHeader(headers, 'From') || 'Unknown sender';
-    const subject = this.getHeader(headers, 'Subject') || '(no subject)';
+    const sender = this.sanitizePostgresText(this.getHeader(headers, 'From') || 'Unknown sender');
+    const subject = this.sanitizePostgresText(this.getHeader(headers, 'Subject') || '(no subject)');
     const headerDate = this.getHeader(headers, 'Date');
     const internalDate = message.internalDate ? Number(message.internalDate) : NaN;
     const receivedAt = Number.isFinite(internalDate)
@@ -217,17 +236,17 @@ export class GmailService {
       : headerDate
         ? new Date(headerDate)
         : null;
-    const body = this.extractBody(message.payload) || message.snippet || '';
+    const body = this.sanitizePostgresText(this.extractBody(message.payload) || message.snippet || '');
 
     return {
       external_id: message.id,
       thread_id: message.threadId ?? null,
       sender,
       subject,
-      snippet: message.snippet ?? null,
+      snippet: message.snippet ? this.sanitizePostgresText(message.snippet) : null,
       body,
       received_at: receivedAt && Number.isFinite(receivedAt.getTime()) ? receivedAt : null,
-      raw_json: message,
+      raw_json: this.sanitizeJsonValue(message) as gmail_v1.Schema$Message,
     };
   }
 
@@ -290,6 +309,14 @@ export class GmailService {
     return value.replace(/\r/g, '\n').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
   }
 
+  private sanitizePostgresText(value: string) {
+    return value.replace(/\u0000/g, '');
+  }
+
+  private sanitizeJsonValue<T>(value: T): T {
+    return JSON.parse(JSON.stringify(value)) as T;
+  }
+
   private async enqueueGmailIndexingJob(
     tx: any,
     input: {
@@ -348,20 +375,148 @@ export class GmailService {
     await invalidateUserSearchCache(userId);
   }
 
-  private isInsufficientScopeError(error: unknown) {
-    const maybeError = error as {
-      code?: number;
-      response?: { status?: number; data?: unknown };
-      message?: string;
-    };
-    const message = `${maybeError.message ?? ''} ${JSON.stringify(maybeError.response?.data ?? {})}`.toLowerCase();
+  private throwGoogleApiException(error: unknown): never | void {
+    const details = this.getGoogleApiErrorDetails(error);
+    const message = details.message.toLowerCase();
+    const reason = details.reason?.toLowerCase() ?? '';
 
-    return (
-      maybeError.code === 403 ||
-      maybeError.response?.status === 403 ||
+    if (
+      details.status === 401 ||
+      details.status === 400 && (message.includes('invalid_grant') || message.includes('token')) ||
+      message.includes('token has been expired') ||
+      message.includes('token has been revoked')
+    ) {
+      throw new UnauthorizedException('Google token expired or was revoked. Reconnect Google, then sync Gmail again.');
+    }
+
+    if (
+      details.status === 403 &&
+      (message.includes('gmail api has not been used') ||
+        message.includes('api has not been used') ||
+        message.includes('disabled') ||
+        reason.includes('accessnotconfigured'))
+    ) {
+      throw new ServiceUnavailableException('Gmail API is not enabled for this Google Cloud project. Enable Gmail API, then reconnect Google.');
+    }
+
+    if (
+      details.status === 403 ||
       message.includes('insufficient') ||
       message.includes('permission') ||
       message.includes('scope')
+    ) {
+      throw new ForbiddenException('Reconnect Google to grant Gmail permission.');
+    }
+
+    if (
+      details.status === 429 ||
+      message.includes('quota') ||
+      message.includes('rate limit') ||
+      reason.includes('ratelimitexceeded')
+    ) {
+      throw new HttpException('Gmail API quota or rate limit was reached. Wait a bit, then sync Gmail again.', HttpStatus.TOO_MANY_REQUESTS);
+    }
+
+    if (details.status === 400) {
+      throw new BadRequestException('Gmail sync request was rejected by Google. Reconnect Google, then try again.');
+    }
+  }
+
+  private throwGmailDatabaseException(error: unknown, fallbackMessage: string): never {
+    if (this.isMissingGmailDatabaseShapeError(error)) {
+      throw new ServiceUnavailableException('Gmail database table or columns are missing. Apply Prisma migrations, then restart the API.');
+    }
+
+    console.error(fallbackMessage, this.getSafeErrorContext(error));
+    throw new InternalServerErrorException(fallbackMessage);
+  }
+
+  private isMissingGmailDatabaseShapeError(error: unknown) {
+    const maybeError = error as {
+      code?: string;
+      meta?: unknown;
+      message?: string;
+    };
+    const message = `${maybeError.message ?? ''} ${JSON.stringify(maybeError.meta ?? {})}`.toLowerCase();
+
+    return (
+      maybeError.code === 'P2021' ||
+      maybeError.code === 'P2022' ||
+      (message.includes('gmail_messages') &&
+        (message.includes('does not exist') ||
+          message.includes('not exist') ||
+          message.includes('missing') ||
+          message.includes('column')))
     );
+  }
+
+  private getGoogleApiErrorDetails(error: unknown): GoogleApiErrorDetails {
+    const maybeError = error as {
+      code?: number | string;
+      response?: {
+        status?: number;
+        data?: unknown;
+      };
+      message?: string;
+    };
+    const data = maybeError.response?.data as {
+      error?: {
+        code?: number;
+        message?: string;
+        status?: string;
+        errors?: Array<{ reason?: string; message?: string }>;
+      } | string;
+      error_description?: string;
+      message?: string;
+      code?: number;
+    } | undefined;
+    const nestedError = data?.error;
+    const nestedErrorObject =
+      nestedError && typeof nestedError === 'object' ? nestedError : undefined;
+    const firstNestedReason = nestedErrorObject?.errors?.find((item) => item.reason)?.reason;
+    const firstNestedMessage = nestedErrorObject?.errors?.find((item) => item.message)?.message;
+    const status =
+      this.toStatusCode(maybeError.response?.status) ??
+      this.toStatusCode(nestedErrorObject?.code) ??
+      this.toStatusCode(data?.code) ??
+      this.toStatusCode(maybeError.code);
+    const message = [
+      maybeError.message,
+      typeof nestedError === 'string' ? nestedError : nestedErrorObject?.message,
+      firstNestedMessage,
+      data?.error_description,
+      data?.message,
+    ]
+      .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+      .join(' ');
+
+    return {
+      status,
+      reason: firstNestedReason ?? nestedErrorObject?.status,
+      message,
+    };
+  }
+
+  private toStatusCode(value: unknown) {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string' && /^\d+$/.test(value)) return Number(value);
+    return undefined;
+  }
+
+  private getSafeErrorContext(error: unknown) {
+    const details = this.getGoogleApiErrorDetails(error);
+    const maybeError = error as {
+      code?: string | number;
+      meta?: unknown;
+      message?: string;
+    };
+
+    return {
+      code: maybeError.code,
+      prismaMeta: maybeError.meta,
+      googleStatus: details.status,
+      googleReason: details.reason,
+      message: details.message || maybeError.message,
+    };
   }
 }

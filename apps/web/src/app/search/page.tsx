@@ -87,7 +87,7 @@ type SearchResponse = {
   cacheStorage?: "redis" | "database";
 };
 
-type ResponseLanguage = "en" | "vi";
+type ResponseLanguage = "auto" | "en" | "vi";
 
 
 const suggestedQuestions = [
@@ -101,6 +101,13 @@ const answerStrategies: Array<{ value: AnswerStrategy; label: string }> = [
   { value: "fast", label: "Fast" },
   { value: "deep", label: "Deep" },
 ];
+
+function inferResponseLanguage(question: string): Exclude<ResponseLanguage, "auto"> {
+  const normalized = question.toLowerCase();
+  const hasVietnameseDiacritics = /[ăâđêôơưáàảãạấầẩẫậắằẳẵặéèẻẽẹếềểễệíìỉĩịóòỏõọốồổỗộớờởỡợúùủũụứừửữựýỳỷỹỵ]/iu.test(question);
+  const hasVietnameseWords = /\b(làm gì|hôm nay|hôm qua|ngày|tháng|tuần|tôi|mình|nhật ký|tâm trạng|cảm xúc|dựa trên|phân tích)\b/iu.test(normalized);
+  return hasVietnameseDiacritics || hasVietnameseWords ? "vi" : "en";
+}
 
 const confidenceStyles = {
   high: "status-badge-success",
@@ -484,7 +491,7 @@ export default function SearchPage() {
   const [result, setResult] = useState<SearchResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSearching, setIsSearching] = useState(false);
-  const [responseLanguage, setResponseLanguage] = useState<ResponseLanguage>("en");
+  const [responseLanguage, setResponseLanguage] = useState<ResponseLanguage>("auto");
   const [answerStrategy, setAnswerStrategy] = useState<AnswerStrategy>("auto");
   const [showAuthPrompt, setShowAuthPrompt] = useState(false);
   const [searchHistory, setSearchHistory] = useState<SearchHistoryEntry[]>([]);
@@ -492,14 +499,17 @@ export default function SearchPage() {
 
   // Load language preference on mount
   useEffect(() => {
-    const saved = localStorage.getItem("dd-response-lang") as ResponseLanguage | null;
-    if (saved === "en" || saved === "vi") setResponseLanguage(saved);
+    const timeoutId = window.setTimeout(() => {
+      const saved = localStorage.getItem("dd-response-lang") as ResponseLanguage | null;
+      if (saved === "auto" || saved === "en" || saved === "vi") setResponseLanguage(saved);
 
-    const savedStrategy = localStorage.getItem("dd-answer-strategy") as AnswerStrategy | null;
-    if (savedStrategy === "auto" || savedStrategy === "fast" || savedStrategy === "deep") {
-      setAnswerStrategy(savedStrategy);
-    }
+      const savedStrategy = localStorage.getItem("dd-answer-strategy") as AnswerStrategy | null;
+      if (savedStrategy === "auto" || savedStrategy === "fast" || savedStrategy === "deep") {
+        setAnswerStrategy(savedStrategy);
+      }
+    }, 0);
 
+    return () => window.clearTimeout(timeoutId);
   }, []);
 
   // Load search history from server when authenticated
@@ -516,8 +526,14 @@ export default function SearchPage() {
 
   useEffect(() => {
     if (!isAuthLoading && isAuthenticated) {
-      loadServerHistory();
+      const timeoutId = window.setTimeout(() => {
+        void loadServerHistory();
+      }, 0);
+
+      return () => window.clearTimeout(timeoutId);
     }
+
+    return undefined;
   }, [isAuthLoading, isAuthenticated, loadServerHistory]);
 
   const handleClearHistory = useCallback(async () => {
@@ -572,6 +588,10 @@ export default function SearchPage() {
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
       const timeZone = getBrowserTimeZone();
+      const effectiveResponseLanguage =
+        responseLanguage === "auto"
+          ? inferResponseLanguage(normalizedQuestion)
+          : responseLanguage;
       const response = await fetch(`${apiUrl}/api/search`, {
         method: "POST",
         headers: {
@@ -581,7 +601,7 @@ export default function SearchPage() {
         body: JSON.stringify({
           question: normalizedQuestion,
           limit: 8,
-          responseLanguage,
+          responseLanguage: effectiveResponseLanguage,
           ...(timeZone ? { timeZone } : {}),
           ...(answerStrategy === "auto" ? {} : { answerStrategy }),
         }),
@@ -624,6 +644,9 @@ export default function SearchPage() {
     event.preventDefault();
     await runSearch(question.trim());
   }
+
+  const displayLanguage =
+    responseLanguage === "auto" ? inferResponseLanguage(question) : responseLanguage;
 
   return (
     <DashboardShell
@@ -679,7 +702,7 @@ export default function SearchPage() {
                 <div className="flex items-center gap-2">
                   <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Language</span>
                   <div className="segment-control">
-                    {(["en", "vi"] as const).map((language) => {
+                    {(["auto", "en", "vi"] as const).map((language) => {
                       const active = responseLanguage === language;
                       return (
                         <button
@@ -870,7 +893,7 @@ export default function SearchPage() {
                     className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 dark:border-slate-600 dark:bg-slate-700/50 dark:text-slate-300 dark:hover:border-indigo-500 dark:hover:bg-indigo-900/30 dark:hover:text-indigo-400"
                   >
                     <svg className="h-5 w-5 shrink-0 text-slate-500 dark:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                    {responseLanguage === "vi" ? "Thêm nhật ký mới về chủ đề này" : "Add a new diary entry about this topic"}
+                    {displayLanguage === "vi" ? "Thêm nhật ký mới về chủ đề này" : "Add a new diary entry about this topic"}
                   </Link>
                   <button
                     type="button"
@@ -882,7 +905,7 @@ export default function SearchPage() {
                     className="flex w-full cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 dark:border-slate-600 dark:bg-slate-700/50 dark:text-slate-300 dark:hover:border-indigo-500 dark:hover:bg-indigo-900/30 dark:hover:text-indigo-400"
                   >
                     <svg className="h-5 w-5 shrink-0 text-slate-500 dark:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-                    {responseLanguage === "vi" ? "Thử diễn đạt lại câu hỏi" : "Try rephrasing your question"}
+                    {displayLanguage === "vi" ? "Thử diễn đạt lại câu hỏi" : "Try rephrasing your question"}
                   </button>
                   <button
                     type="button"
@@ -890,7 +913,7 @@ export default function SearchPage() {
                     className="flex w-full cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 dark:border-slate-600 dark:bg-slate-700/50 dark:text-slate-300 dark:hover:border-indigo-500 dark:hover:bg-indigo-900/30 dark:hover:text-indigo-400"
                   >
                     <svg className="h-5 w-5 shrink-0 text-slate-500 dark:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
-                    {responseLanguage === "vi" ? "Thử một câu hỏi gợi ý" : "Try a suggested question instead"}
+                    {displayLanguage === "vi" ? "Thử một câu hỏi gợi ý" : "Try a suggested question instead"}
                   </button>
                 </div>
               </div>

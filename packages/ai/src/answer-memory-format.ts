@@ -19,19 +19,47 @@ export function formatSingleDayAnswer(
   dateLabel: string,
   lang: ResponseLanguage,
 ): string {
-  const lines = citations.map((citation) => `- ${formatMemoryBullet(citation)}.`);
+  const facts = dedupeSimilarFacts(citations.map((citation) => formatSingleDayFact(citation)))
+    .slice(0, 4);
 
-  if (lang === "vi") {
-    return [
-      `Vào ${dateLabel}, mình tìm thấy các ký ức nổi bật sau:`,
-      ...lines,
-    ].join("\n");
+  if (!facts.length) {
+    return lang === "vi"
+      ? `Ngày ${dateLabel}, mình tìm thấy ký ức liên quan nhưng nội dung không đủ rõ để tóm tắt.`
+      : `On ${dateLabel}, I found a related memory, but it was not clear enough to summarize.`;
   }
 
-  return [
-    `On ${dateLabel}, I found these memories:`,
-    ...lines,
-  ].join("\n");
+  if (lang === "vi") {
+    return `Ngày ${dateLabel}, ${formatVietnameseDayFacts(facts)}`;
+  }
+
+  return `On ${dateLabel}, ${formatEnglishDayFacts(facts)}`;
+}
+
+export function selectSingleDayCitations(citations: MemoryCitation[]): MemoryCitation[] {
+  const hasDiarySource = citations.some((citation) => citation.sourceType === "diary");
+  const candidates = hasDiarySource
+    ? citations.filter((citation) => citation.sourceType !== "summary")
+    : citations;
+
+  const selected: MemoryCitation[] = [];
+  const selectedFingerprints: Array<Set<string>> = [];
+
+  for (const citation of candidates) {
+    const fingerprint = buildTextFingerprint(
+      `${citation.sourceTitle ?? ""} ${citation.chunkType} ${citation.quote}`,
+    );
+    if (fingerprint.size === 0) continue;
+
+    const isDuplicate = selectedFingerprints.some(
+      (existing) => jaccardSimilarity(existing, fingerprint) >= 0.72,
+    );
+    if (isDuplicate) continue;
+
+    selected.push(citation);
+    selectedFingerprints.push(fingerprint);
+  }
+
+  return selected.length ? selected : citations;
 }
 
 export function formatTemporalRangeAnswer(
@@ -132,7 +160,11 @@ export function formatLocalizedMemoryBullet(
 export function cleanMemoryText(text: string): string {
   return trimPromptQuote(
     text
+      .replace(/\*\*/g, "")
+      .replace(/\s+\*\s+/g, ". ")
+      .replace(/^[-*]\s+/g, "")
       .replace(/\s+/g, " ")
+      .replace(/^daily log:\s*\d{4}-\d{2}-\d{2}\s*\.?\s*/i, "")
       .replace(/^(diary entry|journal entry|nhat ky|nhật ký)(\s+h[oô]m nay|\s+today)?\s*[:\-–—]?\s*/i, "")
       .trim(),
     240,
@@ -435,4 +467,138 @@ function sentenceCase(value: string): string {
   const trimmed = value.trim();
   if (!trimmed) return trimmed;
   return trimmed[0].toUpperCase() + trimmed.slice(1);
+}
+
+function formatSingleDayFact(citation: MemoryCitation): string {
+  return sentenceCase(trimTrailingPunctuation(cleanMemoryText(citation.quote)));
+}
+
+function formatVietnameseDayFacts(facts: string[]): string {
+  const normalizedFacts = facts.map(naturalizeVietnameseDayFact).filter(Boolean);
+  if (!normalizedFacts.length) return "mình chưa thấy nội dung đủ rõ trong nhật ký ngày này.";
+
+  if (normalizedFacts.length === 1) {
+    return `${lowercaseFirst(normalizedFacts[0])}.`;
+  }
+
+  return normalizedFacts
+    .map((fact, index) => {
+      if (index === 0) return `${lowercaseFirst(fact)}.`;
+      return `${sentenceCase(fact)}.`;
+    })
+    .join(" ");
+}
+
+function formatEnglishDayFacts(facts: string[]): string {
+  const normalizedFacts = facts.map(naturalizeEnglishDayFact).filter(Boolean);
+  if (!normalizedFacts.length) return "the saved memory was not clear enough to summarize.";
+
+  if (normalizedFacts.length === 1) {
+    return `${lowercaseFirst(normalizedFacts[0])}.`;
+  }
+
+  return normalizedFacts
+    .map((fact, index) => {
+      if (index === 0) return `${lowercaseFirst(fact)}.`;
+      return `${sentenceCase(fact)}.`;
+    })
+    .join(" ");
+}
+
+function naturalizeVietnameseDayFact(value: string): string {
+  return trimTrailingPunctuation(value)
+    .replace(/^h[oô]m nay\s+/i, "")
+    .replace(/\bh[oô]m nay\b/gi, "hôm đó")
+    .replace(/\btôi\b/gi, "bạn")
+    .replace(/\bmình\b/gi, "bạn")
+    .replace(/\bcủa tôi\b/gi, "của bạn")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function naturalizeEnglishDayFact(value: string): string {
+  return trimTrailingPunctuation(value)
+    .replace(/\btoday\b/gi, "that day")
+    .replace(/\bI am\b/g, "you are")
+    .replace(/\bI'm\b/g, "you're")
+    .replace(/\bI was\b/g, "you were")
+    .replace(/\bI\b/g, "you")
+    .replace(/\bmy\b/gi, "your")
+    .replace(/\bme\b/gi, "you")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function lowercaseFirst(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return trimmed;
+  return trimmed[0].toLowerCase() + trimmed.slice(1);
+}
+
+function dedupeSimilarFacts(facts: string[]): string[] {
+  const selected: string[] = [];
+  const fingerprints: Array<Set<string>> = [];
+
+  for (const fact of facts) {
+    const cleaned = trimTrailingPunctuation(fact);
+    const fingerprint = buildTextFingerprint(cleaned);
+    if (!cleaned || fingerprint.size === 0) continue;
+
+    const duplicate = fingerprints.some(
+      (existing) => jaccardSimilarity(existing, fingerprint) >= 0.82,
+    );
+    if (duplicate) continue;
+
+    selected.push(cleaned);
+    fingerprints.push(fingerprint);
+  }
+
+  return selected;
+}
+
+function buildTextFingerprint(value: string): Set<string> {
+  const normalized = value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ");
+
+  const stopWords = new Set([
+    "the",
+    "and",
+    "that",
+    "this",
+    "with",
+    "from",
+    "today",
+    "hom",
+    "nay",
+    "toi",
+    "minh",
+    "ban",
+    "ngay",
+    "daily",
+    "log",
+    "events",
+    "weather",
+  ]);
+
+  const words = normalized
+    .split(/\s+/)
+    .map((word) => word.trim())
+    .filter((word) => word.length >= 3 && !stopWords.has(word));
+
+  return new Set(words);
+}
+
+function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
+  if (!a.size || !b.size) return 0;
+
+  let intersection = 0;
+  for (const value of a) {
+    if (b.has(value)) intersection += 1;
+  }
+
+  const union = a.size + b.size - intersection;
+  return union > 0 ? intersection / union : 0;
 }

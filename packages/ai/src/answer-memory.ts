@@ -22,6 +22,7 @@ import {
   inferRetrievalFilters,
   resolveMemoryTimeZone,
 } from "./answer-memory-temporal.ts";
+import { translateFastAnswerIfUseful } from "./answer-memory-translation.ts";
 import {
   GeminiGroundedAnswerResponseSchema,
   GroundedAnswerSchema,
@@ -141,25 +142,35 @@ export async function answerMemory(
         timeZone,
       );
   if (unindexedFastPathResult) {
+    const translatedUnindexedFastPathResult = await translateFastAnswerIfUseful(
+      unindexedFastPathResult,
+      {
+        question: normalizedQuestion,
+        responseLanguage: lang,
+      },
+    );
+
     if (unindexedFastPathResult.analytics) {
-      unindexedFastPathResult.analytics.timing.embedMs = 0;
-      unindexedFastPathResult.analytics.timing.retrieveMs = Math.round(preRetrieveMs);
-      unindexedFastPathResult.analytics.timing.totalMs = Math.round(performance.now() - totalStart);
-      unindexedFastPathResult.analytics.tokenUsage.model =
-        unindexedFastPathResult.analytics.tokenUsage.model === "temporal-fast-path"
+      translatedUnindexedFastPathResult.analytics!.timing.embedMs = 0;
+      translatedUnindexedFastPathResult.analytics!.timing.retrieveMs = Math.round(preRetrieveMs);
+      translatedUnindexedFastPathResult.analytics!.timing.totalMs = Math.round(performance.now() - totalStart);
+      translatedUnindexedFastPathResult.analytics!.tokenUsage.model =
+        translatedUnindexedFastPathResult.analytics!.tokenUsage.model === "temporal-fast-path"
           ? "unindexed-diary-temporal-fast-path"
-          : "unindexed-diary-fast-path";
+          : translatedUnindexedFastPathResult.analytics!.tokenUsage.model === "fast-path"
+            ? "unindexed-diary-fast-path"
+            : translatedUnindexedFastPathResult.analytics!.tokenUsage.model;
     }
 
-    unindexedFastPathResult.debugTrace = buildDebugTrace({
+    translatedUnindexedFastPathResult.debugTrace = buildDebugTrace({
       question: normalizedQuestion,
       inferredFilters,
       appliedFilters,
       chunks: unindexedDiaryChunks,
-      result: unindexedFastPathResult,
+      result: translatedUnindexedFastPathResult,
     });
 
-    return unindexedFastPathResult;
+    return translatedUnindexedFastPathResult;
   }
 
   const embedStart = performance.now();
@@ -280,7 +291,7 @@ export async function answerMemory(
         timeZone,
       );
 
-  const result = fastPathResult ??
+  let result = fastPathResult ??
     (answerStrategy === "fast"
       ? answerFastExtractiveFromChunks(
           normalizedQuestion,
@@ -295,6 +306,11 @@ export async function answerMemory(
           answerStrategy,
           timeZone,
         }));
+
+  result = await translateFastAnswerIfUseful(result, {
+    question: normalizedQuestion,
+    responseLanguage: lang,
+  });
 
   if (result.analytics) {
     result.analytics.timing.embedMs = Math.round(embedMs);

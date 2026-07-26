@@ -417,22 +417,7 @@ function getDateTimeFormatter(timeZone: string): Intl.DateTimeFormat {
 }
 
 export function detectMonth(value: string): number | null {
-  const monthNames = [
-    "january",
-    "february",
-    "march",
-    "april",
-    "may",
-    "june",
-    "july",
-    "august",
-    "september",
-    "october",
-    "november",
-    "december",
-  ];
-
-  for (const [index, name] of monthNames.entries()) {
+  for (const [index, name] of ENGLISH_MONTH_NAMES.entries()) {
     if (hasNormalizedPhrase(value, name)) return index;
   }
 
@@ -440,6 +425,13 @@ export function detectMonth(value: string): number | null {
   if (vietnameseMonth) {
     const month = Number(vietnameseMonth[1]);
     if (month >= 1 && month <= 12) return month - 1;
+  }
+
+  const tokens = tokenizeTemporalText(value);
+  for (let index = 0; index < tokens.length; index++) {
+    if (tokens[index] !== "thang") continue;
+    const parsed = parseDateNumberAt(tokens, index + 1, 2, 12);
+    if (parsed) return parsed.value - 1;
   }
 
   return null;
@@ -462,6 +454,12 @@ function detectExplicitDate(value: string, now: Date, timeZone: string): LocalDa
     return buildLocalDateFromParts(year, month, day);
   }
 
+  const englishWordDate = detectEnglishWordDate(value, localNow.year);
+  if (englishWordDate) return englishWordDate;
+
+  const vietnameseWordDate = detectVietnameseWordDate(value, localNow.year);
+  if (vietnameseWordDate) return vietnameseWordDate;
+
   const written = value.match(/\b(?:ngay\s+)?(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?(?:thang\s+)?([a-z]+|\d{1,2})(?:\s+(20\d{2}))?\b/u);
   if (written) {
     const day = Number(written[1]);
@@ -478,6 +476,311 @@ function detectExplicitDate(value: string, now: Date, timeZone: string): LocalDa
 
   return null;
 }
+
+function detectEnglishWordDate(value: string, defaultYear: number): LocalDateParts | null {
+  const tokens = tokenizeTemporalText(value);
+  if (!tokens.length) return null;
+
+  for (let monthIndex = 0; monthIndex < tokens.length; monthIndex++) {
+    const month = getEnglishMonthNumber(tokens[monthIndex]);
+    if (month === null) continue;
+
+    const dayBeforeMonth = parseEnglishDayBeforeMonth(tokens, monthIndex);
+    if (dayBeforeMonth) {
+      const year = parseYearAfterDateNumber(tokens, monthIndex + 1, defaultYear);
+      return buildLocalDateFromParts(year, month, dayBeforeMonth.value);
+    }
+
+    const dayAfterMonth = parseEnglishDayAfterMonth(tokens, monthIndex);
+    if (dayAfterMonth) {
+      const year = parseYearAfterDateNumber(
+        tokens,
+        monthIndex + 1 + dayAfterMonth.offset + dayAfterMonth.length,
+        defaultYear,
+      );
+      return buildLocalDateFromParts(year, month, dayAfterMonth.value);
+    }
+  }
+
+  return null;
+}
+
+function parseEnglishDayBeforeMonth(
+  tokens: string[],
+  monthIndex: number,
+): { value: number } | null {
+  let end = monthIndex;
+  while (end > 0 && ENGLISH_CONNECTOR_TOKENS.has(tokens[end - 1])) {
+    end--;
+  }
+
+  for (let length = Math.min(4, end); length >= 1; length--) {
+    const start = end - length;
+    const candidate = trimLeadingEnglishDateMarkers(tokens.slice(start, end));
+    if (!candidate.length) continue;
+
+    const parsed = parseNumberTokens(candidate, 31);
+    if (parsed !== null) return { value: parsed };
+  }
+
+  return null;
+}
+
+function parseEnglishDayAfterMonth(
+  tokens: string[],
+  monthIndex: number,
+): { value: number; offset: number; length: number } | null {
+  let start = monthIndex + 1;
+  while (start < tokens.length && ENGLISH_DATE_MARKERS.has(tokens[start])) {
+    start++;
+  }
+
+  for (let length = Math.min(4, tokens.length - start); length >= 1; length--) {
+    const candidate = tokens.slice(start, start + length);
+    const parsed = parseNumberTokens(candidate, 31);
+    if (parsed !== null) {
+      return {
+        value: parsed,
+        offset: start - (monthIndex + 1),
+        length,
+      };
+    }
+  }
+
+  return null;
+}
+
+function detectVietnameseWordDate(value: string, defaultYear: number): LocalDateParts | null {
+  const tokens = tokenizeTemporalText(value);
+  if (!tokens.length) return null;
+
+  for (let monthMarkerIndex = 0; monthMarkerIndex < tokens.length; monthMarkerIndex++) {
+    if (tokens[monthMarkerIndex] !== "thang") continue;
+
+    const month = parseDateNumberAt(tokens, monthMarkerIndex + 1, 2, 12);
+    if (!month) continue;
+
+    const day = parseVietnameseDayBeforeMonth(tokens, monthMarkerIndex);
+    if (!day) continue;
+
+    const year = parseYearAfterDateNumber(tokens, monthMarkerIndex + 1 + month.length, defaultYear);
+    return buildLocalDateFromParts(year, month.value, day.value);
+  }
+
+  return null;
+}
+
+function parseVietnameseDayBeforeMonth(
+  tokens: string[],
+  monthMarkerIndex: number,
+): { value: number } | null {
+  const earliestCandidateStart = Math.max(0, monthMarkerIndex - 4);
+
+  for (let start = earliestCandidateStart; start < monthMarkerIndex; start++) {
+    const rawCandidate = tokens.slice(start, monthMarkerIndex);
+    const candidate = trimLeadingDateMarkers(rawCandidate);
+    if (!candidate.length) continue;
+
+    const markerInside = rawCandidate.length !== candidate.length;
+    const markerBefore = start > 0 && VIETNAMESE_DAY_MARKERS.has(tokens[start - 1]);
+    const immediatelyBeforeMonth = start + candidate.length === monthMarkerIndex;
+    if (!markerInside && !markerBefore && !immediatelyBeforeMonth) continue;
+
+    const parsed = parseNumberTokens(candidate, 31);
+    if (parsed !== null) return { value: parsed };
+  }
+
+  return null;
+}
+
+function parseYearAfterDateNumber(
+  tokens: string[],
+  start: number,
+  defaultYear: number,
+): number {
+  const directYear = parseYearToken(tokens[start]);
+  if (directYear !== null) return directYear;
+
+  if (tokens[start] === "nam") {
+    return parseYearToken(tokens[start + 1]) ?? defaultYear;
+  }
+
+  if (tokens[start] === "year") {
+    return parseYearToken(tokens[start + 1]) ?? defaultYear;
+  }
+
+  return defaultYear;
+}
+
+function parseDateNumberAt(
+  tokens: string[],
+  start: number,
+  maxTokens: number,
+  maxValue: number,
+): { value: number; length: number } | null {
+  for (let length = Math.min(maxTokens, tokens.length - start); length >= 1; length--) {
+    const value = parseNumberTokens(tokens.slice(start, start + length), maxValue);
+    if (value !== null) return { value, length };
+  }
+
+  return null;
+}
+
+function parseNumberTokens(tokens: string[], maxValue: number): number | null {
+  if (!tokens.length) return null;
+
+  if (tokens.length === 1 && /^\d{1,2}$/u.test(tokens[0])) {
+    const numeric = Number(tokens[0]);
+    return numeric >= 1 && numeric <= maxValue ? numeric : null;
+  }
+
+  const units: Record<string, number> = {
+    khong: 0,
+    linh: 0,
+    mot: 1,
+    nhat: 1,
+    hai: 2,
+    ba: 3,
+    bon: 4,
+    tu: 4,
+    nam: 5,
+    lam: 5,
+    sau: 6,
+    bay: 7,
+    tam: 8,
+    chin: 9,
+  };
+
+  let value: number | null = null;
+  if (tokens.length === 1) {
+    value = units[tokens[0]] ??
+      ENGLISH_NUMBER_WORDS[tokens[0]] ??
+      (tokens[0] === "muoi" ? 10 : null);
+  } else if (tokens[0] === "muoi" && tokens.length === 2) {
+    const unit = units[tokens[1]];
+    value = unit === undefined ? null : 10 + unit;
+  } else if (
+    tokens.length >= 2 &&
+    tokens.length <= 3 &&
+    units[tokens[0]] !== undefined &&
+    tokens[1] === "muoi"
+  ) {
+    const tens = units[tokens[0]] * 10;
+    const unit = tokens.length === 3 ? units[tokens[2]] : 0;
+    value = unit === undefined ? null : tens + unit;
+  } else if (tokens.length === 2 && ENGLISH_TENS_WORDS[tokens[0]] !== undefined) {
+    const unit = ENGLISH_NUMBER_WORDS[tokens[1]];
+    value = unit === undefined ? null : ENGLISH_TENS_WORDS[tokens[0]] + unit;
+  } else if (
+    tokens.length === 3 &&
+    ENGLISH_TENS_WORDS[tokens[0]] !== undefined &&
+    tokens[1] === "and"
+  ) {
+    const unit = ENGLISH_NUMBER_WORDS[tokens[2]];
+    value = unit === undefined ? null : ENGLISH_TENS_WORDS[tokens[0]] + unit;
+  }
+
+  return value !== null && value >= 1 && value <= maxValue ? value : null;
+}
+
+function getEnglishMonthNumber(token: string): number | null {
+  const index = ENGLISH_MONTH_NAMES.indexOf(token);
+  return index >= 0 ? index + 1 : null;
+}
+
+function trimLeadingEnglishDateMarkers(tokens: string[]): string[] {
+  let start = 0;
+  while (start < tokens.length && ENGLISH_DATE_MARKERS.has(tokens[start])) {
+    start++;
+  }
+
+  return tokens.slice(start);
+}
+
+function trimLeadingDateMarkers(tokens: string[]): string[] {
+  let start = 0;
+  while (start < tokens.length && VIETNAMESE_DAY_MARKERS.has(tokens[start])) {
+    start++;
+  }
+
+  return tokens.slice(start);
+}
+
+function parseYearToken(token: string | undefined): number | null {
+  if (!token || !/^(?:20)?\d{2}$/u.test(token)) return null;
+  const year = Number(token.length === 2 ? `20${token}` : token);
+  return year >= 2000 && year <= 2099 ? year : null;
+}
+
+function tokenizeTemporalText(value: string): string[] {
+  return value.match(/[a-z0-9]+/gu) ?? [];
+}
+
+const VIETNAMESE_DAY_MARKERS = new Set(["ngay", "mung", "mong"]);
+const ENGLISH_MONTH_NAMES = [
+  "january",
+  "february",
+  "march",
+  "april",
+  "may",
+  "june",
+  "july",
+  "august",
+  "september",
+  "october",
+  "november",
+  "december",
+];
+const ENGLISH_DATE_MARKERS = new Set(["on", "the"]);
+const ENGLISH_CONNECTOR_TOKENS = new Set(["of", "in"]);
+const ENGLISH_NUMBER_WORDS: Record<string, number> = {
+  one: 1,
+  first: 1,
+  two: 2,
+  second: 2,
+  three: 3,
+  third: 3,
+  four: 4,
+  fourth: 4,
+  five: 5,
+  fifth: 5,
+  six: 6,
+  sixth: 6,
+  seven: 7,
+  seventh: 7,
+  eight: 8,
+  eighth: 8,
+  nine: 9,
+  ninth: 9,
+  ten: 10,
+  tenth: 10,
+  eleven: 11,
+  eleventh: 11,
+  twelve: 12,
+  twelfth: 12,
+  thirteen: 13,
+  thirteenth: 13,
+  fourteen: 14,
+  fourteenth: 14,
+  fifteen: 15,
+  fifteenth: 15,
+  sixteen: 16,
+  sixteenth: 16,
+  seventeen: 17,
+  seventeenth: 17,
+  eighteen: 18,
+  eighteenth: 18,
+  nineteen: 19,
+  nineteenth: 19,
+  twenty: 20,
+  twentieth: 20,
+  thirty: 30,
+  thirtieth: 30,
+};
+const ENGLISH_TENS_WORDS: Record<string, number> = {
+  twenty: 20,
+  thirty: 30,
+};
 
 function buildLocalDateFromParts(year: number, month: number, day: number): LocalDateParts | null {
   if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return null;
