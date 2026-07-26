@@ -1,4 +1,3 @@
-import { PrismaClient } from '@prisma/client';
 import { indexMemoryFromDiary } from '@second-brain/ai';
 import { deleteEntityMentionsForSource, insertEntityMentions, insertMemoryChunks, pruneMemoryChunksForSource, resolveMemoryChunkIds } from '@second-brain/db';
 import * as dotenv from 'dotenv';
@@ -26,42 +25,52 @@ async function run() {
       sourceTitle: "Nhật kí thường ngày",
       insertChunks: async (chunks) => {
         console.log("Inserting chunks...");
-        await insertMemoryChunks(prisma as any, chunks);
+        await prisma.$transaction(async (tx: any) => {
+          await insertMemoryChunks(tx, chunks);
+          await pruneMemoryChunksForSource(tx, {
+            userId,
+            sourceType: 'diary',
+            sourceId: diaryId,
+            keepChunkCount: chunks.length,
+          });
+        });
         console.log("Inserted chunks");
-      }
+      },
+      insertEntityMentions: async (mentions) => {
+        await prisma.$transaction(async (tx: any) => {
+          await deleteEntityMentionsForSource(tx, {
+            userId,
+            sourceType: 'diary',
+            sourceId: diaryId,
+          });
+
+          if (!mentions.length) return;
+
+          const chunkIdMap = await resolveMemoryChunkIds(tx, {
+            userId,
+            sourceType: 'diary',
+            sourceId: diaryId,
+          });
+          const mentionRows = mentions
+            .map((mention) => {
+              const chunkId = chunkIdMap.get(mention.chunkIndex);
+              if (!chunkId) return null;
+              return {
+                chunkId,
+                entityType: mention.entityType,
+                entityValue: mention.entityValue,
+              };
+            })
+            .filter((mention): mention is NonNullable<typeof mention> => mention !== null);
+
+          console.log("Inserting mentions...", mentionRows.length);
+          await insertEntityMentions(tx, mentionRows);
+        });
+      },
     });
 
     console.log("Indexing result:", indexingResult.chunkCount);
-    
-    // Now test entity mention extraction
-    console.log("Resolving chunk IDs...");
-    const chunkIdMap = await resolveMemoryChunkIds(prisma as any, {
-      userId,
-      sourceType: 'diary',
-      sourceId: diaryId,
-    });
-
-    console.log("Map:", Array.from(chunkIdMap.entries()));
-    
-    // simulate the rest of the flow
-    const mentionPayloads = [];
-    for (const chunk of indexingResult.chunks) {
-        const chunkId = chunkIdMap.get(chunk.chunkIndex);
-        if (!chunkId || !chunk.entityMentions?.length) continue;
-
-        for (const mention of chunk.entityMentions) {
-          mentionPayloads.push({
-            chunkId,
-            entityType: mention.entityType,
-            entityValue: mention.entityValue,
-          });
-        }
-    }
-    
-    if (mentionPayloads.length > 0) {
-        console.log("Inserting mentions...", mentionPayloads.length);
-        await insertEntityMentions(prisma as any, mentionPayloads);
-    }
+    console.log("Entity mention result:", indexingResult.entityMentionCount);
     console.log("Done");
 
   } catch(e) {

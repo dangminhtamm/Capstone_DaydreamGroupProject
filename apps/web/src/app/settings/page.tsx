@@ -348,22 +348,22 @@ export default function SettingsPage() {
   };
   const getIndexingBadgeClass = (status: string) => {
     if (status === "succeeded" || status === "completed") {
-      return "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300";
+      return "status-badge-success";
     }
 
     if (status === "dead_letter" || status === "failed") {
-      return "bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300";
+      return "status-badge-danger";
     }
 
     if (status === "processing") {
-      return "bg-sky-50 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300";
+      return "border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-300";
     }
 
     if (status === "retry") {
-      return "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300";
+      return "status-badge-warning";
     }
 
-    return "bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300";
+    return "";
   };
   return (
     <DashboardShell
@@ -371,7 +371,7 @@ export default function SettingsPage() {
       description="Manage your profile, preferences, and application settings."
     >
       <div className="mx-auto max-w-5xl space-y-6">
-        <div className="rounded-3xl border border-slate-200/80 bg-white p-2 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:bg-slate-800 dark:shadow-slate-900/40">
+        <div className="enterprise-card p-1.5">
           <div className="grid gap-2 md:grid-cols-4">
             {settingsTabs.map((tab) => {
               const isActive = activeTab === tab.id;
@@ -380,14 +380,14 @@ export default function SettingsPage() {
                   key={tab.id}
                   type="button"
                   onClick={() => setActiveTab(tab.id)}
-                  className={`cursor-pointer rounded-2xl px-4 py-3 text-left transition ${
+                  className={`cursor-pointer rounded-xl px-3.5 py-3 text-left transition ${
                     isActive
-                      ? "bg-indigo-50 text-indigo-700 ring-1 ring-indigo-100 dark:bg-indigo-900/40 dark:text-indigo-300 dark:ring-indigo-800"
-                      : "text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-700/60 dark:hover:text-slate-100"
+                      ? "bg-blue-50 text-blue-700 ring-1 ring-blue-100 dark:bg-blue-950/40 dark:text-blue-200 dark:ring-blue-900/60"
+                      : "text-slate-600 hover:bg-blue-50/60 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100"
                   }`}
                 >
                   <span className="block text-sm font-bold">{tab.label}</span>
-                  <span className={`mt-0.5 block text-xs ${isActive ? "text-indigo-500 dark:text-indigo-300" : "text-slate-400 dark:text-slate-500"}`}>
+                  <span className={`mt-0.5 block text-xs ${isActive ? "text-slate-500 dark:text-slate-400" : "text-slate-400 dark:text-slate-500"}`}>
                     {tab.description}
                   </span>
                 </button>
@@ -398,18 +398,18 @@ export default function SettingsPage() {
 
         {/* ─── Profile Section ─── */}
         {activeTab === "profile" ? (
-        <section className="rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white via-white to-indigo-50/30 p-6 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:from-slate-800 dark:via-slate-800 dark:to-indigo-950/30 dark:shadow-slate-900/40">
+        <section className="enterprise-card p-5">
           <div className="mb-5">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600 dark:text-indigo-400">Account</p>
-            <h3 className="mt-2 text-2xl font-bold tracking-tight text-slate-950 dark:text-slate-100">Your Profile</h3>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">Account</p>
+            <h3 className="mt-1.5 text-xl font-semibold tracking-tight text-slate-950 dark:text-slate-100">Your Profile</h3>
           </div>
 
           {isLoading ? (
             <div className="flex items-center gap-4">
-              <div className="h-16 w-16 animate-pulse rounded-full bg-slate-200 dark:bg-slate-700" />
+              <div className="skeleton-line h-16 w-16 rounded-full" />
               <div className="flex-1 space-y-2">
-                <div className="h-4 w-32 animate-pulse rounded bg-slate-200 dark:bg-slate-700" />
-                <div className="h-3 w-48 animate-pulse rounded bg-slate-200 dark:bg-slate-700" />
+                <div className="skeleton-line h-4 w-32" />
+                <div className="skeleton-line h-3 w-48" />
               </div>
             </div>
           ) : isAuthenticated ? (
@@ -434,14 +434,14 @@ export default function SettingsPage() {
                       className="h-16 w-16 rounded-2xl object-cover ring-4 ring-indigo-100 dark:ring-indigo-900/50"
                     />
                   ) : (
-                    <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-purple-500 to-pink-500 text-2xl font-bold text-white shadow-lg">
+                    <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-slate-900 text-2xl font-bold text-white dark:bg-slate-700">
                       {displayName.charAt(0).toUpperCase()}
                     </div>
                   )}
                   {/* Hover overlay */}
                   <div className="absolute inset-0 flex items-center justify-center rounded-2xl bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
                     {isUploadingAvatar ? (
-                      <svg className="h-5 w-5 animate-spin text-white" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-white">Saving</span>
                     ) : (
                       <svg className="h-5 w-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                     )}
@@ -477,7 +477,7 @@ export default function SettingsPage() {
               )}
 
               {/* Edit display name */}
-              <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800/60">
+              <div className="enterprise-panel bg-white p-4 dark:bg-slate-950">
                 <label htmlFor="settings-display-name" className="mb-2 block text-sm font-semibold text-slate-700 dark:text-slate-300">Display Name</label>
                 <div className="flex gap-3">
                   <input
@@ -492,7 +492,7 @@ export default function SettingsPage() {
                     type="button"
                     onClick={handleUpdateDisplayName}
                     disabled={!hasNameChanged || isUpdatingName}
-                    className="shrink-0 cursor-pointer rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
+                    className="action-primary shrink-0 disabled:cursor-not-allowed"
                   >
                     {isUpdatingName ? "Saving..." : "Update"}
                   </button>
@@ -509,7 +509,7 @@ export default function SettingsPage() {
               </div>
 
               {/* Password change/set */}
-              <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800/60">
+              <div className="enterprise-panel bg-white p-4 dark:bg-slate-950">
                 <p className="mb-3 text-sm font-semibold text-slate-700 dark:text-slate-300">
                   Change Password
                 </p>
@@ -555,7 +555,7 @@ export default function SettingsPage() {
                     type="button"
                     onClick={handleUpdatePassword}
                     disabled={isUpdatingPassword || !newPassword || !confirmPassword}
-                    className="cursor-pointer rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
+                    className="action-primary disabled:cursor-not-allowed"
                   >
                     {isUpdatingPassword ? "Updating..." : "Change Password"}
                   </button>
@@ -574,7 +574,7 @@ export default function SettingsPage() {
               <svg className="mx-auto h-10 w-10 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
               <p className="mt-3 text-sm font-medium text-slate-900 dark:text-slate-200">Not signed in</p>
               <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Sign in to manage your profile.</p>
-              <a href="/login" className="mt-4 inline-block rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700">
+              <a href="/login" className="action-primary mt-4">
                 Sign in
               </a>
             </div>
@@ -590,18 +590,18 @@ export default function SettingsPage() {
 
         {/* ─── System Health ─── */}
         {activeTab === "memory" ? (
-        <section id="memory-status" className="scroll-mt-24 rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white via-white to-cyan-50/30 p-6 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:from-slate-800 dark:via-slate-800 dark:to-cyan-950/20 dark:shadow-slate-900/40">
+        <section id="memory-status" className="scroll-mt-24 enterprise-card p-5">
           <div className="mb-5 flex items-start justify-between gap-4">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-600 dark:text-cyan-400">System</p>
-              <h3 className="mt-2 text-2xl font-bold tracking-tight text-slate-950 dark:text-slate-100">Health & Indexing</h3>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">System</p>
+              <h3 className="mt-1.5 text-xl font-semibold tracking-tight text-slate-950 dark:text-slate-100">Health & Indexing</h3>
             </div>
             <div className="flex flex-wrap justify-end gap-2">
               <button
                 type="button"
                 onClick={() => void handleRequeueDeadLetterJobs()}
                 disabled={!isAuthenticated || isRequeueingIndexing || userFailedJobs === 0}
-                className="cursor-pointer rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm font-semibold text-amber-700 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300 dark:hover:bg-amber-900/40"
+                className="action-secondary border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 disabled:cursor-not-allowed dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300 dark:hover:bg-amber-900/40"
               >
                 {isRequeueingIndexing ? "Requeueing..." : "Requeue failed"}
               </button>
@@ -609,7 +609,7 @@ export default function SettingsPage() {
                 type="button"
                 onClick={() => void refreshSystemStatus()}
                 disabled={isLoadingSystemStatus}
-                className="cursor-pointer rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600"
+                className="action-secondary disabled:cursor-not-allowed"
               >
                 {isLoadingSystemStatus ? "Checking..." : "Refresh"}
               </button>
@@ -623,29 +623,46 @@ export default function SettingsPage() {
           )}
 
           <div className="grid gap-3 sm:grid-cols-3">
-            <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800/60">
+            <div className="enterprise-panel bg-white p-4 dark:bg-slate-950">
               <p className="text-xs font-medium text-slate-500 dark:text-slate-400">API Health</p>
-              <p className={`mt-1 text-lg font-bold ${systemHealth?.status === "ok" ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}`}>
-                {systemHealth ? systemHealth.status.toUpperCase() : isLoadingSystemStatus ? "CHECKING" : "UNKNOWN"}
-              </p>
+              {isLoadingSystemStatus && !systemHealth ? (
+                <div className="skeleton-line mt-2 h-5 w-24" />
+              ) : (
+                <p className={`mt-1 text-lg font-bold ${systemHealth?.status === "ok" ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}`}>
+                  {systemHealth ? systemHealth.status.toUpperCase() : "UNKNOWN"}
+                </p>
+              )}
               {systemHealth?.checkedAt && (
                 <p className="mt-1 truncate text-xs text-slate-400 dark:text-slate-500">
                   {new Date(systemHealth.checkedAt).toLocaleString()}
                 </p>
               )}
             </div>
-            <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800/60">
+            <div className="enterprise-panel bg-white p-4 dark:bg-slate-950">
               <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Database</p>
-              <p className={`mt-1 text-lg font-bold ${systemHealth?.database.ok ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
-                {systemHealth?.database.ok ? "Connected" : "Needs attention"}
-              </p>
+              {isLoadingSystemStatus && !systemHealth ? (
+                <div className="skeleton-line mt-2 h-5 w-28" />
+              ) : (
+                <p className={`mt-1 text-lg font-bold ${systemHealth?.database.ok ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+                  {systemHealth?.database.ok ? "Connected" : "Needs attention"}
+                </p>
+              )}
             </div>
-            <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800/60">
+            <div className="enterprise-panel bg-white p-4 dark:bg-slate-950">
               <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Outbox</p>
-              <p className={`mt-1 text-lg font-bold ${systemHealth?.indexingOutbox.available ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
-                {systemHealth?.indexingOutbox.available ? "Available" : "Unavailable"}
-              </p>
-              <p className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">{formatCounts(outboxCounts)}</p>
+              {isLoadingSystemStatus && !systemHealth ? (
+                <>
+                  <div className="skeleton-line mt-2 h-5 w-24" />
+                  <div className="skeleton-line mt-2 h-3 w-36" />
+                </>
+              ) : (
+                <>
+                  <p className={`mt-1 text-lg font-bold ${systemHealth?.indexingOutbox.available ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+                    {systemHealth?.indexingOutbox.available ? "Available" : "Unavailable"}
+                  </p>
+                  <p className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">{formatCounts(outboxCounts)}</p>
+                </>
+              )}
             </div>
           </div>
 
@@ -668,10 +685,10 @@ export default function SettingsPage() {
                     Diary {demoReadiness.counts.diaryEntries} · Memory chunks {demoReadiness.counts.memoryChunks} · Summaries {demoReadiness.counts.summaries} · Calendar links {demoReadiness.counts.linkedDiaries}
                   </p>
                 </div>
-                <span className={`self-start rounded-full px-3 py-1 text-xs font-semibold ${
+                <span className={`self-start status-badge ${
                   demoReadiness.ready
-                    ? "bg-emerald-600 text-white"
-                    : "bg-amber-600 text-white"
+                    ? "status-badge-success"
+                    : "status-badge-warning"
                 }`}>
                   {demoReadiness.checks.filter((check) => check.ok).length}/{demoReadiness.checks.length} checks
                 </span>
@@ -681,7 +698,7 @@ export default function SettingsPage() {
                 {demoReadiness.checks.map((check) => (
                   <div
                     key={check.id}
-                    className="flex items-start gap-3 rounded-xl border border-white/70 bg-white/70 px-3 py-2.5 dark:border-slate-700/70 dark:bg-slate-900/30"
+                    className="flex items-start gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2.5 dark:border-slate-800 dark:bg-slate-950"
                   >
                     <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
                       check.ok
@@ -694,7 +711,7 @@ export default function SettingsPage() {
                       <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">
                         {check.label}
                         {!check.required ? (
-                          <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-slate-500 dark:bg-slate-700 dark:text-slate-300">
+                          <span className="ml-2 status-badge">
                             stretch
                           </span>
                         ) : null}
@@ -706,7 +723,7 @@ export default function SettingsPage() {
               </div>
 
               {demoReadiness.nextActions.length ? (
-                <div className="mt-4 rounded-xl bg-white/70 px-3 py-2.5 dark:bg-slate-900/30">
+                <div className="mt-4 rounded-lg border border-slate-200 bg-white px-3 py-2.5 dark:border-slate-800 dark:bg-slate-950">
                   <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                     Next actions
                   </p>
@@ -721,13 +738,13 @@ export default function SettingsPage() {
           ) : null}
 
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800/60">
+            <div className="enterprise-panel bg-white p-4 dark:bg-slate-950">
               <p className="mb-3 text-sm font-semibold text-slate-700 dark:text-slate-300">Environment</p>
               <div className="grid gap-2 text-sm">
                 {environmentChecks.map(([label, ok]) => (
                   <div key={label} className="flex items-center justify-between gap-3">
                     <span className="text-slate-600 dark:text-slate-400">{label}</span>
-                    <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${ok ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300" : "bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300"}`}>
+                    <span className={`status-badge ${ok ? "status-badge-success" : "status-badge-danger"}`}>
                       {ok ? "Configured" : "Missing"}
                     </span>
                   </div>
@@ -735,13 +752,13 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800/60">
+            <div className="enterprise-panel bg-white p-4 dark:bg-slate-950">
               <p className="mb-3 text-sm font-semibold text-slate-700 dark:text-slate-300">Schema</p>
               <div className="grid gap-2 text-sm">
                 {schemaChecks.map(([name, check]) => (
                   <div key={name} className="flex items-center justify-between gap-3">
                     <span className="min-w-0 truncate text-slate-600 dark:text-slate-400">{name}</span>
-                    <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold ${check.ok ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300" : "bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300"}`}>
+                    <span className={`shrink-0 status-badge ${check.ok ? "status-badge-success" : "status-badge-danger"}`}>
                       {check.ok ? "OK" : "Missing"}
                     </span>
                   </div>
@@ -765,19 +782,19 @@ export default function SettingsPage() {
           ) : null}
 
           {systemHealth?.enterpriseControls ? (
-            <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800/60">
+            <div className="mt-4 enterprise-panel bg-white p-4 dark:bg-slate-950">
               <div className="mb-3 flex items-center justify-between gap-3">
                 <div>
                   <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">Enterprise Controls</p>
                   <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">Request tracing, API protection, audit logging, and observability readiness.</p>
                 </div>
-                <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
+                <span className="status-badge status-badge-success">
                   active
                 </span>
               </div>
 
               <div className="grid gap-3 sm:grid-cols-2">
-                <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5 dark:border-slate-700 dark:bg-slate-900/40">
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 dark:border-slate-800 dark:bg-slate-900/70">
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Traceability</p>
                   <p className="mt-1 text-sm font-medium text-slate-800 dark:text-slate-200">
                     {systemHealth.enterpriseControls.requestId.enabled ? "Request ID enabled" : "Request ID disabled"}
@@ -785,7 +802,7 @@ export default function SettingsPage() {
                   <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{systemHealth.enterpriseControls.requestId.header}</p>
                 </div>
 
-                <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5 dark:border-slate-700 dark:bg-slate-900/40">
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 dark:border-slate-800 dark:bg-slate-900/70">
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">API Rate Limit</p>
                   <p className="mt-1 text-sm font-medium text-slate-800 dark:text-slate-200">
                     {systemHealth.enterpriseControls.rateLimit.enabled ? "Enabled" : "Disabled"} · {systemHealth.enterpriseControls.rateLimit.storage}
@@ -795,7 +812,7 @@ export default function SettingsPage() {
                   </p>
                 </div>
 
-                <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5 dark:border-slate-700 dark:bg-slate-900/40">
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 dark:border-slate-800 dark:bg-slate-900/70">
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Search Cache</p>
                   <p className="mt-1 text-sm font-medium text-slate-800 dark:text-slate-200">
                     {systemHealth.enterpriseControls.searchCache?.enabled ? "Enabled" : "Disabled"} · {systemHealth.enterpriseControls.searchCache?.storage ?? "database-fallback"}
@@ -805,7 +822,7 @@ export default function SettingsPage() {
                   </p>
                 </div>
 
-                <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5 dark:border-slate-700 dark:bg-slate-900/40">
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 dark:border-slate-800 dark:bg-slate-900/70">
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Audit Logging</p>
                   <p className="mt-1 text-sm font-medium text-slate-800 dark:text-slate-200">
                     {systemHealth.enterpriseControls.auditLogging.enabled ? "Enabled" : "Disabled"} · {systemHealth.enterpriseControls.auditLogging.sink}
@@ -815,7 +832,7 @@ export default function SettingsPage() {
                   </p>
                 </div>
 
-                <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5 dark:border-slate-700 dark:bg-slate-900/40">
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 dark:border-slate-800 dark:bg-slate-900/70">
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Security Headers</p>
                   <p className="mt-1 text-sm font-medium text-slate-800 dark:text-slate-200">
                     {systemHealth.enterpriseControls.securityHeaders.enabled ? "Enabled" : "Disabled"}
@@ -828,7 +845,7 @@ export default function SettingsPage() {
             </div>
           ) : null}
 
-          <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800/60">
+          <div className="mt-4 enterprise-panel bg-white p-4 dark:bg-slate-950">
             <div className="mb-3 flex items-center justify-between gap-3">
               <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">Your Indexing Jobs</p>
               <p className="text-xs text-slate-500 dark:text-slate-400">{formatCounts(userIndexingCounts)}</p>
@@ -841,7 +858,7 @@ export default function SettingsPage() {
                 { label: "Failed", value: userFailedJobs, tone: userFailedJobs ? "rose" : "emerald" },
                 { label: "Done", value: userIndexingCounts.succeeded ?? 0, tone: "emerald" },
               ].map((item) => (
-                <div key={item.label} className={`rounded-xl border px-3 py-2 ${
+                <div key={item.label} className={`rounded-lg border px-3 py-2 ${
                   item.tone === "rose"
                     ? "border-rose-200 bg-rose-50 dark:border-rose-900/50 dark:bg-rose-950/20"
                     : item.tone === "amber"
@@ -867,7 +884,7 @@ export default function SettingsPage() {
             ) : indexingStatus?.recent.length ? (
               <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
                 {indexingStatus.recent.map((job) => (
-                  <div key={job.id} className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5 dark:border-slate-700 dark:bg-slate-900/40">
+                  <div key={job.id} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 dark:border-slate-800 dark:bg-slate-900/70">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <p className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
@@ -877,7 +894,7 @@ export default function SettingsPage() {
                           {job.sourceId} · updated {new Date(job.updatedAt).toLocaleString()}
                         </p>
                       </div>
-                      <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold ${getIndexingBadgeClass(job.status)}`}>
+                      <span className={`shrink-0 status-badge ${getIndexingBadgeClass(job.status)}`}>
                         {job.status}
                       </span>
                     </div>
@@ -896,7 +913,7 @@ export default function SettingsPage() {
                           type="button"
                           onClick={() => void handleRequeueJob(job.id)}
                           disabled={isRequeueingIndexing}
-                          className="cursor-pointer rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                          className="action-secondary min-h-9 px-3 py-1 text-xs disabled:cursor-not-allowed"
                         >
                           Requeue
                         </button>
@@ -923,15 +940,15 @@ export default function SettingsPage() {
         {/* ─── Appearance ─── */}
         {activeTab === "preferences" ? (
         <>
-        <section className="rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white via-white to-purple-50/30 p-6 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:from-slate-800 dark:via-slate-800 dark:to-purple-950/20 dark:shadow-slate-900/40">
+        <section className="enterprise-card p-5">
           <div className="mb-5">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-purple-600 dark:text-purple-400">Appearance</p>
-            <h3 className="mt-2 text-2xl font-bold tracking-tight text-slate-950 dark:text-slate-100">Theme & Language</h3>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">Appearance</p>
+            <h3 className="mt-1.5 text-xl font-semibold tracking-tight text-slate-950 dark:text-slate-100">Theme & Language</h3>
           </div>
 
           <div className="space-y-4">
             {/* Theme selector */}
-            <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800/60">
+            <div className="enterprise-panel bg-white p-4 dark:bg-slate-950">
               <p className="mb-3 text-sm font-semibold text-slate-700 dark:text-slate-300">Color Theme</p>
               <div className="grid grid-cols-3 gap-3">
                 {([
@@ -943,9 +960,9 @@ export default function SettingsPage() {
                     key={opt.value}
                     type="button"
                     onClick={() => setTheme(opt.value)}
-                    className={`flex cursor-pointer flex-col items-center gap-2 rounded-xl border-2 px-4 py-3 text-sm font-medium transition ${theme === opt.value
-                        ? "border-indigo-500 bg-indigo-50 text-indigo-700 dark:border-indigo-400 dark:bg-indigo-900/30 dark:text-indigo-300"
-                        : "border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-400 dark:hover:border-slate-500 dark:hover:bg-slate-800"
+                    className={`flex cursor-pointer flex-col items-center gap-2 rounded-lg border px-4 py-3 text-sm font-medium transition ${theme === opt.value
+                        ? "border-slate-900 bg-slate-100 text-slate-950 dark:border-slate-200 dark:bg-slate-900 dark:text-slate-100"
+                        : "border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-400 dark:hover:border-slate-600 dark:hover:bg-slate-900"
                       }`}
                   >
                     {opt.icon}
@@ -956,7 +973,7 @@ export default function SettingsPage() {
             </div>
 
             {/* Language preference */}
-            <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800/60">
+            <div className="enterprise-panel bg-white p-4 dark:bg-slate-950">
               <p className="mb-3 text-sm font-semibold text-slate-700 dark:text-slate-300">AI Response Language</p>
               <div className="grid grid-cols-2 gap-3">
                 {([
@@ -967,9 +984,9 @@ export default function SettingsPage() {
                     key={opt.value}
                     type="button"
                     onClick={() => handleChangeLanguage(opt.value)}
-                    className={`flex cursor-pointer items-center gap-3 rounded-xl border-2 px-4 py-3 text-sm font-medium transition ${responseLang === opt.value
-                        ? "border-indigo-500 bg-indigo-50 text-indigo-700 dark:border-indigo-400 dark:bg-indigo-900/30 dark:text-indigo-300"
-                        : "border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-400 dark:hover:border-slate-500 dark:hover:bg-slate-800"
+                    className={`flex cursor-pointer items-center gap-3 rounded-lg border px-4 py-3 text-sm font-medium transition ${responseLang === opt.value
+                        ? "border-slate-900 bg-slate-100 text-slate-950 dark:border-slate-200 dark:bg-slate-900 dark:text-slate-100"
+                        : "border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-400 dark:hover:border-slate-600 dark:hover:bg-slate-900"
                       }`}
                   >
                     {opt.flag}
@@ -982,10 +999,10 @@ export default function SettingsPage() {
         </section>
 
         {/* ─── AI Usage Stats ─── */}
-        <section className="rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white via-white to-emerald-50/30 p-6 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:from-slate-800 dark:via-slate-800 dark:to-emerald-950/20 dark:shadow-slate-900/40">
+        <section className="enterprise-card p-5">
           <div className="mb-5">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-600 dark:text-emerald-400">Usage</p>
-            <h3 className="mt-2 text-2xl font-bold tracking-tight text-slate-950 dark:text-slate-100">AI Token Usage</h3>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">Usage</p>
+            <h3 className="mt-1.5 text-xl font-semibold tracking-tight text-slate-950 dark:text-slate-100">AI Token Usage</h3>
           </div>
 
           <div className="grid gap-3 sm:grid-cols-4">
@@ -995,7 +1012,7 @@ export default function SettingsPage() {
               { label: "This Month", value: tokenStats.month.toLocaleString(), sub: "tokens" },
               { label: "Queries Today", value: tokenStats.queriesToday.toString(), sub: "searches" },
             ].map((stat) => (
-              <div key={stat.label} className="rounded-2xl border border-slate-200 bg-white p-4 text-center dark:border-slate-700 dark:bg-slate-800/60">
+              <div key={stat.label} className="enterprise-panel bg-white p-4 text-center dark:bg-slate-950">
                 <p className="text-xs font-medium text-slate-500 dark:text-slate-400">{stat.label}</p>
                 <p className="mt-1 text-2xl font-bold text-slate-900 dark:text-slate-100">{stat.value}</p>
                 <p className="text-xs text-slate-400 dark:text-slate-500">{stat.sub}</p>

@@ -1,6 +1,56 @@
 {
   "name": "Second Brain MVP Evaluation Dataset",
   "description": "Seven days of diary entries plus realistic calendar events for latency and retrieval quality evaluation.",
+  "summaryCoverage": [
+    {
+      "id": "weekly-2026-05-11",
+      "summaryType": "weekly",
+      "periodStart": "2026-05-11T00:00:00.000Z",
+      "periodEnd": "2026-05-17T23:59:59.999Z",
+      "expectedKeyEvents": [
+        {
+          "label": "Capstone kickoff roles were assigned",
+          "anyOf": ["kickoff", "Tam", "Quan", "Google Calendar"]
+        },
+        {
+          "label": "Mentor Linh said onboarding copy was confusing",
+          "anyOf": ["onboarding", "confusing", "shortened"]
+        },
+        {
+          "label": "POST /diary saves raw entry before indexing",
+          "anyOf": ["POST /diary", "save the raw entry", "trigger memory indexing"]
+        },
+        {
+          "label": "Attachment upload should cover PDF and plain text",
+          "anyOf": ["attachment upload", "PDF", "plain text"]
+        },
+        {
+          "label": "Generated answers must include sources/citations",
+          "anyOf": ["citations", "sources", "trust"]
+        },
+        {
+          "label": "Timeline moved from mock data to real entries",
+          "anyOf": ["timeline", "real diary entries", "mock data"]
+        },
+        {
+          "label": "Calendar sync linked Capstone Mentor Review",
+          "anyOf": ["Capstone Mentor Review", "calendar", "linking"]
+        },
+        {
+          "label": "Duplicate summaries/idempotency were a risk",
+          "anyOf": ["duplicate summaries", "idempotency"]
+        },
+        {
+          "label": "500ms memory recall must be measured separately",
+          "anyOf": ["500ms", "retrieval time", "answer generation"]
+        },
+        {
+          "label": "Demo rehearsal covered diary, search, tasks, weekly reflection",
+          "anyOf": ["demo scenario", "search for mentor feedback", "weekly reflection"]
+        }
+      ]
+    }
+  ],
   "seedDiaries": [
     {
       "id": "eval-diary-2026-05-11",
@@ -36,7 +86,7 @@
       "id": "eval-diary-2026-05-16",
       "entryDate": "2026-05-16T19:50:00.000Z",
       "title": "Benchmark concern",
-      "content": "We discussed the 500ms memory recall requirement. The database retrieval may be fast enough with HNSW and GIN indexes, but full answer generation is slower because Gemini has to create the response. The plan is to measure embedding time, retrieval time, answer generation time, and total time separately. Streaming should be used for the demo so users see the answer sooner."
+      "content": "We discussed the 500ms memory recall requirement. The database retrieval may be fast enough with HNSW and GIN indexes, but full answer generation is slower because Gemini has to create the response. The plan is to measure embedding time, retrieval time, answer generation time, and total time separately. For MVP, Search should keep using the validated grounded answer path so citation recovery and fallback behavior stay reliable."
     },
     {
       "id": "eval-diary-2026-05-17",
@@ -177,8 +227,8 @@
     {
       "id": "memory-01",
       "category": "memory",
-      "question": "Why did the team decide to use streaming for the demo?",
-      "expectedKeywords": ["answer sooner", "Gemini", "slower"],
+      "question": "Why did the team keep Search on the validated grounded answer path for MVP?",
+      "expectedKeywords": ["validated", "citation recovery", "fallback"],
       "expectedSourceTypes": ["diary"],
       "expectedSourceIds": ["eval-diary-2026-05-16"],
       "acceptableConfidence": ["high", "medium"]

@@ -224,7 +224,7 @@ function buildWeeklySummaries(entries: DiaryEntry[]) {
 
 function StatCard({ label, value, helper, tone }: { label: string; value: string; helper: string; tone: string }) {
   return (
-    <div className="rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white to-slate-50/50 p-5 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:from-slate-800 dark:to-slate-800/50 dark:shadow-slate-900/40">
+    <div className="enterprise-card p-5">
       <div className={`mb-4 h-2 w-12 rounded-full ${tone}`} />
       <p className="text-sm font-medium text-slate-500 dark:text-slate-400">{label}</p>
       <p className="mt-2 text-3xl font-bold tracking-tight text-slate-950 dark:text-slate-100">{value}</p>
@@ -253,10 +253,10 @@ function AiSummaryList({ summaries }: { summaries: SummaryRecord[] }) {
       {summaries.map((summary) => (
         <article
           key={summary.id}
-          className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-800/70"
+          className="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950"
         >
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold uppercase text-indigo-700 ring-1 ring-indigo-100 dark:bg-indigo-900/30 dark:text-indigo-300 dark:ring-indigo-800">
+            <span className="status-badge">
               {summary.type}
             </span>
             <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
@@ -277,13 +277,13 @@ function ActivityBars({ summaries }: { summaries: DailySummary[] }) {
   const maxEntries = Math.max(...recentDays.map((day) => day.entries.length), 1);
 
   return (
-    <div className="rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white to-slate-50/50 p-6 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:from-slate-800 dark:to-slate-800/50 dark:shadow-slate-900/40">
+    <div className="enterprise-card p-5">
       <div className="mb-6 flex items-center justify-between gap-3">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600 dark:text-indigo-400">Activity</p>
-          <h3 className="mt-2 text-xl font-bold text-slate-950 dark:text-slate-100">Last 7 days</h3>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">Activity</p>
+          <h3 className="mt-1.5 text-xl font-semibold text-slate-950 dark:text-slate-100">Last 7 days</h3>
         </div>
-        <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 ring-1 ring-indigo-100">
+        <span className="status-badge">
           daily trend
         </span>
       </div>
@@ -291,9 +291,9 @@ function ActivityBars({ summaries }: { summaries: DailySummary[] }) {
         {recentDays.length ? (
           recentDays.map((day) => (
             <div key={day.dateKey} className="flex flex-1 flex-col items-center gap-3">
-              <div className="flex h-32 w-full items-end rounded-2xl bg-slate-50 px-2 py-2 dark:bg-slate-700/50">
+              <div className="flex h-32 w-full items-end rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 dark:border-slate-800 dark:bg-slate-900/70">
                 <div
-                  className="w-full rounded-xl bg-gradient-to-t from-indigo-600 to-sky-400 shadow-sm transition-all"
+                  className="w-full rounded-md bg-indigo-600 transition-all"
                   style={{ height: `${Math.max((day.entries.length / maxEntries) * 100, 10)}%` }}
                 />
               </div>
@@ -329,13 +329,13 @@ function InsightSnapshot({
   const focusTerms = latestWeek ? getTopKeywords(latestWeek.entries).slice(0, 5) : [];
 
   return (
-    <section className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:bg-slate-800 dark:shadow-slate-900/40">
+    <section className="enterprise-card p-5">
       <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
         <div className="max-w-2xl">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600 dark:text-indigo-400">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
             Insight snapshot
           </p>
-          <h3 className="mt-3 text-2xl font-bold tracking-tight text-slate-950 dark:text-slate-100">
+          <h3 className="mt-2 text-xl font-semibold tracking-tight text-slate-950 dark:text-slate-100">
             {latestWeek ? `Week of ${latestWeek.label}` : "Your memory overview is waiting"}
           </h3>
           <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-400">
@@ -346,7 +346,7 @@ function InsightSnapshot({
         </div>
 
         <div className="grid gap-3 sm:grid-cols-3 xl:w-[520px]">
-          <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-700 dark:bg-slate-900/40">
+          <div className="enterprise-panel p-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Latest day</p>
             <p className="mt-2 text-lg font-bold text-slate-950 dark:text-slate-100">
               {latestDay?.label ?? "No entries"}
@@ -355,7 +355,7 @@ function InsightSnapshot({
               {latestDay ? `${latestDay.entries.length} entries · ${latestDay.wordCount} words` : "Start from Diary"}
             </p>
           </div>
-          <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-700 dark:bg-slate-900/40">
+          <div className="enterprise-panel p-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Mood trend</p>
             <p className="mt-2 text-lg font-bold text-slate-950 dark:text-slate-100">
               {mood?.label ?? "Not enough data"}
@@ -364,7 +364,7 @@ function InsightSnapshot({
               {mood ? `${mood.count} tagged entr${mood.count === 1 ? "y" : "ies"}` : "Add mood in Diary"}
             </p>
           </div>
-          <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-700 dark:bg-slate-900/40">
+          <div className="enterprise-panel p-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Next step</p>
             <p className="mt-2 text-lg font-bold text-slate-950 dark:text-slate-100">
               {latestAiSummary ? "Review summary" : "Generate summary"}
@@ -377,13 +377,13 @@ function InsightSnapshot({
       </div>
 
       <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.7fr)]">
-        <div className="rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4 dark:border-indigo-900/60 dark:bg-indigo-950/30">
+        <div className="rounded-lg border border-indigo-100 bg-indigo-50/60 p-4 dark:border-indigo-900/60 dark:bg-indigo-950/30">
           <p className="text-sm font-semibold text-indigo-950 dark:text-indigo-100">This period focused on</p>
           <div className="mt-3 flex flex-wrap gap-2">
             {[...focusTerms, ...topTags.map((tag) => `#${tag}`)].slice(0, 8).map((term) => (
               <span
                 key={term}
-                className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-indigo-700 ring-1 ring-indigo-100 dark:bg-slate-800 dark:text-indigo-300 dark:ring-indigo-800"
+                className="status-badge"
               >
                 {term}
               </span>
@@ -394,7 +394,7 @@ function InsightSnapshot({
           </div>
         </div>
 
-        <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-700 dark:bg-slate-900/40">
+        <div className="enterprise-panel p-4">
           <p className="text-sm font-semibold text-slate-950 dark:text-slate-100">Latest AI reflection</p>
           <p className="mt-2 line-clamp-4 text-sm leading-6 text-slate-600 dark:text-slate-400">
             {latestAiSummary?.content ?? "No generated summary yet. Generate one after adding diary entries or syncing calendar activity."}
@@ -522,7 +522,11 @@ export function SummaryDashboard() {
     return (
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {Array.from({ length: 4 }).map((_, index) => (
-          <div key={index} className="h-36 animate-pulse rounded-3xl bg-slate-200 dark:bg-slate-700" />
+          <div key={index} className="enterprise-card h-36 p-5">
+            <div className="skeleton-line h-3 w-20" />
+            <div className="skeleton-line mt-4 h-8 w-24" />
+            <div className="skeleton-line mt-4 h-3 w-32" />
+          </div>
         ))}
       </div>
     );
@@ -544,7 +548,7 @@ export function SummaryDashboard() {
         </div>
 
         {/* Overlay CTA */}
-        <div className="-mt-16 relative z-10 rounded-3xl border border-indigo-200/70 bg-white/90 p-8 text-center shadow-lg backdrop-blur dark:border-indigo-700/50 dark:bg-slate-800/90">
+        <div className="-mt-16 relative z-10 enterprise-card p-8 text-center">
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-indigo-100 text-indigo-600 dark:bg-indigo-900/40 dark:text-indigo-400">
             <svg className="h-7 w-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-6m4 6V7m4 10v-3M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z" />
@@ -554,7 +558,7 @@ export function SummaryDashboard() {
           <p className="mt-1.5 text-sm text-slate-500 dark:text-slate-400">Sign in to see your writing stats, streaks, and activity trends.</p>
           <a
             href="/login"
-            className="mt-5 inline-flex cursor-pointer items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700"
+            className="action-primary mt-5"
           >
             Sign in to get started
           </a>
@@ -565,7 +569,7 @@ export function SummaryDashboard() {
 
   if (state === "error") {
     return (
-      <div className="rounded-3xl border border-rose-200 bg-rose-50 p-8 text-center dark:border-rose-700 dark:bg-rose-900/20">
+      <div className="rounded-lg border border-rose-200 bg-rose-50 p-8 text-center dark:border-rose-900/50 dark:bg-rose-950/20">
         <p className="text-lg font-semibold text-rose-950 dark:text-rose-300">Unable to load dashboard</p>
         <p className="mt-2 text-sm text-rose-700 dark:text-rose-400">{errorMessage}</p>
       </div>
@@ -595,7 +599,7 @@ export function SummaryDashboard() {
       </section>
 
       {!sortedEntries.length ? (
-        <section className="rounded-3xl border border-dashed border-indigo-200 bg-indigo-50/50 p-6 text-center dark:border-indigo-800 dark:bg-indigo-950/20">
+        <section className="rounded-lg border border-dashed border-indigo-200 bg-indigo-50/50 p-6 text-center dark:border-indigo-800 dark:bg-indigo-950/20">
           <p className="text-base font-semibold text-indigo-950 dark:text-indigo-200">
             No diary activity to summarize yet
           </p>
@@ -604,27 +608,27 @@ export function SummaryDashboard() {
           </p>
           <a
             href="/diary"
-            className="mt-4 inline-flex rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700"
+            className="action-primary mt-4"
           >
             Write first diary entry
           </a>
         </section>
       ) : null}
 
-      <section className="rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white to-slate-50/50 p-6 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:from-slate-800 dark:to-slate-800/50 dark:shadow-slate-900/40">
+      <section className="enterprise-card p-5">
         <div className="mb-5 flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600 dark:text-indigo-400">AI reflections</p>
-            <h3 className="mt-2 text-xl font-bold text-slate-950 dark:text-slate-100">Generated summaries</h3>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">AI reflections</p>
+            <h3 className="mt-1.5 text-xl font-semibold text-slate-950 dark:text-slate-100">Generated summaries</h3>
           </div>
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-            <div className="grid grid-cols-4 rounded-2xl bg-slate-100 p-1 text-sm font-semibold text-slate-600 dark:bg-slate-700 dark:text-slate-300">
+            <div className="segment-control grid grid-cols-4 text-sm">
               {summaryTypeOptions.map((option) => (
                 <button
                   key={option}
                   type="button"
                   onClick={() => setSummaryType(option)}
-                  className={`cursor-pointer rounded-xl px-3 py-2 capitalize transition ${summaryType === option ? "bg-white text-indigo-700 shadow-sm dark:bg-slate-600 dark:text-indigo-400" : "hover:text-slate-900 dark:hover:text-slate-100"}`}
+                  className={`segment-option cursor-pointer capitalize ${summaryType === option ? "segment-option-active" : ""}`}
                 >
                   {option}
                 </button>
@@ -635,13 +639,13 @@ export function SummaryDashboard() {
                 type="date"
                 value={summaryDate}
                 onChange={(event) => setSummaryDate(event.target.value)}
-                className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:focus:ring-indigo-900/50"
+                className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:focus:ring-indigo-900/50"
               />
               <button
                 type="button"
                 onClick={handleGenerateSummary}
                 disabled={isGenerating || !summaryDate}
-                className="h-10 cursor-pointer rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-indigo-400"
+                className="action-primary disabled:cursor-not-allowed"
               >
                 {isGenerating ? "Generating..." : "Generate now"}
               </button>
@@ -667,24 +671,24 @@ export function SummaryDashboard() {
       <section className="grid gap-6 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
         <ActivityBars summaries={dailySummaries} />
 
-        <div className="rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white to-slate-50/50 p-6 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:from-slate-800 dark:to-slate-800/50 dark:shadow-slate-900/40">
+        <div className="enterprise-card p-5">
           <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">Overview</p>
-              <h3 className="mt-2 text-xl font-bold text-slate-950 dark:text-slate-100">Daily and weekly summaries</h3>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">Overview</p>
+              <h3 className="mt-1.5 text-xl font-semibold text-slate-950 dark:text-slate-100">Daily and weekly summaries</h3>
             </div>
-            <div className="grid grid-cols-2 rounded-2xl bg-slate-100 p-1 text-sm font-semibold text-slate-600 dark:bg-slate-700 dark:text-slate-300">
+            <div className="grid grid-cols-2 rounded-lg border border-slate-200 bg-slate-50 p-0.5 text-sm font-semibold text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
               <button
                 type="button"
                 onClick={() => setOverviewMode("daily")}
-                className={`cursor-pointer rounded-xl px-4 py-2 transition ${overviewMode === "daily" ? "bg-white text-indigo-700 shadow-sm dark:bg-slate-600 dark:text-indigo-400" : "hover:text-slate-900 dark:hover:text-slate-100"}`}
+                className={`cursor-pointer rounded-md px-4 py-2 transition ${overviewMode === "daily" ? "bg-white text-slate-950 dark:bg-slate-100 dark:text-slate-950" : "hover:text-slate-900 dark:hover:text-slate-100"}`}
               >
                 Daily
               </button>
               <button
                 type="button"
                 onClick={() => setOverviewMode("weekly")}
-                className={`cursor-pointer rounded-xl px-4 py-2 transition ${overviewMode === "weekly" ? "bg-white text-indigo-700 shadow-sm dark:bg-slate-600 dark:text-indigo-400" : "hover:text-slate-900 dark:hover:text-slate-100"}`}
+                className={`cursor-pointer rounded-md px-4 py-2 transition ${overviewMode === "weekly" ? "bg-white text-slate-950 dark:bg-slate-100 dark:text-slate-950" : "hover:text-slate-900 dark:hover:text-slate-100"}`}
               >
                 Weekly
               </button>
@@ -694,7 +698,7 @@ export function SummaryDashboard() {
           {overviewMode === "daily" ? (
             <div className="space-y-3">
               {dailySummaries.slice(0, 5).map((day) => (
-                <article key={day.dateKey} className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-700 dark:bg-slate-800/70">
+                <article key={day.dateKey} className="rounded-lg border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-900/70">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div>
                       <p className="text-sm font-bold text-slate-950 dark:text-slate-100">{day.label}</p>
@@ -704,7 +708,7 @@ export function SummaryDashboard() {
                     </div>
                     <div className="flex flex-wrap gap-2">
                       {day.topKeywords.map((keyword) => (
-                        <span key={keyword} className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-slate-600 ring-1 ring-slate-200 dark:bg-slate-700 dark:text-slate-300 dark:ring-slate-600">
+                        <span key={keyword} className="status-badge">
                           {keyword}
                         </span>
                       ))}
@@ -717,19 +721,19 @@ export function SummaryDashboard() {
           ) : (
             <div className="space-y-3">
               {weeklySummaries.slice(0, 5).map((week) => (
-                <article key={week.weekKey} className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-700 dark:bg-slate-800/70">
+                <article key={week.weekKey} className="rounded-lg border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-900/70">
                   <div className="mb-3 flex items-center justify-between gap-3">
                     <div>
                       <p className="text-sm font-bold text-slate-950 dark:text-slate-100">{week.label}</p>
                       <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{week.activeDays} active days · {week.entries.length} entries</p>
                     </div>
-                    <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 ring-1 ring-indigo-100 dark:bg-indigo-900/30 dark:text-indigo-400 dark:ring-indigo-700">
+                    <span className="status-badge">
                       {week.wordCount} words
                     </span>
                   </div>
                   <div className="h-2 rounded-full bg-slate-200 dark:bg-slate-600">
                     <div
-                      className="h-2 rounded-full bg-gradient-to-r from-indigo-500 to-sky-400"
+                      className="h-2 rounded-full bg-indigo-600"
                       style={{ width: `${Math.min((week.activeDays / 7) * 100, 100)}%` }}
                     />
                   </div>
@@ -742,13 +746,13 @@ export function SummaryDashboard() {
         </div>
       </section>
 
-      <section className="rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white to-slate-50/50 p-6 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:from-slate-800 dark:to-slate-800/50 dark:shadow-slate-900/40">
+      <section className="enterprise-card p-5">
         <div className="mb-5 flex items-center justify-between gap-3">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">Data source</p>
-            <h3 className="mt-2 text-xl font-bold text-slate-950 dark:text-slate-100">Recent diary entries used</h3>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">Data source</p>
+            <h3 className="mt-1.5 text-xl font-semibold text-slate-950 dark:text-slate-100">Recent diary entries used</h3>
           </div>
-          <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 dark:bg-slate-700 dark:text-slate-300">
+          <span className="status-badge">
             {sortedEntries.length} entries loaded
           </span>
         </div>
@@ -756,13 +760,13 @@ export function SummaryDashboard() {
         {sortedEntries.length ? (
           <div className="grid gap-3 md:grid-cols-2">
             {sortedEntries.slice(0, 4).map((entry) => (
-              <article key={entry.id} className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-700 dark:bg-slate-800/70">
+              <article key={entry.id} className="rounded-lg border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-900/70">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-sm font-bold text-slate-950 dark:text-slate-100">{entry.title}</p>
                     <p className="mt-1 line-clamp-2 text-sm leading-6 text-slate-600 dark:text-slate-400">{entry.content}</p>
                   </div>
-                  <span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-xs font-medium text-slate-500 ring-1 ring-slate-200 dark:bg-slate-700 dark:text-slate-400 dark:ring-slate-600">
+                  <span className="shrink-0 status-badge">
                     {weekdayFormatter.format(new Date(getEntryActivityDate(entry)))}
                   </span>
                 </div>

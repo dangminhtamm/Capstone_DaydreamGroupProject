@@ -733,7 +733,7 @@ test("answerFromChunks blocker fast path refuses checklist-only evidence", async
   assert.doesNotMatch(result.answer, /final AI memory checklist/i);
 });
 
-test("answerFromChunks latency fallback explains retrieval timing from latency memories", async () => {
+test("answerFromChunks auto tries Gemini for why-latency questions, then falls back to evidence", async () => {
   const result = await answerFromChunks(
     "Why did we separate retrieval latency from answer generation?",
     [
@@ -768,9 +768,9 @@ test("answerFromChunks latency fallback explains retrieval timing from latency m
     },
   );
 
-  assert.equal(result.answerMode, "fast_path");
-  assert.equal(result.analytics?.answerMode, "fast_path");
-  assert.equal(result.modelError, undefined);
+  assert.equal(result.answerMode, "extractive_fallback");
+  assert.equal(result.analytics?.answerMode, "extractive_fallback");
+  assert.equal(result.modelError?.kind, "validation");
   assert.equal(result.citations.length, 1);
   assert.equal(result.citations[0]?.sourceId, "latency-note");
   assert.match(result.answer, /retrieval latency/);
@@ -1250,6 +1250,56 @@ test("answerFromChunks fast strategy returns extractive answer without generatio
   assert.match(result.answer, /trả lời nhanh/);
 });
 
+test("answerFromChunks auto uses Gemini for reasoning-heavy latency questions", async () => {
+  let generateCalled = false;
+  const result = await answerFromChunks(
+    "Why did we separate retrieval latency from answer generation?",
+    [
+      makeHit({
+        id: "latency-reasoning",
+        sourceType: "diary",
+        sourceId: "latency-diary",
+        chunkType: "decision",
+        text: "The team separated retrieval latency from answer generation to measure embedding time, database retrieval, reranking, time to first result, answer generation time, and total answer time.",
+        evidence: "separated retrieval latency from answer generation to measure embedding time, database retrieval, reranking, time to first result, answer generation time, and total answer time",
+        similarity: 0.9,
+        vectorSimilarity: 0.9,
+        occurredAt: new Date("2026-07-12T00:00:00.000Z"),
+      }),
+    ],
+    {
+      responseLanguage: "en",
+      generateAnswer: async (options: any) => {
+        generateCalled = true;
+        return {
+          data: options.validator.parse({
+            answer: "The team separated retrieval latency from answer generation so they could measure embedding time, database retrieval, reranking, time to first result, answer generation time, and total answer time separately.",
+            confidence: "high",
+            citations: [
+              {
+                marker: "S1",
+                claim: "separated retrieval latency from answer generation to measure embedding time, database retrieval, reranking, time to first result, answer generation time, and total answer time",
+              },
+            ],
+          }),
+          tokenUsage: {
+            promptTokens: 64,
+            completionTokens: 36,
+            totalTokens: 100,
+            model: "test-gemini",
+          },
+        };
+      },
+    },
+  );
+
+  assert.equal(generateCalled, true);
+  assert.equal(result.answerMode, "gemini");
+  assert.equal(result.analytics?.answerMode, "gemini");
+  assert.equal(result.analytics?.tokenUsage.totalTokens, 100);
+  assert.match(result.answer, /measure embedding time/);
+});
+
 test("answerSingleDayFastPath assembles simple day answers without model generation", () => {
   const result = answerSingleDayFastPath(
     "What did I do on 2026-05-18?",
@@ -1371,6 +1421,62 @@ test("inferRetrievalFilters parses tomorrow and ngày mai", () => {
   assert.deepEqual(vietnameseFilters.preferredSourceTypes, ["calendar"]);
   assert.ok(vietnameseFilters.startDate instanceof Date);
   assert.equal(vietnameseFilters.startDate.toISOString(), "2026-07-12T00:00:00.000Z");
+});
+
+test("inferRetrievalFilters uses request timezone for hôm nay boundaries", () => {
+  const now = new Date("2026-07-25T18:30:00.000Z");
+  const filters = inferRetrievalFilters(
+    "Hôm nay tôi đã làm gì?",
+    now,
+    "Asia/Ho_Chi_Minh",
+  );
+
+  assert.ok(filters.startDate instanceof Date);
+  assert.equal(filters.startDate.toISOString(), "2026-07-25T17:00:00.000Z");
+  assert.ok(filters.endDate instanceof Date);
+  assert.equal(filters.endDate.toISOString(), "2026-07-26T16:59:59.999Z");
+});
+
+test("inferRetrievalFilters uses request timezone for tuần này boundaries", () => {
+  const now = new Date("2026-07-25T18:30:00.000Z");
+  const filters = inferRetrievalFilters(
+    "Tuần này tôi làm gì?",
+    now,
+    "Asia/Ho_Chi_Minh",
+  );
+
+  assert.ok(filters.startDate instanceof Date);
+  assert.equal(filters.startDate.toISOString(), "2026-07-19T17:00:00.000Z");
+  assert.ok(filters.endDate instanceof Date);
+  assert.equal(filters.endDate.toISOString(), "2026-07-26T16:59:59.999Z");
+});
+
+test("answerSingleDayFastPath formats local date labels with timezone", () => {
+  const now = new Date("2026-07-25T18:30:00.000Z");
+  const filters = inferRetrievalFilters(
+    "Hôm nay tôi đã làm gì?",
+    now,
+    "Asia/Ho_Chi_Minh",
+  );
+  const result = answerSingleDayFastPath(
+    "Hôm nay tôi đã làm gì?",
+    [
+      makeHit({
+        text: "Tôi sửa temporal timezone cho AI memory.",
+        similarity: 0.84,
+        vectorSimilarity: 0.84,
+        occurredAt: new Date("2026-07-26T02:00:00.000Z"),
+      }),
+    ],
+    filters,
+    "vi",
+    0.62,
+    "Asia/Ho_Chi_Minh",
+  );
+
+  assert.ok(result);
+  assert.match(result.answer, /26\/07\/2026/);
+  assert.doesNotMatch(result.answer, /25\/07\/2026/);
 });
 
 test("inferRetrievalFilters parses hôm trước as the previous day", () => {

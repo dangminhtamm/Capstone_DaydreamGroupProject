@@ -631,7 +631,7 @@ export function DiaryInputForm() {
 
   return (
     <div className="w-full">
-      <form className="space-y-4 rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white via-white to-indigo-50/30 p-5 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:from-slate-800 dark:via-slate-800 dark:to-indigo-950/30 dark:shadow-slate-900/40 sm:p-6" onSubmit={onSubmit}>
+      <form className="enterprise-card space-y-4 p-5" onSubmit={onSubmit}>
         <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_180px]">
           <div>
             <label htmlFor="title" className="mb-1.5 block text-sm font-semibold text-slate-700 dark:text-slate-300">
@@ -640,7 +640,7 @@ export function DiaryInputForm() {
             <input
               id="title"
               autoFocus
-              className="w-full rounded-2xl border border-slate-200 bg-white/80 px-4 py-3 text-sm text-slate-900 shadow-inner outline-none transition placeholder:text-slate-400 focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-100 dark:border-slate-600 dark:bg-slate-700/60 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-indigo-500 dark:focus:bg-slate-700 dark:focus:ring-indigo-900/40"
+              className="w-full rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-indigo-500 dark:focus:ring-indigo-900/40"
               placeholder="What happened today?"
               value={draft.title}
               onChange={(event) => setDraft((prev) => ({ ...prev, title: event.target.value }))}
@@ -655,7 +655,7 @@ export function DiaryInputForm() {
               id="entryDate"
               type="date"
               required
-              className="w-full rounded-2xl border border-slate-200 bg-white/80 px-4 py-3 text-sm text-slate-900 shadow-inner outline-none transition placeholder:text-slate-400 focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-100 dark:border-slate-600 dark:bg-slate-700/60 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-indigo-500 dark:focus:bg-slate-700 dark:focus:ring-indigo-900/40"
+              className="w-full rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-indigo-500 dark:focus:ring-indigo-900/40"
               value={draft.entryDate}
               onChange={(event) => setDraft((prev) => ({ ...prev, entryDate: event.target.value }))}
             />
@@ -674,7 +674,7 @@ export function DiaryInputForm() {
                   key={option.value}
                   type="button"
                   onClick={() => setDraft((prev) => ({ ...prev, mood: option.value }))}
-                  className={`min-h-12 rounded-2xl border px-3 py-2 text-left transition ${
+                  className={`min-h-12 rounded-lg border px-3 py-2 text-left transition ${
                     isSelected
                       ? `${option.className} ring-2 ring-indigo-300 dark:ring-indigo-600`
                       : "border-slate-200 bg-white/70 text-slate-600 hover:border-indigo-200 hover:bg-indigo-50/30 dark:border-slate-600 dark:bg-slate-700/40 dark:text-slate-300 dark:hover:border-indigo-600 dark:hover:bg-indigo-900/20"
@@ -696,12 +696,12 @@ export function DiaryInputForm() {
             </label>
             <span className="text-xs text-slate-400 dark:text-slate-500">{draft.tags.length}/12</span>
           </div>
-          <div className="min-h-12 rounded-2xl border border-slate-200 bg-white/80 px-3 py-2 shadow-inner transition focus-within:border-indigo-400 focus-within:bg-white focus-within:ring-4 focus-within:ring-indigo-100 dark:border-slate-600 dark:bg-slate-700/60 dark:focus-within:border-indigo-500 dark:focus-within:bg-slate-700 dark:focus-within:ring-indigo-900/40">
+          <div className="min-h-12 rounded-lg border border-slate-200 bg-white px-3 py-2 transition focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-100 dark:border-slate-700 dark:bg-slate-950 dark:focus-within:border-indigo-500 dark:focus-within:ring-indigo-900/40">
             <div className="flex flex-wrap items-center gap-2">
               {draft.tags.map((tag) => (
                 <span
                   key={tag}
-                  className="inline-flex items-center gap-1.5 rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700 ring-1 ring-indigo-100 dark:bg-indigo-900/30 dark:text-indigo-300 dark:ring-indigo-800"
+                  className="status-badge"
                 >
                   #{tag}
                   <button
@@ -731,7 +731,7 @@ export function DiaryInputForm() {
         </div>
 
         {(isCalendarLoading || linkedCalendarEvents.length > 0) && (
-          <div className="rounded-2xl border border-sky-100 bg-sky-50/70 px-3 py-2 dark:border-sky-900/60 dark:bg-sky-950/30">
+          <div className="rounded-lg border border-sky-100 bg-sky-50/70 px-3 py-2 dark:border-sky-900/60 dark:bg-sky-950/30">
             <div className="flex flex-wrap items-center gap-2 text-xs text-sky-800 dark:text-sky-200">
               <span className="font-semibold">Calendar context</span>
               {isCalendarLoading ? (
@@ -743,7 +743,7 @@ export function DiaryInputForm() {
                     href={event.htmlLink ?? undefined}
                     target={event.htmlLink ? "_blank" : undefined}
                     rel={event.htmlLink ? "noopener noreferrer" : undefined}
-                    className="inline-flex max-w-full items-center gap-1 rounded-full bg-white/80 px-2.5 py-1 font-medium text-sky-700 ring-1 ring-sky-100 transition hover:bg-white dark:bg-slate-800/70 dark:text-sky-200 dark:ring-sky-800"
+                    className="inline-flex max-w-full items-center gap-1 rounded-full border border-sky-100 bg-white px-2.5 py-1 font-medium text-sky-700 transition hover:bg-white dark:border-sky-900/60 dark:bg-slate-950 dark:text-sky-200"
                   >
                     <span className="truncate">{event.title}</span>
                     <span className="shrink-0 text-sky-500 dark:text-sky-300">{formatCompactEventTime(event)}</span>
@@ -764,7 +764,7 @@ export function DiaryInputForm() {
           <textarea
             id="content"
             rows={8}
-            className="w-full resize-none rounded-2xl border border-slate-200 bg-white/80 px-4 py-3 text-sm leading-relaxed text-slate-900 shadow-inner outline-none transition placeholder:text-slate-400 focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-100 dark:border-slate-600 dark:bg-slate-700/60 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-indigo-500 dark:focus:bg-slate-700 dark:focus:ring-indigo-900/40"
+            className="w-full resize-none rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm leading-relaxed text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-indigo-500 dark:focus:ring-indigo-900/40"
             placeholder="Write your day in detail..."
             value={draft.content}
             onChange={(event) => setDraft((prev) => ({ ...prev, content: event.target.value }))}
@@ -777,33 +777,33 @@ export function DiaryInputForm() {
                 type="button"
                 disabled={isCopilotLoading}
                 onClick={() => handleCopilotAction('continue')}
-                className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50/50 px-3 py-1.5 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100 disabled:opacity-50 dark:border-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300 dark:hover:bg-indigo-900/50"
+                className="action-secondary min-h-10 px-3 text-xs disabled:opacity-50"
               >
-                {activeCopilotAction === 'continue' ? '✨ Thinking...' : '✨ Continue'}
+                {activeCopilotAction === 'continue' ? 'Thinking...' : 'Continue'}
               </button>
               <button
                 type="button"
                 disabled={isCopilotLoading}
                 onClick={() => handleCopilotAction('fix_grammar')}
-                className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50/50 px-3 py-1.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-50 dark:border-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300 dark:hover:bg-emerald-900/50"
+                className="action-secondary min-h-10 px-3 text-xs disabled:opacity-50"
               >
-                {activeCopilotAction === 'fix_grammar' ? '🪄 Fixing...' : '🪄 Fix Grammar'}
+                {activeCopilotAction === 'fix_grammar' ? 'Fixing...' : 'Fix Grammar'}
               </button>
               <button
                 type="button"
                 disabled={isCopilotLoading}
                 onClick={() => handleCopilotAction('expand')}
-                className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-purple-200 bg-purple-50/50 px-3 py-1.5 text-xs font-semibold text-purple-700 transition hover:bg-purple-100 disabled:opacity-50 dark:border-purple-800 dark:bg-purple-900/30 dark:text-purple-300 dark:hover:bg-purple-900/50"
+                className="action-secondary min-h-10 px-3 text-xs disabled:opacity-50"
               >
-                {activeCopilotAction === 'expand' ? '📝 Expanding...' : '📝 Expand'}
+                {activeCopilotAction === 'expand' ? 'Expanding...' : 'Expand'}
               </button>
               <button
                 type="button"
                 disabled={isCopilotLoading}
                 onClick={() => handleCopilotAction('summarize')}
-                className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50/50 px-3 py-1.5 text-xs font-semibold text-amber-700 transition hover:bg-amber-100 disabled:opacity-50 dark:border-amber-800 dark:bg-amber-900/30 dark:text-amber-300 dark:hover:bg-amber-900/50"
+                className="action-secondary min-h-10 px-3 text-xs disabled:opacity-50"
               >
-                {activeCopilotAction === 'summarize' ? '✂️ Summarizing...' : '✂️ Summarize'}
+                {activeCopilotAction === 'summarize' ? 'Summarizing...' : 'Summarize'}
               </button>
             </div>
           )}
@@ -822,21 +822,21 @@ export function DiaryInputForm() {
           <button
             type="submit"
             disabled={!canSubmit || state === "saving"}
-            className="inline-flex cursor-pointer items-center justify-center rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-200 transition hover:-translate-y-0.5 hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none disabled:hover:translate-y-0 dark:shadow-indigo-900/30 dark:disabled:bg-slate-600"
+            className="action-primary px-5 disabled:cursor-not-allowed"
           >
             {state === "saving" ? "Saving..." : "Save Diary Entry"}
           </button>
 
           <label
             htmlFor="attachments"
-            className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-indigo-300 hover:bg-indigo-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-indigo-500 dark:hover:bg-indigo-950/40"
+            className="action-secondary px-4"
           >
             <svg className="h-4 w-4 text-indigo-500 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21.44 11.05 12 20.5a6 6 0 1 1-8.49-8.49l9.9-9.9a4 4 0 0 1 5.66 5.66l-9.9 9.9a2 2 0 0 1-2.83-2.83l8.49-8.49" />
             </svg>
             Attach
             {attachmentItems.length > 0 && (
-              <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-200">
+              <span className="status-badge">
                 {attachmentItems.length}
               </span>
             )}
@@ -847,13 +847,13 @@ export function DiaryInputForm() {
           </span>
 
           {state === "success" && (
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:ring-emerald-700">
+            <span className="status-badge status-badge-success">
               <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
               Saved successfully
             </span>
           )}
           {state === "error" && (
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 ring-1 ring-rose-200 dark:bg-rose-900/30 dark:text-rose-400 dark:ring-rose-700">
+            <span className="status-badge status-badge-danger">
               {errorMessage || "Save failed."}
             </span>
           )}
@@ -872,7 +872,7 @@ export function DiaryInputForm() {
               </div>
               <a
                 href="/login"
-                className="shrink-0 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-indigo-700"
+                className="action-primary shrink-0 min-h-10 px-3 text-xs"
               >
                 Sign in
               </a>
@@ -885,7 +885,7 @@ export function DiaryInputForm() {
             {attachmentItems.map((item) => (
               <div
                 key={item.id}
-                className="flex flex-col gap-2 rounded-2xl border border-slate-200 bg-white/80 px-3 py-2 dark:border-slate-700 dark:bg-slate-800/70 sm:flex-row sm:items-center sm:justify-between"
+                className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900/70 sm:flex-row sm:items-center sm:justify-between"
               >
                 <div className="min-w-0">
                   <p className="truncate text-sm font-semibold text-slate-800 dark:text-slate-200">{item.file.name}</p>
@@ -894,7 +894,7 @@ export function DiaryInputForm() {
                   </p>
                 </div>
                 <div className="flex shrink-0 flex-wrap items-center gap-2">
-                  <span className={`rounded-full px-3 py-1 text-xs font-semibold ring-1 ${getAttachmentStatusClass(item.status)}`}>
+                  <span className={`status-badge ${getAttachmentStatusClass(item.status)}`}>
                     {item.status}
                   </span>
                   <span className="max-w-[220px] truncate text-xs text-slate-500 dark:text-slate-400">
@@ -926,7 +926,7 @@ export function DiaryInputForm() {
         ) : null}
       </form>
 
-      <details className="mt-5 rounded-3xl border border-slate-200/70 bg-white/60 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-800/50">
+      <details className="mt-5 enterprise-card p-4">
         <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold text-slate-700 dark:text-slate-200">
           <span>{templateLang === "vi" ? "Mẫu viết nhanh" : "Quick writing templates"}</span>
           <button
@@ -935,7 +935,7 @@ export function DiaryInputForm() {
               event.preventDefault();
               toggleTemplateLang();
             }}
-            className="inline-flex cursor-pointer items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold shadow-sm transition hover:border-indigo-300 hover:shadow-md dark:border-slate-600 dark:bg-slate-700 dark:hover:border-indigo-500"
+            className="inline-flex cursor-pointer items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold transition hover:border-indigo-300 dark:border-slate-700 dark:bg-slate-950 dark:hover:border-indigo-800"
           >
             <span className={`rounded-full px-1.5 py-0.5 transition ${templateLang === "en" ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300" : "text-slate-400 dark:text-slate-500"}`}>EN</span>
             <span className="text-slate-300 dark:text-slate-600">|</span>
@@ -949,7 +949,7 @@ export function DiaryInputForm() {
               key={`${templateLang}-${tpl.id}`}
               type="button"
               onClick={() => applyTemplate(tpl)}
-              className="group flex w-[170px] shrink-0 cursor-pointer flex-col items-start gap-2 rounded-2xl border border-slate-200/80 bg-white/70 p-4 text-left shadow-sm shadow-slate-200/50 transition-all hover:-translate-y-1 hover:border-indigo-300 hover:bg-white hover:shadow-md dark:border-slate-700/60 dark:bg-slate-800/60 dark:shadow-slate-900/40 dark:hover:border-indigo-500/50 dark:hover:bg-slate-800/90"
+              className="group flex w-[170px] shrink-0 cursor-pointer flex-col items-start gap-2 rounded-lg border border-slate-200 bg-white p-4 text-left transition hover:border-indigo-300 hover:bg-indigo-50/40 dark:border-slate-800 dark:bg-slate-950 dark:hover:border-indigo-800 dark:hover:bg-indigo-950/20"
             >
               <span className="text-sm font-bold text-slate-700 dark:text-slate-300 group-hover:text-indigo-600 dark:group-hover:text-indigo-400">
                 {tpl.name}
@@ -977,7 +977,7 @@ export function DiaryInputForm() {
             title: "Summarize", desc: "See writing stats and weekly trends."
           },
         ].map((step) => (
-          <div key={step.title} className="flex items-start gap-3 rounded-2xl border border-slate-200/70 bg-white/60 px-4 py-3 shadow-sm dark:border-slate-700 dark:bg-slate-800/60">
+          <div key={step.title} className="enterprise-panel flex items-start gap-3 px-4 py-3">
             <span className="mt-0.5 shrink-0">{step.icon}</span>
             <div>
               <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">{step.title}</p>

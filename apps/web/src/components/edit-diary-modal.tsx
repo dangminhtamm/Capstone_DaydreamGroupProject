@@ -249,7 +249,7 @@ export function EditDiaryModal({
             type="button"
             disabled={isLoading}
             onClick={onCancel}
-            className="cursor-pointer rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600"
+            className="action-secondary disabled:opacity-50"
           >
             Cancel
           </button>
@@ -257,7 +257,7 @@ export function EditDiaryModal({
             type="button"
             disabled={!canSave || isLoading}
             onClick={() => onSave({ title: title.trim(), content: content.trim(), mood, tags })}
-            className="cursor-pointer rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-indigo-600 dark:hover:bg-indigo-500"
+            className="action-primary disabled:cursor-not-allowed"
           >
             {isLoading ? "Saving…" : "Save Changes"}
           </button>

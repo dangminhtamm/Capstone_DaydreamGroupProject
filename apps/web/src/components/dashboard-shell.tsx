@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import Image from "next/image";
 import { ReactNode, useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
+import { useSidebarState } from "@/contexts/SidebarContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { BrainLogo } from "@/components/brain-logo";
 
@@ -96,10 +97,7 @@ export function DashboardShell({ children, title, description }: DashboardShellP
   const pathname = usePathname();
   const [openMenu, setOpenMenu] = useState<"settings" | null>(null);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
-    if (typeof window === "undefined") return false;
-    return localStorage.getItem("dd-sidebar-collapsed") === "true";
-  });
+  const { collapsed: sidebarCollapsed, setCollapsed: setSidebarCollapsed } = useSidebarState();
   const { resolvedTheme, toggleTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
 
@@ -124,17 +122,13 @@ export function DashboardShell({ children, title, description }: DashboardShellP
     } catch { /* ignore */ }
   }, []);
 
-  useEffect(() => {
-    localStorage.setItem("dd-sidebar-collapsed", sidebarCollapsed ? "true" : "false");
-  }, [sidebarCollapsed]);
-
   const avatarUrl: string | undefined =
     user?.user_metadata?.avatar_url ?? user?.user_metadata?.picture ?? undefined;
   const displayName: string = user?.user_metadata?.full_name ?? user?.user_metadata?.name ?? "User";
   const displayEmail: string = user?.email ?? "";
 
   return (
-    <div className="flex h-screen overflow-hidden bg-slate-50 dark:bg-slate-950" onClick={() => setOpenMenu(null)}>
+    <div className="flex h-screen overflow-hidden bg-[#f6f8fb] dark:bg-slate-950" onClick={() => setOpenMenu(null)}>
       {/* Mobile overlay */}
       {mobileSidebarOpen && (
         <div
@@ -144,14 +138,14 @@ export function DashboardShell({ children, title, description }: DashboardShellP
       )}
 
       {/* Sidebar */}
-      <aside className={`fixed inset-y-0 left-0 z-30 w-64 flex-shrink-0 border-r border-slate-200 bg-white transition-all duration-300 dark:border-slate-700 dark:bg-slate-900 lg:static lg:translate-x-0 ${
+      <aside className={`fixed inset-y-0 left-0 z-30 w-64 flex-shrink-0 border-r border-slate-200 bg-white transition-all duration-300 dark:border-slate-800 dark:bg-slate-950 lg:static lg:translate-x-0 ${
         sidebarCollapsed ? "lg:w-20" : "lg:w-64"
       } ${
         mobileSidebarOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"
       }`}>
         <div className="flex h-full flex-col">
           {/* Logo */}
-          <div className={`relative border-b border-slate-200 py-4 dark:border-slate-700 ${sidebarCollapsed ? "lg:px-3 px-6" : "px-6"}`}>
+          <div className={`relative border-b border-slate-200 py-3 dark:border-slate-800 ${sidebarCollapsed ? "lg:px-3 px-5" : "px-5"}`}>
             <div className={`flex items-center gap-3 ${sidebarCollapsed ? "lg:justify-center" : "justify-between"}`}>
               <div className={sidebarCollapsed ? "lg:hidden" : ""}>
                 <BrainLogo size="sm" variant="badge" showText={true} subText="Second Brain" href="/" />
@@ -165,7 +159,7 @@ export function DashboardShell({ children, title, description }: DashboardShellP
                   event.stopPropagation();
                   setSidebarCollapsed((value) => !value);
                 }}
-                className="absolute -right-3 top-1/2 z-10 hidden h-7 w-7 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-sm shadow-slate-200/70 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 hover:shadow-md dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400 dark:shadow-slate-950/40 dark:hover:border-indigo-700 dark:hover:bg-indigo-950/70 dark:hover:text-indigo-300 lg:inline-flex"
+                className="absolute -right-3 top-1/2 z-10 hidden h-7 w-7 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-sm transition hover:bg-slate-50 hover:text-slate-900 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100 lg:inline-flex"
                 aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
                 title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
               >
@@ -177,11 +171,11 @@ export function DashboardShell({ children, title, description }: DashboardShellP
           </div>
 
           {/* Navigation */}
-          <nav className={`flex-1 overflow-y-auto py-5 ${sidebarCollapsed ? "lg:px-3 px-4" : "px-4"}`}>
+          <nav className={`flex-1 overflow-y-auto py-4 ${sidebarCollapsed ? "lg:px-3 px-3" : "px-3"}`}>
             <Link
               href="/diary"
               onClick={() => setMobileSidebarOpen(false)}
-              className={`mb-5 flex items-center justify-center gap-2 rounded-2xl bg-indigo-600 py-3 text-sm font-bold text-white shadow-lg shadow-indigo-200 transition hover:-translate-y-0.5 hover:bg-indigo-700 dark:shadow-indigo-950/40 ${sidebarCollapsed ? "lg:px-0 px-4" : "px-4"}`}
+              className={`action-primary mb-4 w-full ${sidebarCollapsed ? "lg:px-0 px-4" : "px-4"}`}
               title="New Diary"
             >
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -193,7 +187,7 @@ export function DashboardShell({ children, title, description }: DashboardShellP
             <div className={sidebarCollapsed ? "space-y-4 lg:space-y-3" : "space-y-5"}>
               {sidebarSections.map((section) => (
                 <div key={section.label}>
-                  <p className={`mb-2 px-3 text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500 ${sidebarCollapsed ? "lg:sr-only" : ""}`}>
+                  <p className={`mb-2 px-2 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500 ${sidebarCollapsed ? "lg:sr-only" : ""}`}>
                     {section.label}
                   </p>
                   <div className="space-y-1">
@@ -211,11 +205,11 @@ export function DashboardShell({ children, title, description }: DashboardShellP
                           onClick={() => {
                             setMobileSidebarOpen(false);
                           }}
-                          className={`group flex items-center rounded-xl py-2.5 text-sm font-medium transition-all ${
+                          className={`group flex items-center rounded-lg py-2 text-sm font-medium transition-all ${
                             isActive
-                              ? "bg-indigo-50 text-indigo-700 shadow-sm ring-1 ring-indigo-100 dark:bg-indigo-900/40 dark:text-indigo-300 dark:ring-indigo-800"
-                              : "text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
-                          } ${sidebarCollapsed ? "lg:justify-center lg:px-0 px-3 gap-3" : "gap-3 px-3"}`}
+                              ? "bg-blue-50 text-blue-700 ring-1 ring-blue-100 dark:bg-blue-950/40 dark:text-blue-200 dark:ring-blue-900/60"
+                              : "text-slate-600 hover:bg-blue-50/60 hover:text-slate-950 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100"
+                          } ${sidebarCollapsed ? "lg:justify-center lg:px-0 px-2 gap-3" : "gap-3 px-2"}`}
                         >
                           <span className={`shrink-0 transition ${isActive ? "text-indigo-600 dark:text-indigo-300" : "text-slate-400 group-hover:text-slate-700 dark:group-hover:text-slate-200"}`}>
                             {item.icon}
@@ -229,7 +223,7 @@ export function DashboardShell({ children, title, description }: DashboardShellP
                             ) : null}
                           </span>
                           {isActive ? (
-                            <span className={`h-2 w-2 rounded-full bg-indigo-500 dark:bg-indigo-300 ${sidebarCollapsed ? "lg:hidden" : ""}`} />
+                            <span className={`h-1.5 w-1.5 rounded-full bg-blue-500 dark:bg-blue-300 ${sidebarCollapsed ? "lg:hidden" : ""}`} />
                           ) : null}
                         </Link>
                       );
@@ -242,7 +236,7 @@ export function DashboardShell({ children, title, description }: DashboardShellP
 
           {/* Token Usage Widget (Order 2: 3d) */}
           {tokenStats && (
-            <div className={`mx-4 mb-3 rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50 to-indigo-50/50 p-3 dark:border-slate-700 dark:from-slate-800 dark:to-indigo-950/30 ${sidebarCollapsed ? "lg:hidden" : ""}`}>
+            <div className={`mx-3 mb-3 enterprise-panel p-3 ${sidebarCollapsed ? "lg:hidden" : ""}`}>
               <div className="flex items-center gap-2 mb-2">
                 <svg className="h-4 w-4 text-indigo-500 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
@@ -267,12 +261,12 @@ export function DashboardShell({ children, title, description }: DashboardShellP
           )}
 
           {/* User section */}
-          <div className={`border-t border-slate-200 py-4 dark:border-slate-700 ${sidebarCollapsed ? "lg:px-3 px-4" : "px-4"}`}>
+          <div className={`border-t border-slate-200 py-3 dark:border-slate-800 ${sidebarCollapsed ? "lg:px-3 px-3" : "px-3"}`}>
             {isLoading ? (
               <div className={`flex items-center gap-3 px-2 ${sidebarCollapsed ? "lg:justify-center" : ""}`}>
-                <div className="h-8 w-8 animate-pulse rounded-full bg-slate-200 dark:bg-slate-700" />
+                <div className="skeleton-line h-8 w-8 rounded-full" />
                 <div className={`flex-1 ${sidebarCollapsed ? "lg:hidden" : ""}`}>
-                  <div className="h-4 w-20 animate-pulse rounded bg-slate-200 dark:bg-slate-700" />
+                  <div className="skeleton-line h-4 w-20" />
                 </div>
               </div>
             ) : isAuthenticated ? (
@@ -287,7 +281,7 @@ export function DashboardShell({ children, title, description }: DashboardShellP
                       className="h-8 w-8 rounded-full object-cover ring-2 ring-indigo-100 dark:ring-slate-700"
                     />
                   ) : (
-                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-purple-500 to-pink-500 text-white text-xs font-bold">
+                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-900 text-white text-xs font-bold dark:bg-slate-700">
                       {displayName.charAt(0).toUpperCase()}
                     </div>
                   )}
@@ -300,7 +294,7 @@ export function DashboardShell({ children, title, description }: DashboardShellP
             ) : (
               <Link
                 href="/login"
-                className={`w-full flex items-center justify-center gap-2 rounded-lg bg-slate-900 py-2.5 text-sm font-medium text-white transition-colors hover:bg-slate-800 dark:bg-indigo-600 dark:hover:bg-indigo-500 ${sidebarCollapsed ? "lg:px-0 px-4" : "px-4"}`}
+                className={`action-primary w-full ${sidebarCollapsed ? "lg:px-0 px-4" : "px-4"}`}
                 title="Sign in"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -316,14 +310,14 @@ export function DashboardShell({ children, title, description }: DashboardShellP
       {/* Main Content */}
       <main className="flex-1 overflow-y-auto">
         {/* Header */}
-        <header className="sticky top-0 z-10 border-b border-slate-200 bg-white/80 backdrop-blur-sm px-6 py-5 dark:border-slate-700 dark:bg-slate-900/80">
+        <header className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 px-6 py-4 dark:border-slate-800 dark:bg-slate-950/95">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               {/* Hamburger - mobile only */}
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); setMobileSidebarOpen(!mobileSidebarOpen); }}
-                className="cursor-pointer rounded-xl p-2 text-slate-500 transition hover:bg-slate-100 lg:hidden dark:hover:bg-slate-800"
+                className="action-quiet cursor-pointer p-2 lg:hidden"
                 aria-label="Toggle sidebar"
               >
                 <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -331,7 +325,7 @@ export function DashboardShell({ children, title, description }: DashboardShellP
                 </svg>
               </button>
               <div>
-                <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100">{title}</h2>
+                <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">{title}</h2>
                 <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">{description}</p>
               </div>
             </div>
@@ -341,7 +335,7 @@ export function DashboardShell({ children, title, description }: DashboardShellP
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); setOpenMenu(openMenu === "settings" ? null : "settings"); }}
-                className="cursor-pointer rounded-xl p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+                className="action-quiet cursor-pointer p-2"
                 aria-label="Settings"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -351,7 +345,7 @@ export function DashboardShell({ children, title, description }: DashboardShellP
 
               {/* Settings dropdown */}
               {openMenu === "settings" && (
-                <div className="animate-slide-down absolute right-0 top-11 z-20 w-80 rounded-2xl border border-slate-200 bg-white shadow-xl shadow-slate-200/60 dark:border-slate-700 dark:bg-slate-900 dark:shadow-slate-900/60">
+                <div className="animate-slide-down absolute right-0 top-11 z-20 w-80 enterprise-card bg-white dark:bg-slate-950">
                   {/* Profile section */}
                   <div className="flex items-center gap-3 border-b border-slate-100 p-4 dark:border-slate-700">
                     {avatarUrl ? (
@@ -363,7 +357,7 @@ export function DashboardShell({ children, title, description }: DashboardShellP
                         className="h-11 w-11 rounded-full object-cover ring-2 ring-indigo-100 dark:ring-indigo-800"
                       />
                     ) : (
-                      <div className="flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-br from-purple-500 to-pink-500 text-base font-bold text-white">
+                      <div className="flex h-11 w-11 items-center justify-center rounded-full bg-slate-900 text-base font-bold text-white dark:bg-slate-700">
                         {displayName.charAt(0).toUpperCase()}
                       </div>
                     )}
@@ -378,7 +372,7 @@ export function DashboardShell({ children, title, description }: DashboardShellP
                     <Link
                       href="/settings"
                       onClick={() => setOpenMenu(null)}
-                      className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800"
+                      className="action-quiet flex w-full justify-start px-3"
                     >
                       <svg className="h-4 w-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
@@ -392,7 +386,7 @@ export function DashboardShell({ children, title, description }: DashboardShellP
                     <button
                       type="button"
                       onClick={toggleTheme}
-                      className="flex w-full cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800"
+                      className="action-quiet flex w-full cursor-pointer justify-start px-3"
                     >
                       {isDark ? (
                         <svg className="h-4 w-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -404,7 +398,7 @@ export function DashboardShell({ children, title, description }: DashboardShellP
                         </svg>
                       )}
                       <span className="flex-1 text-left">Theme</span>
-                      <span className={`rounded-full px-2.5 py-1 text-xs font-semibold transition ${isDark ? "bg-slate-700 text-slate-200" : "bg-slate-100 text-slate-600"}`}>
+                      <span className="status-badge">
                         {isDark ? "Dark" : "Light"}
                       </span>
                     </button>
@@ -415,7 +409,7 @@ export function DashboardShell({ children, title, description }: DashboardShellP
                     <button
                       type="button"
                       onClick={() => { setOpenMenu(null); signOut(); }}
-                      className="flex w-full cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-rose-600 transition hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-900/20"
+                      className="flex w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-rose-600 transition hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-900/20"
                     >
                       <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
@@ -430,7 +424,7 @@ export function DashboardShell({ children, title, description }: DashboardShellP
         </header>
 
         {/* Content */}
-        <div className="animate-fade-in px-6 py-6 lg:px-8">
+        <div className="animate-fade-in px-6 py-5 lg:px-8">
           {children}
         </div>
       </main>

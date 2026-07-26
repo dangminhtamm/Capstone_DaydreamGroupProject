@@ -29,19 +29,19 @@ const PAGE_SIZE = 5;
 const MOOD_META: Record<DiaryMood, { label: string; className: string }> = {
   great: {
     label: "Great",
-    className: "bg-emerald-50 text-emerald-700 ring-emerald-100 dark:bg-emerald-900/30 dark:text-emerald-300 dark:ring-emerald-800",
+    className: "status-badge-success",
   },
   good: {
     label: "Good",
-    className: "bg-sky-50 text-sky-700 ring-sky-100 dark:bg-sky-900/30 dark:text-sky-300 dark:ring-sky-800",
+    className: "border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-300",
   },
   neutral: {
     label: "Neutral",
-    className: "bg-slate-100 text-slate-700 ring-slate-200 dark:bg-slate-700 dark:text-slate-200 dark:ring-slate-600",
+    className: "",
   },
   bad: {
     label: "Bad",
-    className: "bg-rose-50 text-rose-700 ring-rose-100 dark:bg-rose-900/30 dark:text-rose-300 dark:ring-rose-800",
+    className: "status-badge-danger",
   },
 };
 
@@ -69,18 +69,18 @@ function getAttachmentStatus(attachment: string | DiaryAttachment) {
 
 function getStatusClass(status: string) {
   if (status === "indexed") {
-    return "bg-emerald-50 text-emerald-700 ring-emerald-100 dark:bg-emerald-900/30 dark:text-emerald-300 dark:ring-emerald-800";
+    return "status-badge-success";
   }
 
   if (status === "failed") {
-    return "bg-rose-50 text-rose-700 ring-rose-100 dark:bg-rose-900/30 dark:text-rose-300 dark:ring-rose-800";
+    return "status-badge-danger";
   }
 
   if (status === "processing") {
-    return "bg-sky-50 text-sky-700 ring-sky-100 dark:bg-sky-900/30 dark:text-sky-300 dark:ring-sky-800";
+    return "border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-300";
   }
 
-  return "bg-amber-50 text-amber-700 ring-amber-100 dark:bg-amber-900/30 dark:text-amber-300 dark:ring-amber-800";
+  return "status-badge-warning";
 }
 
 function formatEventTime(event: DiaryCalendarEvent) {
@@ -149,7 +149,7 @@ export function TimelineList({ entries, onUpdate, onDelete }: TimelineListProps)
     <div className="relative">
       {/* Toast notification */}
       {toast && (
-        <div className={`animate-fade-in fixed top-6 right-6 z-50 flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-medium shadow-lg ${
+        <div className={`animate-fade-in fixed top-6 right-6 z-50 flex items-center gap-2 rounded-lg px-4 py-3 text-sm font-medium shadow-sm ${
           toast.type === "success"
             ? "bg-emerald-600 text-white"
             : "bg-rose-600 text-white"
@@ -169,22 +169,22 @@ export function TimelineList({ entries, onUpdate, onDelete }: TimelineListProps)
 
       {/* Timeline vertical line */}
       {paginatedEntries.length > 1 && (
-        <div className="absolute left-[19px] top-8 bottom-28 w-0.5 bg-gradient-to-b from-slate-200 via-slate-300 to-slate-200 dark:from-slate-700 dark:via-slate-600 dark:to-slate-700" />
+        <div className="absolute left-[19px] top-8 bottom-28 w-px bg-slate-200 dark:bg-slate-800" />
       )}
       
       <ul className="space-y-6">
         {paginatedEntries.map((entry, index) => (
           <li key={entry.id} className="relative pl-14">
             {/* Timeline dot */}
-            <div className="absolute left-0 top-6 w-10 h-10 rounded-full bg-indigo-500 shadow-lg flex items-center justify-center text-white font-bold border-4 border-white dark:border-slate-900 z-10">
+            <div className="absolute left-0 top-6 z-10 flex h-10 w-10 items-center justify-center rounded-full border-4 border-white bg-slate-900 text-white dark:border-slate-950 dark:bg-slate-700">
               <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
             </div>
             
             {/* Card */}
-            <div className="group relative rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white to-slate-50/50 p-6 shadow-sm shadow-slate-200/60 transition-all duration-300 hover:-translate-y-0.5 hover:border-indigo-200 hover:shadow-md dark:border-slate-700 dark:from-slate-800 dark:to-slate-800/50 dark:shadow-slate-900/40 dark:hover:border-indigo-500/50">
+            <div className="group relative enterprise-card p-5 transition hover:border-indigo-200 dark:hover:border-indigo-800">
               {/* Entry number badge + action buttons */}
               <div className="absolute -top-3 right-6 flex items-center gap-2">
-                <span className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 ring-1 ring-indigo-100 shadow-sm dark:bg-indigo-900/40 dark:text-indigo-400 dark:ring-indigo-700">
+                <span className="status-badge">
                   Entry #{entries.length - ((currentPage - 1) * PAGE_SIZE + index)}
                 </span>
               </div>
@@ -235,7 +235,7 @@ export function TimelineList({ entries, onUpdate, onDelete }: TimelineListProps)
                 {(entry.mood || entry.tags?.length) && (
                   <div className="flex flex-wrap items-center gap-2 pt-1">
                     {entry.mood ? (
-                      <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ring-1 ${MOOD_META[entry.mood].className}`}>
+                      <span className={`status-badge ${MOOD_META[entry.mood].className}`}>
                         <span className="h-1.5 w-1.5 rounded-full bg-current" />
                         {MOOD_META[entry.mood].label}
                       </span>
@@ -243,7 +243,7 @@ export function TimelineList({ entries, onUpdate, onDelete }: TimelineListProps)
                     {entry.tags?.map((tag) => (
                       <span
                         key={tag}
-                        className="inline-flex items-center rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700 ring-1 ring-indigo-100 dark:bg-indigo-900/30 dark:text-indigo-300 dark:ring-indigo-800"
+                        className="status-badge"
                       >
                         #{tag}
                       </span>
@@ -254,7 +254,7 @@ export function TimelineList({ entries, onUpdate, onDelete }: TimelineListProps)
               
               {/* Content */}
               <div className="relative">
-                <div className="absolute left-0 top-0 bottom-0 w-1 rounded-full bg-gradient-to-b from-indigo-400 to-indigo-200"></div>
+                <div className="absolute bottom-0 left-0 top-0 w-1 rounded-full bg-indigo-500"></div>
                 <p className="pl-4 text-sm text-slate-700 leading-relaxed dark:text-slate-300">
                   {entry.content}
                 </p>
@@ -284,14 +284,14 @@ export function TimelineList({ entries, onUpdate, onDelete }: TimelineListProps)
                           href={event.htmlLink}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="flex items-center gap-2 rounded-xl border border-sky-100 bg-sky-50 px-3 py-2 text-xs text-sky-800 transition hover:border-sky-200 hover:bg-sky-100 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-sky-200 dark:hover:bg-sky-900/40"
+                          className="flex items-center gap-2 rounded-lg border border-sky-100 bg-sky-50 px-3 py-2 text-xs text-sky-800 transition hover:border-sky-200 hover:bg-sky-100 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-sky-200 dark:hover:bg-sky-900/40"
                         >
                           {content}
                         </a>
                       ) : (
                         <div
                           key={event.id}
-                          className="flex items-center gap-2 rounded-xl border border-sky-100 bg-sky-50 px-3 py-2 text-xs text-sky-800 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-sky-200"
+                          className="flex items-center gap-2 rounded-lg border border-sky-100 bg-sky-50 px-3 py-2 text-xs text-sky-800 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-sky-200"
                         >
                           {content}
                         </div>
@@ -318,7 +318,7 @@ export function TimelineList({ entries, onUpdate, onDelete }: TimelineListProps)
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
                           </svg>
                           <span className="max-w-[180px] truncate">{label}</span>
-                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ${getStatusClass(status)}`}>
+                          <span className={`status-badge ${getStatusClass(status)}`}>
                             {status}
                           </span>
                         </>
@@ -330,14 +330,14 @@ export function TimelineList({ entries, onUpdate, onDelete }: TimelineListProps)
                           href={href}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1.5 rounded-xl bg-slate-100 px-2.5 py-1.5 text-xs text-slate-700 transition-colors hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600"
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs text-slate-700 transition-colors hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
                         >
                           {content}
                         </a>
                       ) : (
                         <span
                           key={isAttachmentObject(attachment) ? attachment.id : i}
-                          className="inline-flex items-center gap-1.5 rounded-xl bg-slate-100 px-2.5 py-1.5 text-xs text-slate-700 dark:bg-slate-700 dark:text-slate-300"
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"
                         >
                           {content}
                         </span>
@@ -373,7 +373,7 @@ export function TimelineList({ entries, onUpdate, onDelete }: TimelineListProps)
       )}
 
       {entries.length > PAGE_SIZE && (
-        <div className="mt-8 flex flex-col items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row dark:border-slate-700 dark:bg-slate-800">
+        <div className="mt-8 flex flex-col items-center justify-between gap-4 enterprise-card p-4 sm:flex-row">
           <p className="text-sm text-slate-500 dark:text-slate-400">
             Showing {(currentPage - 1) * PAGE_SIZE + 1}-
             {Math.min(currentPage * PAGE_SIZE, entries.length)} of {entries.length} entries

@@ -1,0 +1,13 @@
+export const MIN_TOP_SIMILARITY = Number(
+  process.env.MEMORY_MIN_TOP_SIMILARITY ?? 0.62,
+);
+export const DEFAULT_MAX_DISTANCE = Number(process.env.MEMORY_MAX_DISTANCE ?? 0.42);
+export const DEFAULT_PROMPT_SOURCE_LIMIT = Number(process.env.MEMORY_PROMPT_SOURCE_LIMIT ?? 4);
+export const DEFAULT_MAX_ANSWER_TOKENS = Number(process.env.MEMORY_MAX_ANSWER_TOKENS ?? 512);
+export const DEFAULT_REASONING_MAX_ANSWER_TOKENS = Number(
+  process.env.MEMORY_REASONING_MAX_ANSWER_TOKENS ??
+    Math.max(DEFAULT_MAX_ANSWER_TOKENS, 2048),
+);
+export const DEFAULT_RETRIEVAL_CANDIDATE_LIMIT = Number(
+  process.env.MEMORY_RETRIEVAL_CANDIDATE_LIMIT ?? 12,
+);

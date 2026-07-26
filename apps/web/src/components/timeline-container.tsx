@@ -12,16 +12,16 @@ function SkeletonCards() {
     <div className="space-y-6">
       {Array.from({ length: 3 }).map((_, i) => (
         <div key={i} className="relative pl-14">
-          <div className="absolute left-0 top-6 h-10 w-10 animate-pulse rounded-full bg-slate-200 dark:bg-slate-700" />
-          <div className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+          <div className="skeleton-line absolute left-0 top-6 h-10 w-10 rounded-full" />
+          <div className="enterprise-card p-5">
             <div className="mb-4 space-y-2">
-              <div className="h-5 w-2/3 animate-pulse rounded-full bg-slate-200 dark:bg-slate-700" />
-              <div className="h-3.5 w-1/3 animate-pulse rounded-full bg-slate-100 dark:bg-slate-600" />
+              <div className="skeleton-line h-5 w-2/3" />
+              <div className="skeleton-line h-3.5 w-1/3" />
             </div>
             <div className="space-y-2">
-              <div className="h-3.5 w-full animate-pulse rounded-full bg-slate-100 dark:bg-slate-600" />
-              <div className="h-3.5 w-11/12 animate-pulse rounded-full bg-slate-100 dark:bg-slate-600" />
-              <div className="h-3.5 w-9/12 animate-pulse rounded-full bg-slate-100 dark:bg-slate-600" />
+              <div className="skeleton-line h-3.5 w-full" />
+              <div className="skeleton-line h-3.5 w-11/12" />
+              <div className="skeleton-line h-3.5 w-9/12" />
             </div>
           </div>
         </div>
@@ -65,7 +65,7 @@ function MiniCalendar({
   const nextMonth = () => setViewMonth(new Date(year, month + 1, 1));
 
   return (
-    <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+    <div className="enterprise-card p-4">
       {/* Header */}
       <div className="mb-3 flex items-center justify-between">
         <button type="button" onClick={prevMonth} className="cursor-pointer rounded-lg p-1 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-200">
@@ -222,13 +222,13 @@ export function TimelineContainer() {
         <div className="pointer-events-none select-none opacity-50 blur-[1px]">
           {[1, 2].map((i) => (
             <div key={i} className="relative mb-6 pl-14">
-              <div className="absolute left-0 top-6 h-10 w-10 rounded-full bg-gradient-to-br from-indigo-400 to-purple-500" />
-              <div className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-                <div className="mb-2 h-5 w-2/3 rounded-full bg-slate-200 dark:bg-slate-700" />
-                <div className="mb-1 h-3.5 w-1/3 rounded-full bg-slate-100 dark:bg-slate-600" />
+              <div className="skeleton-line absolute left-0 top-6 h-10 w-10 rounded-full" />
+              <div className="enterprise-card p-5">
+                <div className="skeleton-line mb-2 h-5 w-2/3" />
+                <div className="skeleton-line mb-1 h-3.5 w-1/3" />
                 <div className="mt-3 space-y-1.5">
-                  <div className="h-3.5 w-full rounded-full bg-slate-100 dark:bg-slate-600" />
-                  <div className="h-3.5 w-10/12 rounded-full bg-slate-100 dark:bg-slate-600" />
+                  <div className="skeleton-line h-3.5 w-full" />
+                  <div className="skeleton-line h-3.5 w-10/12" />
                 </div>
               </div>
             </div>
@@ -236,7 +236,7 @@ export function TimelineContainer() {
         </div>
 
         {/* Overlay CTA */}
-        <div className="-mt-32 relative z-10 rounded-3xl border border-indigo-200/70 bg-white/90 p-8 text-center shadow-lg backdrop-blur dark:border-indigo-700/50 dark:bg-slate-800/90">
+        <div className="-mt-32 relative z-10 enterprise-card p-8 text-center">
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-indigo-100 text-indigo-600 dark:bg-indigo-900/40 dark:text-indigo-400">
             <svg className="h-7 w-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -246,7 +246,7 @@ export function TimelineContainer() {
           <p className="mt-1.5 text-sm text-slate-500 dark:text-slate-400">Sign in to see your saved diary entries in a beautiful timeline.</p>
           <a
             href="/login"
-            className="mt-5 inline-flex cursor-pointer items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700"
+            className="action-primary mt-5"
           >
             Sign in to get started
           </a>
@@ -261,7 +261,7 @@ export function TimelineContainer() {
 
   if (state === "error") {
     return (
-      <div className="rounded-3xl border border-rose-200/70 bg-rose-50/60 p-12 text-center dark:border-rose-700/50 dark:bg-rose-900/20">
+      <div className="rounded-lg border border-rose-200 bg-rose-50 p-8 text-center dark:border-rose-900/50 dark:bg-rose-950/20">
         <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-rose-100 text-rose-600 dark:bg-rose-900/40 dark:text-rose-400">
           <svg className="h-7 w-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -271,7 +271,7 @@ export function TimelineContainer() {
         <p className="mt-1.5 text-sm text-slate-500 dark:text-slate-400">{errorMessage}</p>
         <button
           onClick={() => fetchEntries()}
-          className="mt-5 cursor-pointer rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-700 dark:bg-indigo-600 dark:hover:bg-indigo-500"
+          className="action-primary mt-5"
         >
           Try again
         </button>
@@ -301,7 +301,7 @@ export function TimelineContainer() {
             onSelect={setSelectedDate}
           />
           {/* Quick stats */}
-          <div className="mt-3 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+          <div className="mt-3 enterprise-card p-4">
             <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Stats</p>
             <div className="mt-2 grid grid-cols-2 gap-3">
               <div className="text-center">
@@ -314,7 +314,7 @@ export function TimelineContainer() {
               </div>
             </div>
           </div>
-          <div className="mt-3 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+          <div className="mt-3 enterprise-card p-4">
             <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Mood tracking</p>
             <div className="mt-3 space-y-2">
               {(["great", "good", "neutral", "bad"] as const).map((mood) => {
@@ -338,13 +338,13 @@ export function TimelineContainer() {
             </div>
           </div>
           {topTags.length > 0 && (
-            <div className="mt-3 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+            <div className="mt-3 enterprise-card p-4">
               <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Top tags</p>
               <div className="mt-3 flex flex-wrap gap-2">
                 {topTags.map(([tag, count]) => (
                   <span
                     key={tag}
-                    className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700 ring-1 ring-indigo-100 dark:bg-indigo-900/30 dark:text-indigo-300 dark:ring-indigo-800"
+                    className="status-badge"
                   >
                     #{tag}
                     <span className="text-indigo-400 dark:text-indigo-500">{count}</span>

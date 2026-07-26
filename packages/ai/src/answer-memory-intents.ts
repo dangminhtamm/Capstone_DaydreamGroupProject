@@ -377,17 +377,23 @@ export function hasStressEvidence(searchable: string): boolean {
 
 export function hasOnlyQuestionListEvidence(searchable: string): boolean {
   return includesAny(searchable, [
+    "demo account is ready",
     "best questions are",
     "sample questions",
     "test questions",
+    "cau hoi test",
     "final ai memory checklist",
     "final checklist has six items",
     "checklist has six items",
     "asks search about",
+    "ask search about",
+    "asks about mentor feedback",
     "asks about blockers",
     "ask questions about feedback",
     "ask questions about feedback decisions blockers",
+    "what feedback did",
     "what blockers did",
+    "why did we separate",
     "what made me feel stressed",
   ]);
 }

@@ -103,18 +103,19 @@ const answerStrategies: Array<{ value: AnswerStrategy; label: string }> = [
 ];
 
 const confidenceStyles = {
-  high: "bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:ring-emerald-700",
-  medium: "bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:ring-amber-700",
-  low: "bg-rose-50 text-rose-700 ring-rose-200 dark:bg-rose-900/30 dark:text-rose-400 dark:ring-rose-700",
+  high: "status-badge-success",
+  medium: "status-badge-warning",
+  low: "status-badge-danger",
 };
 
 const sourceToneStyles: Record<string, string> = {
-  diary: "bg-indigo-50 text-indigo-700 ring-indigo-100 dark:bg-indigo-900/30 dark:text-indigo-300 dark:ring-indigo-800",
-  calendar: "bg-sky-50 text-sky-700 ring-sky-100 dark:bg-sky-900/30 dark:text-sky-300 dark:ring-sky-800",
-  contact: "bg-fuchsia-50 text-fuchsia-700 ring-fuchsia-100 dark:bg-fuchsia-900/30 dark:text-fuchsia-300 dark:ring-fuchsia-800",
-  drive: "bg-lime-50 text-lime-700 ring-lime-100 dark:bg-lime-900/30 dark:text-lime-300 dark:ring-lime-800",
-  attachment: "bg-emerald-50 text-emerald-700 ring-emerald-100 dark:bg-emerald-900/30 dark:text-emerald-300 dark:ring-emerald-800",
-  summary: "bg-amber-50 text-amber-700 ring-amber-100 dark:bg-amber-900/30 dark:text-amber-300 dark:ring-amber-800",
+  diary: "border-indigo-100 bg-indigo-50 text-indigo-700 dark:border-indigo-900/50 dark:bg-indigo-950/30 dark:text-indigo-300",
+  calendar: "border-sky-100 bg-sky-50 text-sky-700 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-300",
+  contact: "border-fuchsia-100 bg-fuchsia-50 text-fuchsia-700 dark:border-fuchsia-900/50 dark:bg-fuchsia-950/30 dark:text-fuchsia-300",
+  drive: "border-lime-100 bg-lime-50 text-lime-700 dark:border-lime-900/50 dark:bg-lime-950/30 dark:text-lime-300",
+  gmail: "border-rose-100 bg-rose-50 text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-300",
+  attachment: "border-emerald-100 bg-emerald-50 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-300",
+  summary: "border-amber-100 bg-amber-50 text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300",
 };
 
 function formatSourceType(value: string) {
@@ -145,6 +146,14 @@ function formatAnswerMode(value?: AnswerMode) {
       return "No memory";
     default:
       return "Unknown";
+  }
+}
+
+function getBrowserTimeZone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+  } catch {
+    return undefined;
   }
 }
 
@@ -226,6 +235,249 @@ function highlightQuote(quote: string, claim?: string) {
   );
 }
 
+type DebugPipelineState = "ok" | "warning" | "error" | "skipped" | "unknown";
+
+function formatDurationMs(value?: number | null) {
+  if (value == null || !Number.isFinite(value)) return "n/a";
+  if (value >= 1000) return `${(value / 1000).toFixed(1)}s`;
+  return `${Math.max(0, Math.round(value))}ms`;
+}
+
+function formatPercent(value?: number | null) {
+  if (value == null || !Number.isFinite(value)) return "n/a";
+  return `${Math.round(value * 100)}%`;
+}
+
+function debugStateClass(state: DebugPipelineState) {
+  switch (state) {
+    case "ok":
+      return "status-badge-success";
+    case "warning":
+    case "skipped":
+      return "status-badge-warning";
+    case "error":
+      return "status-badge-danger";
+    default:
+      return "";
+  }
+}
+
+function analyticsStatusState(status?: QueryAnalytics["status"]): DebugPipelineState {
+  if (status === "success") return "ok";
+  if (status === "no_memory") return "warning";
+  if (status === "error") return "error";
+  return "unknown";
+}
+
+function traceMissingMessage(result: SearchResponse) {
+  if (result.cached) {
+    return "This response came from cache, so the backend may skip a fresh retrieval trace.";
+  }
+
+  return "API did not return debugTrace. Set MEMORY_DEBUG_TRACE=true and restart the API/dev server to inspect filters and retrieved chunks.";
+}
+
+function AiDebugPanel({ result }: { result: SearchResponse }) {
+  const analytics = result.analytics ?? null;
+  const trace = result.debugTrace ?? null;
+  const answerMode = result.answerMode ?? analytics?.answerMode;
+  const traceState: DebugPipelineState = trace
+    ? analyticsStatusState(trace.status)
+    : result.modelError
+      ? "warning"
+      : "unknown";
+  const generateState: DebugPipelineState = result.modelError
+    ? "warning"
+    : answerMode === "fast_path" || answerMode === "extractive_fallback" || answerMode === "no_memory"
+      ? "skipped"
+      : analyticsStatusState(analytics?.status);
+
+  const pipeline = [
+    {
+      label: "Embed query",
+      value: analytics ? formatDurationMs(analytics.timing.embedMs) : "n/a",
+      state: analytics ? "ok" : "unknown",
+      detail: "Creates the vector used for semantic memory retrieval.",
+    },
+    {
+      label: "Retrieve sources",
+      value: analytics ? formatDurationMs(analytics.timing.retrieveMs) : "n/a",
+      state: analyticsStatusState(analytics?.status),
+      detail: `${trace?.chunksRetrieved ?? analytics?.chunksRetrieved ?? result.sources.length} chunks considered for grounding.`,
+    },
+    {
+      label: "Ground answer",
+      value: analytics ? formatDurationMs(analytics.timing.generateMs) : "n/a",
+      state: generateState,
+      detail:
+        answerMode === "fast_path"
+          ? "Fast path used retrieved evidence without Gemini generation."
+          : answerMode === "extractive_fallback"
+            ? "Fallback answer assembled from retrieved evidence."
+            : result.modelError
+              ? "Gemini generation failed, but retrieved evidence is still shown."
+              : "Gemini or grounded composer produced the final answer.",
+    },
+  ] satisfies Array<{
+    label: string;
+    value: string;
+    state: DebugPipelineState;
+    detail: string;
+  }>;
+
+  const visibleChunks = trace?.topChunks?.length
+    ? trace.topChunks.slice(0, 5)
+    : result.sources.slice(0, 5).map((source) => ({
+        id: source.chunkId,
+        sourceType: source.sourceType,
+        sourceId: source.sourceId,
+        sourceTitle: source.sourceTitle,
+        chunkType: source.chunkType,
+        occurredAt: source.occurredAt,
+        retrievalMode: "citation",
+        similarity: source.similarity,
+        vectorSimilarity: source.similarity,
+        lexicalScore: 0,
+        distance: null,
+        quote: source.quote,
+      }));
+
+  return (
+    <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50/80 p-4 dark:border-slate-800 dark:bg-slate-900/70">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
+            AI Debug
+          </p>
+          <h4 className="mt-1 text-base font-semibold text-slate-950 dark:text-slate-100">
+            Search pipeline visibility
+          </h4>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className={`status-badge ${debugStateClass(traceState)}`}>
+            Trace: {trace ? "returned" : "missing"}
+          </span>
+          <span className={`status-badge ${debugStateClass(analyticsStatusState(analytics?.status))}`}>
+            API: {analytics?.status ?? trace?.status ?? "unknown"}
+          </span>
+          <span className="status-badge">
+            Mode: {formatAnswerMode(answerMode)}
+          </span>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-3">
+        {pipeline.map((step) => (
+          <div key={step.label} className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">{step.label}</p>
+              <span className={`status-badge ${debugStateClass(step.state)}`}>{step.value}</span>
+            </div>
+            <p className="mt-2 text-xs leading-5 text-slate-500 dark:text-slate-400">{step.detail}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-3 grid gap-3 lg:grid-cols-4">
+        <div className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 dark:border-slate-800 dark:bg-slate-950">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Total latency</p>
+          <p className="mt-1 text-sm font-semibold text-slate-950 dark:text-slate-100">{formatDurationMs(analytics?.timing.totalMs)}</p>
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 dark:border-slate-800 dark:bg-slate-950">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Tokens</p>
+          <p className="mt-1 text-sm font-semibold text-slate-950 dark:text-slate-100">
+            {analytics ? analytics.tokenUsage.totalTokens : "n/a"}
+          </p>
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 dark:border-slate-800 dark:bg-slate-950">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Sources</p>
+          <p className="mt-1 text-sm font-semibold text-slate-950 dark:text-slate-100">{result.sources.length}</p>
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 dark:border-slate-800 dark:bg-slate-950">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Model</p>
+          <p className="mt-1 truncate font-mono text-xs font-semibold text-slate-950 dark:text-slate-100">
+            {analytics?.tokenUsage.model ?? "n/a"}
+          </p>
+        </div>
+      </div>
+
+      {!trace ? (
+        <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 dark:border-amber-900/60 dark:bg-amber-950/20">
+          <p className="text-xs font-semibold text-amber-900 dark:text-amber-200">debugTrace missing</p>
+          <p className="mt-1 text-xs leading-5 text-amber-800 dark:text-amber-300">{traceMissingMessage(result)}</p>
+        </div>
+      ) : (
+        <div className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-2.5 dark:border-slate-800 dark:bg-slate-950">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Reason</p>
+          <p className="mt-1 text-sm leading-6 text-slate-700 dark:text-slate-300">{trace.reason}</p>
+        </div>
+      )}
+
+      {result.modelError ? (
+        <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2.5 dark:border-rose-900/60 dark:bg-rose-950/20">
+          <p className="text-xs font-semibold text-rose-900 dark:text-rose-200">
+            Model error: {result.modelError.kind}{result.modelError.status ? ` (${result.modelError.status})` : ""}
+          </p>
+          <p className="mt-1 text-xs leading-5 text-rose-800 dark:text-rose-300">{result.modelError.message}</p>
+        </div>
+      ) : null}
+
+      <div className="mt-4">
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+            Retrieved evidence
+          </p>
+          <span className="status-badge">{visibleChunks.length} shown</span>
+        </div>
+        {visibleChunks.length ? (
+          <div className="space-y-2">
+            {visibleChunks.map((chunk, index) => (
+              <article key={`${chunk.id}-${index}`} className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950">
+                <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                  <span className="rounded-md bg-slate-900 px-2 py-0.5 font-bold text-white dark:bg-slate-100 dark:text-slate-950">#{index + 1}</span>
+                  <span className="font-medium text-slate-700 dark:text-slate-300">{chunk.sourceTitle || `${chunk.sourceType}/${chunk.chunkType}`}</span>
+                  <span>{formatSourceDate(chunk.occurredAt)}</span>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-slate-600 dark:text-slate-300">
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">mode: {chunk.retrievalMode}</span>
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">sim: {formatPercent(chunk.similarity)}</span>
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">vector: {formatPercent(chunk.vectorSimilarity)}</span>
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">lexical: {formatPercent(chunk.lexicalScore)}</span>
+                </div>
+                <blockquote className="mt-2 line-clamp-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+                  {chunk.quote}
+                </blockquote>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-lg border border-dashed border-slate-300 p-4 text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
+            No retrieved chunks or citations were returned for this query.
+          </div>
+        )}
+      </div>
+
+      {trace ? (
+        <details className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-2.5 dark:border-slate-800 dark:bg-slate-950">
+          <summary className="cursor-pointer text-xs font-semibold text-slate-600 dark:text-slate-300">
+            Advanced filters JSON
+          </summary>
+          <div className="mt-3 grid gap-3 lg:grid-cols-2">
+            <div>
+              <p className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Inferred filters</p>
+              <pre className="max-h-36 overflow-auto rounded-lg bg-slate-950 p-3 text-xs leading-5 text-slate-100">{JSON.stringify(trace.inferredFilters, null, 2)}</pre>
+            </div>
+            <div>
+              <p className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Applied filters</p>
+              <pre className="max-h-36 overflow-auto rounded-lg bg-slate-950 p-3 text-xs leading-5 text-slate-100">{JSON.stringify(trace.appliedFilters, null, 2)}</pre>
+            </div>
+          </div>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
 export default function SearchPage() {
   const { isAuthenticated, isLoading: isAuthLoading, getAccessToken } = useAuth();
   const [question, setQuestion] = useState("");
@@ -235,7 +487,6 @@ export default function SearchPage() {
   const [responseLanguage, setResponseLanguage] = useState<ResponseLanguage>("en");
   const [answerStrategy, setAnswerStrategy] = useState<AnswerStrategy>("auto");
   const [showAuthPrompt, setShowAuthPrompt] = useState(false);
-  const [analyticsOpen, setAnalyticsOpen] = useState(false);
   const [searchHistory, setSearchHistory] = useState<SearchHistoryEntry[]>([]);
   const [showHistory, setShowHistory] = useState(true);
 
@@ -320,6 +571,7 @@ export default function SearchPage() {
 
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+      const timeZone = getBrowserTimeZone();
       const response = await fetch(`${apiUrl}/api/search`, {
         method: "POST",
         headers: {
@@ -330,6 +582,7 @@ export default function SearchPage() {
           question: normalizedQuestion,
           limit: 8,
           responseLanguage,
+          ...(timeZone ? { timeZone } : {}),
           ...(answerStrategy === "auto" ? {} : { answerStrategy }),
         }),
       });
@@ -378,11 +631,11 @@ export default function SearchPage() {
       description="Ask a question and get an answer grounded in your saved memories."
     >
       <div className="space-y-6">
-        <section className="rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white via-white to-indigo-50/40 p-6 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:from-slate-800 dark:via-slate-800 dark:to-indigo-950/30 dark:shadow-slate-900/40">
-          <div className="mb-5">
+        <section className="enterprise-card p-5">
+          <div className="mb-4">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600 dark:text-indigo-400">AI-powered recall</p>
-              <h3 className="mt-2 text-2xl font-bold tracking-tight text-slate-950 dark:text-slate-100">Ask your Second Brain</h3>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">AI-powered recall</p>
+              <h3 className="mt-1.5 text-xl font-semibold tracking-tight text-slate-950 dark:text-slate-100">Ask your Second Brain</h3>
               <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
                 Type a natural-language question. Your memories will surface the most relevant answer.
               </p>
@@ -396,14 +649,14 @@ export default function SearchPage() {
                   value={question}
                   onChange={(event) => setQuestion(event.target.value)}
                   placeholder="Example: What did I write about my capstone progress?"
-                  className="mt-2 min-h-32 w-full resize-none rounded-2xl border border-slate-200 bg-white/90 px-5 py-4 text-base leading-7 text-slate-900 shadow-inner outline-none transition placeholder:text-slate-400 focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-100 dark:border-slate-600 dark:bg-slate-700/70 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-indigo-500 dark:focus:bg-slate-700 dark:focus:ring-indigo-900/40"
+                  className="mt-2 min-h-28 w-full resize-none rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm leading-6 text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-indigo-500 dark:focus:ring-indigo-900/40"
                 />
               </label>
 
-              <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white/75 px-3 py-2 dark:border-slate-700 dark:bg-slate-800/50">
+              <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900/70">
                 <div className="flex items-center gap-2">
                   <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Mode</span>
-                  <div className="inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1 dark:border-slate-700 dark:bg-slate-900/40">
+                  <div className="segment-control">
                     {answerStrategies.map((strategy) => {
                       const active = answerStrategy === strategy.value;
                       return (
@@ -414,11 +667,7 @@ export default function SearchPage() {
                             setAnswerStrategy(strategy.value);
                             localStorage.setItem("dd-answer-strategy", strategy.value);
                           }}
-                          className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-                            active
-                              ? "bg-indigo-600 text-white shadow-sm"
-                              : "text-slate-600 hover:bg-white hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
-                          }`}
+                          className={`segment-option ${active ? "segment-option-active" : ""}`}
                         >
                           {strategy.label}
                         </button>
@@ -429,7 +678,7 @@ export default function SearchPage() {
 
                 <div className="flex items-center gap-2">
                   <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Language</span>
-                  <div className="inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1 dark:border-slate-700 dark:bg-slate-900/40">
+                  <div className="segment-control">
                     {(["en", "vi"] as const).map((language) => {
                       const active = responseLanguage === language;
                       return (
@@ -440,11 +689,7 @@ export default function SearchPage() {
                             setResponseLanguage(language);
                             localStorage.setItem("dd-response-lang", language);
                           }}
-                          className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-                            active
-                              ? "bg-emerald-600 text-white shadow-sm"
-                              : "text-slate-600 hover:bg-white hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
-                          }`}
+                          className={`segment-option ${active ? "segment-option-active" : ""}`}
                         >
                           {language.toUpperCase()}
                         </button>
@@ -461,7 +706,7 @@ export default function SearchPage() {
                     key={suggestion}
                     type="button"
                     onClick={() => setQuestion(suggestion)}
-                    className="cursor-pointer rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm transition hover:-translate-y-0.5 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-300 dark:hover:border-indigo-500 dark:hover:bg-indigo-900/30 dark:hover:text-indigo-400"
+                    className="cursor-pointer rounded-full border border-blue-100 bg-blue-50/60 px-3.5 py-2 text-xs font-semibold text-blue-700 transition hover:border-blue-200 hover:bg-blue-100 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-300 dark:hover:border-blue-800 dark:hover:bg-blue-900/40"
                   >
                     {suggestion}
                   </button>
@@ -486,7 +731,7 @@ export default function SearchPage() {
                   </div>
                   <a
                     href="/login"
-                    className="shrink-0 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-indigo-700"
+                    className="action-primary shrink-0 min-h-10 px-3"
                   >
                     Sign in
                   </a>
@@ -504,16 +749,10 @@ export default function SearchPage() {
               <button
                 type="submit"
                 disabled={!canSubmit}
-                className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-200 transition hover:-translate-y-0.5 hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none disabled:hover:translate-y-0 dark:shadow-indigo-900/30 dark:disabled:bg-slate-600"
+                className="action-primary cursor-pointer px-5"
               >
                 {isSearching ? (
-                  <>
-                    <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                    </svg>
-                    Searching memories...
-                  </>
+                  "Searching memories..."
                 ) : (
                   <>
                     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -526,21 +765,21 @@ export default function SearchPage() {
             </form>
         </section>
 
-        <section className="rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white to-slate-50/50 p-6 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:from-slate-800 dark:to-slate-800/50 dark:shadow-slate-900/40">
-          <div className="mb-5 flex items-start justify-between gap-3">
+        <section className="enterprise-card p-5">
+          <div className="mb-4 flex items-start justify-between gap-3">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">Answer</p>
-              <h3 className="mt-2 text-2xl font-bold tracking-tight text-slate-950 dark:text-slate-100">Grounded response</h3>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">Answer</p>
+              <h3 className="mt-1.5 text-xl font-semibold tracking-tight text-slate-950 dark:text-slate-100">Grounded response</h3>
             </div>
             {result ? (
               <div className="flex items-center gap-2">
                 {result.cached && (
-                  <span className="flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                  <span className="status-badge">
                     <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
                     Cached{result.cacheStorage ? `: ${result.cacheStorage}` : ""}
                   </span>
                 )}
-                <span className={`rounded-full px-3 py-1 text-xs font-semibold ring-1 ${confidenceStyles[result.confidence]}`}>
+                <span className={`status-badge ${confidenceStyles[result.confidence]}`}>
                   {result.confidence} confidence
                 </span>
               </div>
@@ -549,11 +788,11 @@ export default function SearchPage() {
 
           {result ? (
             <div className="mb-3 flex flex-wrap items-center gap-2">
-              <span className="rounded-full bg-indigo-50 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider text-indigo-700 ring-1 ring-indigo-100 dark:bg-indigo-900/30 dark:text-indigo-300 dark:ring-indigo-800">
+              <span className="status-badge">
                 Mode: {formatAnswerMode(result.answerMode ?? result.analytics?.answerMode)}
               </span>
               {result.analytics?.tokenUsage.totalTokens === 0 ? (
-                <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider text-emerald-700 ring-1 ring-emerald-100 dark:bg-emerald-900/30 dark:text-emerald-300 dark:ring-emerald-800">
+                <span className="status-badge status-badge-success">
                   0 generate tokens
                 </span>
               ) : null}
@@ -562,31 +801,31 @@ export default function SearchPage() {
 
           {isSearching ? (
             <div className="space-y-4">
-              <div className="flex items-center gap-3 rounded-2xl border border-indigo-100 bg-indigo-50/60 px-4 py-3 dark:border-indigo-800 dark:bg-indigo-900/30">
-                <svg className="h-4 w-4 shrink-0 animate-spin text-indigo-500 dark:text-indigo-400" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
+              <div className="enterprise-panel px-4 py-3">
                 <div>
-                  <p className="text-sm font-semibold text-indigo-800 dark:text-indigo-200">Searching grounded memories</p>
-                  <p className="mt-0.5 text-xs text-indigo-700 dark:text-indigo-300">Ranking memory chunks, then composing a grounded answer.</p>
+                  <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">Searching grounded memories</p>
+                  <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">Ranking memory chunks, then composing a grounded answer.</p>
+                  <div className="mt-3 space-y-2">
+                    <div className="skeleton-line h-3 w-11/12" />
+                    <div className="skeleton-line h-3 w-8/12" />
+                  </div>
                 </div>
               </div>
               <div className="grid gap-3 sm:grid-cols-3">
                 {["Embed query", "Retrieve sources", "Ground answer"].map((step, index) => (
-                  <div key={step} className="rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800/70">
+                  <div key={step} className="enterprise-panel p-3">
                     <div className="mb-3 flex items-center gap-2">
-                      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-100 text-xs font-bold text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300">{index + 1}</span>
+                      <span className="flex h-6 w-6 items-center justify-center rounded-full border border-slate-200 bg-white text-xs font-bold text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300">{index + 1}</span>
                       <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">{step}</p>
                     </div>
-                    <div className="h-2 animate-pulse rounded-full bg-slate-200 dark:bg-slate-700" />
+                    <div className="skeleton-line h-2" />
                   </div>
                 ))}
               </div>
             </div>
           ) : result?.modelError ? (
             <div className="space-y-4">
-              <div className="rounded-2xl border border-indigo-100 bg-white p-5 shadow-sm dark:border-indigo-800/70 dark:bg-slate-900/40">
+              <div className="enterprise-panel bg-white p-4 dark:bg-slate-950">
                 <p className="whitespace-pre-wrap text-base leading-8 text-slate-800 dark:text-slate-200">{result.answer}</p>
               </div>
               <div className="flex items-start gap-2 rounded-2xl border border-amber-100 bg-amber-50/60 px-3 py-2 dark:border-amber-900/60 dark:bg-amber-950/20">
@@ -657,12 +896,12 @@ export default function SearchPage() {
               </div>
             </div>
           ) : result ? (
-            <div className="rounded-2xl border border-indigo-100 bg-white p-5 shadow-sm dark:border-indigo-800/70 dark:bg-slate-900/40">
+            <div className="enterprise-panel bg-white p-4 dark:bg-slate-950">
               <p className="whitespace-pre-wrap text-base leading-8 text-slate-800 dark:text-slate-200">{result.answer}</p>
             </div>
           ) : (
-            <div className="rounded-xl border border-dashed border-slate-300 p-6 text-center dark:border-slate-600">
-              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-indigo-50 text-indigo-600 dark:bg-indigo-900/40 dark:text-indigo-400">
+            <div className="rounded-lg border border-dashed border-slate-300 p-6 text-center dark:border-slate-700">
+              <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
                 <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 4v-4z" />
                 </svg>
@@ -672,206 +911,17 @@ export default function SearchPage() {
             </div>
           )}
 
-          {result?.debugTrace ? (
-            <details className="mt-5 rounded-2xl border border-sky-200 bg-sky-50/70 p-4 dark:border-sky-800 dark:bg-sky-950/30">
-              <summary className="cursor-pointer text-sm font-bold text-sky-900 dark:text-sky-200">
-                Memory Debug
-              </summary>
-
-              <div className="mt-4 space-y-4">
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <div className="rounded-xl border border-sky-100 bg-white/80 p-3 dark:border-sky-900 dark:bg-slate-900/60">
-                    <p className="text-[11px] font-semibold uppercase tracking-wider text-sky-600 dark:text-sky-400">Status</p>
-                    <p className="mt-1 text-sm font-semibold text-slate-900 dark:text-slate-100">{result.debugTrace.status}</p>
-                  </div>
-                  <div className="rounded-xl border border-sky-100 bg-white/80 p-3 dark:border-sky-900 dark:bg-slate-900/60">
-                    <p className="text-[11px] font-semibold uppercase tracking-wider text-sky-600 dark:text-sky-400">Chunks</p>
-                    <p className="mt-1 text-sm font-semibold text-slate-900 dark:text-slate-100">{result.debugTrace.chunksRetrieved}</p>
-                  </div>
-                  <div className="rounded-xl border border-sky-100 bg-white/80 p-3 dark:border-sky-900 dark:bg-slate-900/60">
-                    <p className="text-[11px] font-semibold uppercase tracking-wider text-sky-600 dark:text-sky-400">Confidence</p>
-                    <p className="mt-1 text-sm font-semibold text-slate-900 dark:text-slate-100">{result.confidence}</p>
-                  </div>
-                </div>
-
-                <div className="rounded-xl border border-sky-100 bg-white/80 p-3 dark:border-sky-900 dark:bg-slate-900/60">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-sky-600 dark:text-sky-400">Reason</p>
-                  <p className="mt-1 text-sm leading-6 text-slate-700 dark:text-slate-300">{result.debugTrace.reason}</p>
-                </div>
-
-                <div className="grid gap-3 lg:grid-cols-2">
-                  <div className="rounded-xl border border-sky-100 bg-white/80 p-3 dark:border-sky-900 dark:bg-slate-900/60">
-                    <p className="text-[11px] font-semibold uppercase tracking-wider text-sky-600 dark:text-sky-400">Inferred filters</p>
-                    <pre className="mt-2 max-h-36 overflow-auto rounded-lg bg-slate-950 p-3 text-xs leading-5 text-slate-100">{JSON.stringify(result.debugTrace.inferredFilters, null, 2)}</pre>
-                  </div>
-                  <div className="rounded-xl border border-sky-100 bg-white/80 p-3 dark:border-sky-900 dark:bg-slate-900/60">
-                    <p className="text-[11px] font-semibold uppercase tracking-wider text-sky-600 dark:text-sky-400">Applied filters</p>
-                    <pre className="mt-2 max-h-36 overflow-auto rounded-lg bg-slate-950 p-3 text-xs leading-5 text-slate-100">{JSON.stringify(result.debugTrace.appliedFilters, null, 2)}</pre>
-                  </div>
-                </div>
-
-                <div>
-                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-sky-600 dark:text-sky-400">Top retrieved chunks</p>
-                  {result.debugTrace.topChunks.length ? (
-                    <div className="space-y-3">
-                      {result.debugTrace.topChunks.map((chunk, index) => (
-                        <article key={`${chunk.id}-${index}`} className="rounded-xl border border-sky-100 bg-white/90 p-3 dark:border-sky-900 dark:bg-slate-900/70">
-                          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-                            <span className="rounded-full bg-sky-100 px-2 py-0.5 font-semibold text-sky-700 dark:bg-sky-900/60 dark:text-sky-300">#{index + 1}</span>
-                            <span>{chunk.sourceTitle || `${chunk.sourceType}/${chunk.chunkType}`}</span>
-                            <span>{new Date(chunk.occurredAt).toLocaleString()}</span>
-                          </div>
-                          <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-slate-600 dark:text-slate-300">
-                            <span className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">mode: {chunk.retrievalMode}</span>
-                            <span className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">sim: {Math.round(chunk.similarity * 100)}%</span>
-                            <span className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">vector: {Math.round(chunk.vectorSimilarity * 100)}%</span>
-                            <span className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">lexical: {Math.round(chunk.lexicalScore * 100)}%</span>
-                          </div>
-                          <blockquote className="mt-3 rounded-r-lg border-l-4 border-sky-200 bg-sky-50 px-3 py-2 text-xs leading-5 text-slate-700 dark:border-sky-800 dark:bg-slate-800 dark:text-slate-300">
-                            {chunk.quote}
-                          </blockquote>
-                        </article>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="rounded-xl border border-dashed border-sky-200 p-4 text-sm text-slate-500 dark:border-sky-800 dark:text-slate-400">
-                      No chunks survived retrieval thresholds.
-                    </div>
-                  )}
-                </div>
-              </div>
-            </details>
-          ) : null}
+          {result ? <AiDebugPanel result={result} /> : null}
         </section>
       </div>
 
-      {/* ── Query Analytics Panel (Order 1: 3a+3b+3c) ── */}
-      {result?.analytics && (
-        <section className="animate-fade-in mt-6 rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white via-white to-emerald-50/30 p-6 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:from-slate-800 dark:via-slate-800 dark:to-emerald-950/20 dark:shadow-slate-900/40">
-          <button
-            type="button"
-            onClick={() => setAnalyticsOpen(!analyticsOpen)}
-            className="flex w-full cursor-pointer items-center justify-between"
-          >
-            <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-100 dark:bg-emerald-900/40">
-                <svg className="h-5 w-5 text-emerald-600 dark:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                </svg>
-              </div>
-              <div className="text-left">
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-600 dark:text-emerald-400">Query Analytics</p>
-                <p className="mt-0.5 text-sm font-medium text-slate-700 dark:text-slate-300">
-                  {result.analytics.tokenUsage.totalTokens} tokens · {(result.analytics.timing.totalMs / 1000).toFixed(1)}s · {result.analytics.chunksRetrieved} chunks
-                </p>
-              </div>
-            </div>
-            <svg className={`h-5 w-5 text-slate-400 transition-transform duration-200 ${analyticsOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </button>
-
-          {analyticsOpen && (
-            <div className="mt-5 space-y-3 animate-fade-in">
-              {/* Pipeline Steps */}
-              <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800/60">
-                <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Pipeline Steps</p>
-                <div className="space-y-2.5">
-                  {/* Embedding */}
-                  <div className="flex items-center gap-3">
-                    <svg className="h-4 w-4 shrink-0 text-slate-500 dark:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" /></svg>
-                    <span className="flex-1 text-sm text-slate-700 dark:text-slate-300">Embedding query</span>
-                    <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-700 dark:text-slate-300">
-                      {result.analytics.timing.embedMs > 0 ? `${result.analytics.timing.embedMs}ms` : 'included'}
-                    </span>
-                  </div>
-                  {/* Retrieval */}
-                  <div className="flex items-center gap-3">
-                    <svg className="h-4 w-4 shrink-0 text-slate-500 dark:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-                    <span className="flex-1 text-sm text-slate-700 dark:text-slate-300">
-                      Retrieved {result.analytics.chunksRetrieved} memory chunks
-                    </span>
-                    <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-700 dark:text-slate-300">
-                      {result.analytics.timing.retrieveMs}ms
-                    </span>
-                  </div>
-                  {/* Generation */}
-                  <div className="flex items-center gap-3">
-                    <svg className="h-4 w-4 shrink-0 text-slate-500 dark:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
-                    <span className="flex-1 text-sm text-slate-700 dark:text-slate-300">Generating answer</span>
-                    <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-700 dark:text-slate-300">
-                      {result.analytics.timing.generateMs > 1000
-                        ? `${(result.analytics.timing.generateMs / 1000).toFixed(1)}s`
-                        : `${result.analytics.timing.generateMs}ms`}
-                    </span>
-                  </div>
-                  {/* Confidence */}
-                  <div className="flex items-center gap-3">
-                    <svg className="h-4 w-4 shrink-0 text-slate-500 dark:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
-                    <span className="flex-1 text-sm text-slate-700 dark:text-slate-300">Confidence</span>
-                    <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ${confidenceStyles[result.confidence]}`}>
-                      {result.confidence}
-                    </span>
-                  </div>
-                  {/* Tokens */}
-                  <div className="flex items-center gap-3">
-                    <svg className="h-4 w-4 shrink-0 text-slate-500 dark:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                    <span className="flex-1 text-sm text-slate-700 dark:text-slate-300">Tokens</span>
-                    <span className="rounded-full bg-indigo-50 px-2.5 py-0.5 text-xs font-medium text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400">
-                      {result.analytics.tokenUsage.promptTokens} prompt + {result.analytics.tokenUsage.completionTokens} completion = {result.analytics.tokenUsage.totalTokens}
-                    </span>
-                  </div>
-                  {/* Status */}
-                  <div className="flex items-center gap-3">
-                    {result.analytics.status === 'success' ? (<svg className="h-4 w-4 shrink-0 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>) : result.analytics.status === 'no_memory' ? (<svg className="h-4 w-4 shrink-0 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" /></svg>) : (<svg className="h-4 w-4 shrink-0 text-rose-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>)}
-                    <span className="flex-1 text-sm text-slate-700 dark:text-slate-300">Status</span>
-                    <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-                      result.analytics.status === 'success'
-                        ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
-                        : result.analytics.status === 'no_memory'
-                          ? 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
-                          : 'bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400'
-                    }`}>
-                      {result.analytics.status}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <svg className="h-4 w-4 shrink-0 text-slate-500 dark:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-                    <span className="flex-1 text-sm text-slate-700 dark:text-slate-300">Answer mode</span>
-                    <span className="rounded-full bg-indigo-50 px-2.5 py-0.5 text-xs font-semibold text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300">
-                      {formatAnswerMode(result.answerMode ?? result.analytics.answerMode)}
-                    </span>
-                  </div>
-                  {/* Total */}
-                  <div className="flex items-center gap-3 border-t border-slate-200 pt-2.5 dark:border-slate-700">
-                    <svg className="h-4 w-4 shrink-0 text-slate-500 dark:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                    <span className="flex-1 text-sm font-semibold text-slate-900 dark:text-slate-100">Total</span>
-                    <span className="rounded-full bg-slate-900 px-2.5 py-0.5 text-xs font-bold text-white dark:bg-slate-200 dark:text-slate-900">
-                      {(result.analytics.timing.totalMs / 1000).toFixed(1)}s
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Model info */}
-              <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 dark:border-slate-700 dark:bg-slate-800/40">
-                <span className="text-xs text-slate-500 dark:text-slate-400">Model</span>
-                <span className="rounded-full bg-slate-200 px-2.5 py-0.5 text-xs font-mono font-medium text-slate-700 dark:bg-slate-700 dark:text-slate-300">
-                  {result.analytics.tokenUsage.model}
-                </span>
-              </div>
-            </div>
-          )}
-        </section>
-      )}
-
-      <section className="mt-6 rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:bg-slate-800 dark:shadow-slate-900/40">
+      <section className="mt-6 enterprise-card p-5">
         <div className="mb-4 flex items-center justify-between">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">Citations</p>
-            <h3 className="mt-2 text-xl font-bold tracking-tight text-slate-950 dark:text-slate-100">Evidence used</h3>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">Citations</p>
+            <h3 className="mt-1.5 text-xl font-semibold tracking-tight text-slate-950 dark:text-slate-100">Evidence used</h3>
           </div>
-          <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600 dark:bg-slate-700 dark:text-slate-300">
+          <span className="status-badge">
             {result?.sources.length ?? 0} sources
           </span>
         </div>
@@ -881,18 +931,18 @@ export default function SearchPage() {
             {result.sources.map((source) => (
               <article
                 key={`${source.marker}-${source.chunkId}`}
-                className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3 transition hover:border-indigo-200 hover:bg-white hover:shadow-sm dark:border-slate-700 dark:bg-slate-900/40 dark:hover:border-indigo-500/50 dark:hover:bg-slate-900/70"
+                className="rounded-lg border border-slate-200 bg-slate-50/70 p-3 transition hover:border-indigo-200 hover:bg-white dark:border-slate-800 dark:bg-slate-900/60 dark:hover:border-indigo-800 dark:hover:bg-slate-950"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="mb-2 flex flex-wrap items-center gap-1.5">
-                      <span className="rounded-md bg-indigo-600 px-2 py-0.5 text-[11px] font-bold text-white">
+                      <span className="rounded-md bg-slate-900 px-2 py-0.5 text-[11px] font-bold text-white dark:bg-slate-100 dark:text-slate-950">
                         {source.marker}
                       </span>
-                      <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold capitalize ring-1 ${sourceToneStyles[source.sourceType] ?? "bg-slate-100 text-slate-700 ring-slate-200 dark:bg-slate-700 dark:text-slate-200 dark:ring-slate-600"}`}>
+                      <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold capitalize ${sourceToneStyles[source.sourceType] ?? "border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"}`}>
                         {formatSourceType(source.sourceType)}
                       </span>
-                      <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-600 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700">
+                      <span className="status-badge">
                         {source.chunkType.replaceAll("_", " ")}
                       </span>
                     </div>
@@ -907,11 +957,11 @@ export default function SearchPage() {
                 </div>
 
                 {source.claim ? (
-                  <p className="mt-3 line-clamp-2 rounded-xl border border-indigo-100 bg-indigo-50/70 px-3 py-2 text-xs leading-5 text-indigo-950 dark:border-indigo-900/60 dark:bg-indigo-950/30 dark:text-indigo-100">
+                  <p className="mt-3 line-clamp-2 rounded-lg border border-indigo-100 bg-indigo-50/70 px-3 py-2 text-xs leading-5 text-indigo-950 dark:border-indigo-900/60 dark:bg-indigo-950/30 dark:text-indigo-100">
                     {source.claim}
                   </p>
                 ) : null}
-                <blockquote className="mt-3 line-clamp-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs leading-5 text-slate-700 dark:border-slate-700 dark:bg-slate-800/70 dark:text-slate-300">
+                <blockquote className="mt-3 line-clamp-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs leading-5 text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300">
                   {highlightQuote(source.quote, source.claim)}
                 </blockquote>
               </article>
@@ -925,7 +975,7 @@ export default function SearchPage() {
       </section>
 
       {searchHistory.length > 0 && (
-        <section className="mt-6 rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:bg-slate-800 dark:shadow-slate-900/40">
+        <section className="mt-6 enterprise-card p-5">
           <div className="mb-3 flex items-center justify-between">
             <button
               type="button"

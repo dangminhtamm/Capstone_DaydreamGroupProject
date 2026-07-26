@@ -32,6 +32,7 @@ export class SearchService {
 
     const normalizedQuestion = queryDto.question.trim();
     const lang = queryDto.responseLanguage ?? 'en';
+    const timeZone = queryDto.timeZone?.trim() || undefined;
 
     // ── Live search ──
     try {
@@ -42,6 +43,7 @@ export class SearchService {
           userId: user.id,
           question: normalizedQuestion,
           responseLanguage: lang,
+          timeZone,
         });
 
         if (redisCached && this.isCacheableCachedAnswer(redisCached)) {
@@ -56,12 +58,14 @@ export class SearchService {
           console.warn('Skipping stale/unsafe Redis search cache entry.');
         }
 
-        const cached = await findCachedAnswer(
-          this.prisma,
-          user.id,
-          normalizedQuestion,
-          lang,
-        );
+        const cached = timeZone
+          ? null
+          : await findCachedAnswer(
+              this.prisma,
+              user.id,
+              normalizedQuestion,
+              lang,
+            );
 
         if (cached) {
           const cachedAnalytics = this.parseJsonObject(cached.analytics_json);
@@ -100,6 +104,7 @@ export class SearchService {
         maxDistance: queryDto.maxDistance,
         responseLanguage: lang,
         answerStrategy: queryDto.answerStrategy ?? 'auto',
+        timeZone,
         filters,
       });
 
@@ -128,6 +133,7 @@ export class SearchService {
             userId: user.id,
             question: normalizedQuestion,
             responseLanguage: lang,
+            timeZone,
           },
           {
             answer: result.answer,

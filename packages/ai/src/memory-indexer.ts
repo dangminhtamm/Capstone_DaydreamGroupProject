@@ -41,6 +41,10 @@ export interface IndexedMemoryChunk {
 
 export type { ExtractedEntityMention } from "./indexing-utils.ts";
 
+export interface ExtractedEntityMentionWithChunkIndex extends ExtractedEntityMention {
+  chunkIndex: number;
+}
+
 export interface IndexMemoryFromDiaryInput {
   userId: string;
   diaryId: string;
@@ -51,15 +55,12 @@ export interface IndexMemoryFromDiaryInput {
   insertChunks?: (chunks: PersistedMemoryChunkPayload[]) => Promise<unknown>;
   /**
    * Optional callback to persist entity mentions after chunks are inserted.
-   * Each entry maps a chunkIndex to its extracted entity mentions.
+   * The caller resolves chunkIndex to actual memory_chunks.id values inside
+   * its own storage boundary before writing relational EntityMention rows.
    * If not provided, entity mentions are returned but not persisted.
    */
   insertEntityMentions?: (
-    mentions: Array<{
-      chunkId: string;
-      entityType: string;
-      entityValue: string;
-    }>,
+    mentions: ExtractedEntityMentionWithChunkIndex[],
   ) => Promise<unknown>;
 }
 
@@ -131,15 +132,16 @@ export async function indexMemoryFromDiary(
   // -----------------------------------------------------------------------
   // Extract people, projects, and tags from each chunk's metadata and
   // persist them as relational EntityMention rows for fast graph queries.
-  const allEntityMentions: Array<{
-    chunkIndex: number;
-    entityType: "person" | "project" | "tag" | "goal" | "habit";
-    entityValue: string;
-  }> = [];
+  const allEntityMentions: ExtractedEntityMentionWithChunkIndex[] = [];
+  const seenEntityMentions = new Set<string>();
 
   for (const chunk of persistedChunks) {
     const mentions = extractEntityMentionsFromMetadata(chunk.metadata);
     for (const mention of mentions) {
+      const key = `${chunk.chunkIndex}:${mention.entityType}:${mention.entityValue}`;
+      if (seenEntityMentions.has(key)) continue;
+      seenEntityMentions.add(key);
+
       allEntityMentions.push({
         chunkIndex: chunk.chunkIndex,
         ...mention,
@@ -155,35 +157,12 @@ export async function indexMemoryFromDiary(
     mentionsByChunkIndex.set(m.chunkIndex, list);
   }
 
-  // If a persistence callback is provided, resolve chunkIds and persist
+  // If a persistence callback is provided, delegate persistence to the caller.
+  // Callback errors intentionally propagate so the outbox worker can retry.
   let persistedEntityCount = 0;
-  if (input.insertEntityMentions && allEntityMentions.length > 0) {
-    try {
-      // Resolve chunk IDs: chunks are identified by (userId, sourceType, sourceId, chunkIndex)
-      // Since we just upserted them, we can query for their IDs
-      const chunkIdPayloads = allEntityMentions.map((m) => ({
-        chunkId: "", // Will be resolved below
-        entityType: m.entityType,
-        entityValue: m.entityValue,
-        chunkIndex: m.chunkIndex,
-      }));
-
-      // We need the actual DB chunk IDs. Query them by the unique key.
-      // For now, we pass the source identifiers so the caller can resolve.
-      // The diary service will handle this in a transaction.
-      await input.insertEntityMentions(
-        chunkIdPayloads.map((p) => ({
-          // The chunk ID will be resolved by the caller using source key lookup
-          chunkId: `${input.userId}:${persistedChunks[0]?.sourceType ?? "diary"}:${input.diaryId}:${p.chunkIndex}`,
-          entityType: p.entityType,
-          entityValue: p.entityValue,
-        })),
-      );
-      persistedEntityCount = allEntityMentions.length;
-    } catch (error) {
-      console.error("Failed to persist entity mentions (non-fatal):", error);
-      // Entity mention persistence is best-effort — don't fail the whole pipeline
-    }
+  if (input.insertEntityMentions) {
+    await input.insertEntityMentions(allEntityMentions);
+    persistedEntityCount = allEntityMentions.length;
   }
 
   return {

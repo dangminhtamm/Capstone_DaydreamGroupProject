@@ -7,6 +7,7 @@ import { isSafeRedirectUrl } from '@/features/google-calendar/google-calendar-ut
 import { useGoogleCalendarIntegration } from '@/features/google-calendar/use-google-calendar';
 import { useGoogleContactsIntegration } from '@/features/google-contacts/use-google-contacts';
 import { useGoogleDriveIntegration } from '@/features/google-drive/use-google-drive';
+import { useGoogleGmailIntegration } from '@/features/google-gmail/use-google-gmail';
 import type { IndexingStatus } from '@/lib/api-client';
 
 type GoogleWorkspaceCardProps = {
@@ -24,31 +25,30 @@ type WorkspaceRow = {
   connected: boolean;
   isLoading: boolean;
   isSyncing: boolean;
-  isFuture?: boolean;
-  accent: 'sky' | 'fuchsia' | 'lime' | 'slate';
+  accent: 'sky' | 'fuchsia' | 'lime' | 'rose';
   onSync?: () => void;
 };
 
 const accentStyles = {
   sky: {
     dot: 'bg-sky-500',
-    button: 'bg-sky-600 text-white hover:bg-sky-700',
-    subtle: 'bg-sky-50 text-sky-700 ring-sky-100 dark:bg-sky-950/40 dark:text-sky-200 dark:ring-sky-800',
+    button: 'action-primary',
+    subtle: 'status-badge',
   },
   fuchsia: {
     dot: 'bg-fuchsia-500',
-    button: 'bg-fuchsia-600 text-white hover:bg-fuchsia-700',
-    subtle: 'bg-fuchsia-50 text-fuchsia-700 ring-fuchsia-100 dark:bg-fuchsia-950/40 dark:text-fuchsia-200 dark:ring-fuchsia-800',
+    button: 'action-primary',
+    subtle: 'status-badge',
   },
   lime: {
     dot: 'bg-lime-500',
-    button: 'bg-lime-600 text-white hover:bg-lime-700',
-    subtle: 'bg-lime-50 text-lime-700 ring-lime-100 dark:bg-lime-950/40 dark:text-lime-200 dark:ring-lime-800',
+    button: 'action-primary',
+    subtle: 'status-badge',
   },
-  slate: {
-    dot: 'bg-slate-400',
-    button: 'bg-slate-200 text-slate-500 dark:bg-slate-700 dark:text-slate-400',
-    subtle: 'bg-slate-100 text-slate-600 ring-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700',
+  rose: {
+    dot: 'bg-rose-500',
+    button: 'action-primary',
+    subtle: 'status-badge',
   },
 };
 
@@ -59,11 +59,13 @@ export function GoogleWorkspaceCard({ indexingStatus }: GoogleWorkspaceCardProps
   const calendar = useGoogleCalendarIntegration(auth);
   const contacts = useGoogleContactsIntegration(auth);
   const drive = useGoogleDriveIntegration(auth);
+  const gmail = useGoogleGmailIntegration(auth);
 
   const connected =
     Boolean(calendar.status?.connected) ||
     Boolean(contacts.status?.connected) ||
-    Boolean(drive.status?.connected);
+    Boolean(drive.status?.connected) ||
+    Boolean(gmail.status?.connected);
 
   const rows: WorkspaceRow[] = useMemo(() => [
     {
@@ -106,15 +108,15 @@ export function GoogleWorkspaceCard({ indexingStatus }: GoogleWorkspaceCardProps
       source: 'gmail',
       label: 'Gmail',
       description: 'Email memory and thread citations',
-      countLabel: 'Future',
-      lastSyncedAt: null,
-      connected: false,
-      isLoading: false,
-      isSyncing: false,
-      isFuture: true,
-      accent: 'slate',
+      countLabel: `${gmail.status?.messageCount ?? 0} messages`,
+      lastSyncedAt: gmail.status?.lastSyncedAt ?? null,
+      connected: Boolean(gmail.status?.connected),
+      isLoading: gmail.isLoading,
+      isSyncing: gmail.isSyncing,
+      accent: 'rose',
+      onSync: () => void gmail.syncGmail(20),
     },
-  ], [calendar, contacts, drive]);
+  ], [calendar, contacts, drive, gmail]);
 
   const reconnectGoogle = async () => {
     setIsConnecting(true);
@@ -134,18 +136,19 @@ export function GoogleWorkspaceCard({ indexingStatus }: GoogleWorkspaceCardProps
     calendar.clearFeedback();
     contacts.clearFeedback();
     drive.clearFeedback();
+    gmail.clearFeedback();
   };
 
-  const feedback = calendar.feedback ?? contacts.feedback ?? drive.feedback;
+  const feedback = calendar.feedback ?? contacts.feedback ?? drive.feedback ?? gmail.feedback;
 
   if (!isAuthenticated) {
     return (
-      <section id="google-workspace" className="scroll-mt-24 rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:bg-slate-800 dark:shadow-slate-900/40">
+      <section id="google-workspace" className="scroll-mt-24 enterprise-card p-5">
         <div className="mb-5">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
             Integrations
           </p>
-          <h3 className="mt-2 text-2xl font-bold tracking-tight text-slate-950 dark:text-slate-100">
+          <h3 className="mt-1.5 text-xl font-semibold tracking-tight text-slate-950 dark:text-slate-100">
             Google Workspace
           </h3>
         </div>
@@ -159,24 +162,24 @@ export function GoogleWorkspaceCard({ indexingStatus }: GoogleWorkspaceCardProps
   }
 
   return (
-    <section id="google-workspace" className="scroll-mt-24 rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:bg-slate-800 dark:shadow-slate-900/40">
+    <section id="google-workspace" className="scroll-mt-24 enterprise-card p-5">
       <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
             Integrations
           </p>
-          <h3 className="mt-2 text-2xl font-bold tracking-tight text-slate-950 dark:text-slate-100">
+          <h3 className="mt-1.5 text-xl font-semibold tracking-tight text-slate-950 dark:text-slate-100">
             Google Workspace
           </h3>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            Calendar, Contacts, and Drive feed grounded AI memory citations.
+            Calendar, Contacts, Drive, and Gmail feed grounded AI memory citations.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${
+          <span className={`status-badge ${
             connected
-              ? 'bg-emerald-50 text-emerald-700 ring-emerald-100 dark:bg-emerald-900/30 dark:text-emerald-300 dark:ring-emerald-800'
-              : 'bg-amber-50 text-amber-700 ring-amber-100 dark:bg-amber-900/30 dark:text-amber-300 dark:ring-amber-800'
+              ? 'status-badge-success'
+              : 'status-badge-warning'
           }`}>
             {connected ? 'Connected' : 'Needs reconnect'}
           </span>
@@ -184,7 +187,7 @@ export function GoogleWorkspaceCard({ indexingStatus }: GoogleWorkspaceCardProps
             type="button"
             onClick={() => void reconnectGoogle()}
             disabled={isConnecting}
-            className="cursor-pointer rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600"
+            className="action-secondary disabled:cursor-not-allowed"
           >
             {isConnecting ? 'Connecting...' : 'Reconnect Google'}
           </button>
@@ -214,7 +217,7 @@ export function GoogleWorkspaceCard({ indexingStatus }: GoogleWorkspaceCardProps
         </div>
       )}
 
-      <div className="divide-y divide-slate-100 overflow-hidden rounded-2xl border border-slate-200 dark:divide-slate-700 dark:border-slate-700">
+      <div className="divide-y divide-slate-100 overflow-hidden rounded-lg border border-slate-200 dark:divide-slate-800 dark:border-slate-800">
         {rows.map((row) => (
           <WorkspaceIntegrationRow
             key={row.source}
@@ -235,23 +238,21 @@ function WorkspaceIntegrationRow({
   indexingLabel: string;
 }) {
   const styles = accentStyles[row.accent];
-  const statusLabel = row.isFuture
-    ? 'Future'
-    : row.isLoading
-      ? 'Checking'
-      : row.connected
-        ? 'Ready'
-        : 'Needs reconnect';
+  const statusLabel = row.isLoading
+    ? 'Checking'
+    : row.connected
+      ? 'Ready'
+      : 'Needs reconnect';
 
   return (
-    <div className="grid gap-4 px-4 py-4 md:grid-cols-[minmax(0,1.2fr)_120px_140px_150px_auto] md:items-center">
+    <div className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1.2fr)_120px_140px_150px_auto] md:items-center">
       <div className="min-w-0">
         <div className="flex items-center gap-2">
           <span className={`h-2.5 w-2.5 rounded-full ${styles.dot}`} aria-hidden />
           <p className="truncate text-sm font-semibold text-slate-950 dark:text-slate-100">
             {row.label}
           </p>
-          <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ${styles.subtle}`}>
+          <span className={styles.subtle}>
             {statusLabel}
           </span>
         </div>
@@ -261,17 +262,17 @@ function WorkspaceIntegrationRow({
       </div>
 
       <Metric label="Synced" value={row.countLabel} />
-      <Metric label="Last sync" value={formatLastSynced(row.lastSyncedAt, row.isFuture)} />
-      <Metric label="Indexing" value={row.isFuture ? 'Planned' : indexingLabel} />
+      <Metric label="Last sync" value={formatLastSynced(row.lastSyncedAt)} />
+      <Metric label="Indexing" value={indexingLabel} />
 
       <div className="flex justify-start md:justify-end">
         <button
           type="button"
           onClick={row.onSync}
-          disabled={row.isFuture || !row.connected || row.isSyncing}
-          className={`min-w-24 cursor-pointer rounded-xl px-4 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${row.isFuture ? accentStyles.slate.button : styles.button}`}
+          disabled={!row.connected || row.isSyncing}
+          className={`min-w-28 disabled:cursor-not-allowed ${styles.button}`}
         >
-          {row.isFuture ? 'Future' : row.isSyncing ? 'Syncing...' : 'Sync'}
+          {row.isSyncing ? 'Syncing...' : 'Sync'}
         </button>
       </div>
     </div>
@@ -291,8 +292,7 @@ function Metric({ label, value }: { label: string; value: string }) {
   );
 }
 
-function formatLastSynced(value: string | null, isFuture?: boolean) {
-  if (isFuture) return 'Future';
+function formatLastSynced(value: string | null) {
   if (!value) return 'Not synced';
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return 'Unknown';
@@ -305,7 +305,6 @@ function formatLastSynced(value: string | null, isFuture?: boolean) {
 
 function getIndexingLabel(source: WorkspaceSource, indexingStatus?: IndexingStatus | null) {
   if (!indexingStatus?.available) return 'Unknown';
-  if (source === 'gmail') return 'Planned';
 
   const sourceJobs = indexingStatus.recent.filter((job) => job.sourceType === source);
   const activeJob = sourceJobs.find((job) => ['pending', 'retry', 'processing'].includes(job.status));

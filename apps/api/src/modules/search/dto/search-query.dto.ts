@@ -6,6 +6,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  MaxLength,
   Max,
   Min,
   MinLength,
@@ -55,4 +56,9 @@ export class SearchQueryDto {
   @IsString()
   @IsIn(['auto', 'fast', 'deep'])
   answerStrategy?: 'auto' | 'fast' | 'deep';
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  timeZone?: string;
 }

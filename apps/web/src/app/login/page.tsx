@@ -63,14 +63,14 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col bg-gradient-to-br from-slate-50 via-white to-indigo-50 dark:from-slate-950 dark:via-slate-900 dark:to-indigo-950/40">
+    <div className="flex min-h-screen flex-col bg-[#f6f8fb] dark:bg-slate-950">
       {/* Minimal header */}
-      <header className="border-b border-slate-200 bg-white/80 backdrop-blur-sm dark:border-slate-700 dark:bg-slate-900/80">
+      <header className="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
         <div className="mx-auto flex h-16 max-w-5xl items-center justify-between px-6">
           <BrainLogo size="sm" variant="badge" showText={true} href="/" />
           <button
             onClick={toggleTheme}
-            className="cursor-pointer rounded-xl p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+            className="action-quiet cursor-pointer p-2"
             aria-label="Toggle theme"
           >
             {isDark ? (
@@ -103,13 +103,13 @@ export default function LoginPage() {
           </div>
 
           {/* Card */}
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-xl shadow-slate-200/50 dark:border-slate-700 dark:bg-slate-800 dark:shadow-slate-900/50">
+          <div className="enterprise-card p-6">
             {/* Google sign-in */}
             <button
               type="button"
               onClick={handleGoogleLogin}
               disabled={isSubmitting}
-              className="flex w-full cursor-pointer items-center justify-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700 transition hover:bg-slate-50 hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600"
+              className="action-secondary w-full disabled:cursor-not-allowed"
             >
               <svg className="h-5 w-5" viewBox="0 0 24 24">
                 <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
@@ -171,7 +171,7 @@ export default function LoginPage() {
                     <button
                       type="submit"
                       disabled={isSubmitting || !email.trim()}
-                      className="w-full cursor-pointer rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="action-primary w-full disabled:cursor-not-allowed"
                     >
                       {isSubmitting ? "Sending..." : "Send Reset Link"}
                     </button>
@@ -256,7 +256,7 @@ export default function LoginPage() {
                 <button
                   type="submit"
                   disabled={isSubmitting || !email.trim() || !password}
-                  className="w-full cursor-pointer rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-200 transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50 dark:shadow-indigo-900/30"
+                  className="action-primary w-full disabled:cursor-not-allowed"
                 >
                   {isSubmitting ? "Signing in..." : "Sign In"}
                 </button>

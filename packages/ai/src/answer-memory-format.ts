@@ -38,9 +38,10 @@ export function formatTemporalRangeAnswer(
   citations: MemoryCitation[],
   rangeLabel: string,
   lang: ResponseLanguage,
+  timeZone = "UTC",
 ): string {
   const lines = citations.map((citation) => {
-    const date = formatFallbackSourceDate(citation.occurredAt, lang);
+    const date = formatFallbackSourceDate(citation.occurredAt, lang, timeZone);
     return `- ${date}: ${formatMemoryBullet(citation)}.`;
   });
 
@@ -57,13 +58,17 @@ export function formatTemporalRangeAnswer(
   ].join("\n");
 }
 
-export function formatDateForAnswer(date: Date, lang: ResponseLanguage): string {
+export function formatDateForAnswer(
+  date: Date,
+  lang: ResponseLanguage,
+  timeZone = "UTC",
+): string {
   if (lang === "vi") {
     return new Intl.DateTimeFormat("vi-VN", {
       day: "2-digit",
       month: "2-digit",
       year: "numeric",
-      timeZone: "UTC",
+      timeZone,
     }).format(date);
   }
 
@@ -71,7 +76,7 @@ export function formatDateForAnswer(date: Date, lang: ResponseLanguage): string 
     month: "long",
     day: "numeric",
     year: "numeric",
-    timeZone: "UTC",
+    timeZone,
   }).format(date);
 }
 
@@ -79,9 +84,10 @@ export function formatDateRangeForAnswer(
   startDate: Date,
   endDate: Date,
   lang: ResponseLanguage,
+  timeZone = "UTC",
 ): string {
-  const start = formatDateForAnswer(startDate, lang);
-  const end = formatDateForAnswer(endDate, lang);
+  const start = formatDateForAnswer(startDate, lang, timeZone);
+  const end = formatDateForAnswer(endDate, lang, timeZone);
   if (start === end) return start;
   return lang === "vi" ? `${start} đến ${end}` : `${start} to ${end}`;
 }
@@ -138,10 +144,11 @@ export function formatIntentEvidenceAnswer(
   citations: MemoryCitation[],
   intent: MemoryIntent,
   lang: ResponseLanguage,
+  timeZone = "UTC",
 ): string {
   const bullets = citations
     .map((citation) => {
-      const date = formatFallbackSourceDate(citation.occurredAt, lang);
+      const date = formatFallbackSourceDate(citation.occurredAt, lang, timeZone);
       return `- ${date}: ${formatLocalizedMemoryBullet(citation, intent, lang)}.`;
     })
     .join("\n");
@@ -312,10 +319,14 @@ export function formatValidationFallbackLead(message: string, lang: ResponseLang
     : "I am using the most relevant memories directly.";
 }
 
-export function formatFallbackSourceDate(value: string, lang: ResponseLanguage): string {
+export function formatFallbackSourceDate(
+  value: string,
+  lang: ResponseLanguage,
+  timeZone = "UTC",
+): string {
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return value;
-  return formatDateForAnswer(date, lang);
+  return formatDateForAnswer(date, lang, timeZone);
 }
 
 export function trimPromptQuote(text: string, maxLength = 420): string {

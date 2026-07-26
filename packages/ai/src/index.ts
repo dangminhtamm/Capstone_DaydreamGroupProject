@@ -15,6 +15,7 @@ export {
   answerFromChunks,
   answerMemory,
   inferRetrievalFilters,
+  resolveMemoryTimeZone,
   type AnswerMemoryOptions,
   type AnswerMemoryResult,
   type MemoryDebugTrace,
@@ -30,6 +31,7 @@ export {
 export {
   indexMemoryFromDiary,
   type ExtractedEntityMention,
+  type ExtractedEntityMentionWithChunkIndex,
   type IndexedMemoryChunk,
   type IndexMemoryFromDiaryInput,
   type IndexMemoryFromDiaryResult,
@@ -52,6 +54,12 @@ export {
   type IndexMemoryFromDriveInput,
   type IndexMemoryFromDriveResult,
 } from "./drive-indexer.ts";
+export {
+  indexMemoryFromGmail,
+  type GmailMessageInput,
+  type IndexMemoryFromGmailInput,
+  type IndexMemoryFromGmailResult,
+} from "./gmail-indexer.ts";
 export {
   indexMemoryFromAttachment,
   type IndexMemoryFromAttachmentInput,

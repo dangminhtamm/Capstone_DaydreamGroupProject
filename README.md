@@ -20,7 +20,7 @@ _Transform unstructured thoughts into structured, retrievable memory with AI-pow
 | Feature | Description |
 |---|---|
 | **Hierarchical Reflection** | Aggregates data from daily diary entries into weekly and monthly AI-generated insights. |
-| **Grounded Memory Retrieval** | Prevents AI hallucination by grounding every answer in actual diary chunks and calendar events. |
+| **Grounded Memory Retrieval** | Prevents AI hallucination by grounding every answer in actual diary, attachment, Calendar, Contacts, Drive, Gmail, and summary chunks. |
 | **Explainable AI** | Provides exact citation markers (`[S1]`, `[S2]`, …) and confidence scores (`high` / `medium` / `low`) for every retrieved answer. |
 | **AI Observability** | Full transparency with token usage tracking, timing pipeline breakdown, and an interactive analytics panel per query. |
 | **Semantic Search + History** | Vector-based search using Gemini embeddings with persistent search history and cached answers. |
@@ -77,6 +77,7 @@ Capstone_DaydreamGroupProject/
 │   │       ├── modules/
 │   │       │   ├── auth/             # Supabase JWT auth guard + Google OAuth
 │   │       │   ├── calendar/         # Google Calendar sync & retrieval
+│   │       │   ├── gmail/            # Gmail sync & memory indexing
 │   │       │   ├── diary/            # CRUD for diary entries
 │   │       │   ├── search/           # Semantic memory search endpoint
 │   │       │   ├── summary/          # AI-generated summaries (daily/weekly/monthly)
@@ -127,7 +128,7 @@ Capstone_DaydreamGroupProject/
 |---|---|
 | `User` | Linked to Supabase Auth; stores Google OAuth tokens |
 | `DiaryEntry` | Raw text entries with draft/published status |
-| `MemoryChunk` | Chunked diary/calendar/email text with 768-dim vector embeddings |
+| `MemoryChunk` | Chunked diary/calendar/email/attachment/summary text with 768-dim vector embeddings |
 | `CalendarEvent` | Synced Google Calendar events (many-to-many with DiaryEntry) |
 | `Summary` | AI-generated reflections (daily, weekly, monthly, yearly) |
 | `EntityMention` | Extracted entities (person, project, goal, habit) from chunks |
@@ -147,7 +148,7 @@ Capstone_DaydreamGroupProject/
 | `/timeline` | Timeline | Browse entries with mini calendar, date filter, and quick stats |
 | `/search` | Memory Search | AI-powered semantic search with search history and cached answers |
 | `/summary` | Summary | AI-generated daily/weekly/monthly reflections with token usage dashboard |
-| `/settings` | Settings | Profile, avatar upload, password management, theme, language |
+| `/settings` | Settings | Profile, avatar upload, password management, theme, language, Google Workspace sync |
 | `/auth/callback` | Auth Callback | Supabase OAuth redirect handler |
 
 ---
@@ -185,7 +186,7 @@ SUPABASE_URL="https://YOUR_PROJECT.supabase.co"
 SUPABASE_JWT_SECRET="your-jwt-secret"
 SUPABASE_SERVICE_KEY="your-service-role-key"
 
-# ── Google OAuth (Calendar Sync) ──────────────────────────
+# ── Google OAuth (Calendar, Contacts, Drive, Gmail Sync) ──
 GOOGLE_CLIENT_ID="your-google-client-id"
 GOOGLE_CLIENT_SECRET="your-google-client-secret"
 GOOGLE_REDIRECT_URI="http://localhost:3001/api/calendar/oauth/callback"
@@ -243,6 +244,33 @@ pnpm --filter @second-brain/worker dev
 pnpm --filter @second-brain/search dev
 ```
 
+### Run With Docker
+
+Docker Compose runs the production builds plus local infrastructure:
+
+- `postgres`: PostgreSQL with `pgvector`
+- `redis`: rate-limit/cache backend
+- `migrate`: applies Prisma migrations before app startup
+- `api`: NestJS API on `http://localhost:3001/api`
+- `worker`: background indexing/sync/summary jobs
+- `web`: Next.js app on `http://localhost:3000`
+
+```bash
+# Prepare env. Fill in real Supabase, Gemini, and Google values.
+cp .env.docker.example .env
+
+# Build and start the stack
+pnpm docker:up
+
+# Optional: follow app logs
+pnpm docker:logs
+
+# Stop containers
+pnpm docker:down
+```
+
+Compose overrides `DATABASE_URL`, `DIRECT_URL`, and `REDIS_URL` to use the local containers, while your Supabase/Gemini/Google secrets still come from `.env`.
+
 ### Useful Scripts
 
 ```bash
@@ -257,6 +285,12 @@ pnpm --filter @second-brain/db memory:insert-sample
 
 # DB package — test vector similarity search
 pnpm --filter @second-brain/db memory:test-search
+
+# Seed evaluation data and publish a valid memory quality report
+pnpm eval:memory-report
+
+# Stable artifact for demo slides
+open packages/ai/evaluation/reports/memory-evaluation-latest-valid.md
 
 # Build all packages
 pnpm build
@@ -278,8 +312,16 @@ All endpoints are prefixed with `/api` and require a valid Supabase JWT (`Author
 | `GET` | `/api/search?q=...&limit=10` | Search | Semantic memory search |
 | `POST` | `/api/calendar/sync` | Calendar | Sync Google Calendar events |
 | `GET` | `/api/calendar/events` | Calendar | Get synced calendar events |
+| `POST` | `/api/contacts/sync` | Contacts | Sync Google Contacts |
+| `POST` | `/api/drive/sync` | Drive | Sync Google Drive files |
+| `POST` | `/api/gmail/sync` | Gmail | Sync recent Gmail messages |
+| `GET` | `/api/gmail/messages` | Gmail | Get synced Gmail messages |
 | `GET` | `/api/summary` | Summary | Get AI-generated summaries |
 | `POST` | `/api/upload` | Upload | Upload file attachments |
+
+Search intentionally uses the non-streaming grounded answer path for MVP. The
+internal `answerMemoryStream` wrapper is experimental and delegates to the same
+validated `answerMemory` pipeline; no `/api/search/stream` route is exposed yet.
 
 ---
 

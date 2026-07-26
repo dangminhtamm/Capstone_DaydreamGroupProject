@@ -432,7 +432,7 @@ export async function insertEntityMentions(
       `
         INSERT INTO "entity_mentions" ("id", "chunk_id", "entity_type", "entity_value")
         VALUES (gen_random_uuid(), $1, $2, $3)
-        ON CONFLICT DO NOTHING
+        ON CONFLICT ("chunk_id", "entity_type", "entity_value") DO NOTHING
       `,
       mention.chunkId,
       mention.entityType,

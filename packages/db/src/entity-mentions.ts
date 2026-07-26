@@ -29,7 +29,7 @@ export async function insertEntityMentions(
       prisma.$executeRaw`
         INSERT INTO entity_mentions (id, chunk_id, entity_type, entity_value)
         VALUES (gen_random_uuid(), ${m.chunkId}, ${m.entityType}, ${m.entityValue})
-        ON CONFLICT DO NOTHING;
+        ON CONFLICT (chunk_id, entity_type, entity_value) DO NOTHING;
       `,
     ),
   );

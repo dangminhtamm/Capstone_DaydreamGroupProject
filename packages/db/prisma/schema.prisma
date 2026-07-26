@@ -115,22 +115,32 @@ model EntityMention {
   // Relations
   chunk MemoryChunk @relation(fields: [chunk_id], references: [id], onDelete: Cascade)
 
+  @@unique([chunk_id, entity_type, entity_value], map: "entity_mentions_chunk_type_value_key")
+  @@index([entity_type, entity_value], map: "entity_mentions_type_value_idx")
+  @@index([chunk_id], map: "entity_mentions_chunk_id_idx")
   @@map("entity_mentions")
 }
 
 model GmailMessage {
-  id          String @id @default(uuid())
+  id          String   @id @default(uuid())
   user_id     String
-  external_id String @unique // Gmail Message/Thread ID
+  external_id String // Gmail Message ID, unique per user
+  thread_id   String?
   sender      String
   subject     String
-  body        String @db.Text
+  snippet     String?
+  body        String   @db.Text
+  received_at DateTime?
+  raw_json    Json?
 
   created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
 
   // Relations
   user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
+  @@unique([user_id, external_id], map: "gmail_messages_user_external_key")
+  @@index([user_id, received_at], map: "gmail_messages_user_received_at_idx")
   @@map("gmail_messages")
 }
 

@@ -21,6 +21,7 @@ import { IndexingController } from './modules/indexing/indexing.controller';
 import { IndexingService } from './modules/indexing/indexing.service';
 import { ContactsModule } from './modules/contacts/contacts.module';
 import { DriveModule } from './modules/drive/drive.module';
+import { GmailModule } from './modules/gmail/gmail.module';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { DriveModule } from './modules/drive/drive.module';
     CalendarModule,
     ContactsModule,
     DriveModule,
+    GmailModule,
   ],
   controllers: [
     AppController,

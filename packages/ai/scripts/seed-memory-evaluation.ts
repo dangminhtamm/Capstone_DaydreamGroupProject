@@ -26,6 +26,16 @@ type SeedCalendarEvent = {
 type EvaluationDataset = {
   seedDiaries: SeedDiary[];
   seedCalendarEvents: SeedCalendarEvent[];
+  summaryCoverage?: Array<{
+    id: string;
+    summaryType: string;
+    periodStart: string;
+    periodEnd: string;
+    expectedKeyEvents: Array<{
+      label: string;
+      anyOf: string[];
+    }>;
+  }>;
 };
 
 const datasetPath =
@@ -39,7 +49,9 @@ const seedDiaryLimit = process.env.MEMORY_SEED_DIARY_LIMIT
   : undefined;
 const seedDelayMs = Number(process.env.MEMORY_SEED_DELAY_MS ?? 13_000);
 
-if (!process.env.GEMINI_API_KEY) {
+if (process.argv.includes("--help") || process.argv.includes("-h")) {
+  printHelp();
+} else if (!process.env.GEMINI_API_KEY) {
   console.error("Set GEMINI_API_KEY before seeding memory evaluation data.");
   process.exitCode = 1;
 } else if (!process.env.DATABASE_URL) {
@@ -54,7 +66,13 @@ if (!process.env.GEMINI_API_KEY) {
     import("../src/index.ts"),
   ]);
   const prisma = db.prisma ?? db.createPrismaClient();
-  const { deleteMemoryChunksForSource, insertMemoryChunks } = db;
+  const {
+    deleteEntityMentionsForSource,
+    deleteMemoryChunksForSource,
+    insertEntityMentions,
+    insertMemoryChunks,
+    resolveMemoryChunkIds,
+  } = db;
   const userId = await resolveEvaluationUserId(prisma as any, "seed");
   const dataset = JSON.parse(
     readFileSync(datasetPath, "utf8"),
@@ -64,6 +82,7 @@ if (!process.env.GEMINI_API_KEY) {
     if (userId) {
       let diaryChunkCount = 0;
       let calendarChunkCount = 0;
+      let summaryCount = 0;
       const seedDiaries = Number.isFinite(seedDiaryLimit)
         ? dataset.seedDiaries.slice(0, Math.max(0, seedDiaryLimit ?? 0))
         : dataset.seedDiaries;
@@ -99,6 +118,34 @@ if (!process.env.GEMINI_API_KEY) {
           entryDate: diary.entryDate,
           sourceTitle: diary.title,
           insertChunks: (chunks) => insertMemoryChunks(prisma as any, chunks),
+          insertEntityMentions: async (mentions) => {
+            await deleteEntityMentionsForSource(prisma as any, {
+              userId,
+              sourceType: "diary",
+              sourceId: diary.id,
+            });
+
+            if (!mentions.length) return;
+
+            const chunkIdMap = await resolveMemoryChunkIds(prisma as any, {
+              userId,
+              sourceType: "diary",
+              sourceId: diary.id,
+            });
+            const mentionRows = mentions
+              .map((mention) => {
+                const chunkId = chunkIdMap.get(mention.chunkIndex);
+                if (!chunkId) return null;
+                return {
+                  chunkId,
+                  entityType: mention.entityType,
+                  entityValue: mention.entityValue,
+                };
+              })
+              .filter((mention): mention is NonNullable<typeof mention> => mention !== null);
+
+            await insertEntityMentions(prisma as any, mentionRows);
+          },
         });
 
         diaryChunkCount += indexed.chunkCount;
@@ -111,7 +158,12 @@ if (!process.env.GEMINI_API_KEY) {
       const upsertedCalendarEvents = [];
       for (const event of dataset.seedCalendarEvents) {
         const upserted = await prisma.calendarEvent.upsert({
-          where: { external_id: event.externalId },
+          where: {
+            user_id_external_id: {
+              user_id: userId,
+              external_id: event.externalId,
+            },
+          },
           update: {
             user_id: userId,
             title: event.title,
@@ -156,11 +208,37 @@ if (!process.env.GEMINI_API_KEY) {
       });
       calendarChunkCount += calendarIndexed.totalChunkCount;
 
+      for (const target of dataset.summaryCoverage ?? []) {
+        await prisma.summary.upsert({
+          where: {
+            user_id_summary_type_period_start_period_end: {
+              user_id: userId,
+              summary_type: target.summaryType,
+              period_start: new Date(target.periodStart),
+              period_end: new Date(target.periodEnd),
+            },
+          },
+          update: {
+            content: buildSummaryCoverageContent(target),
+          },
+          create: {
+            id: target.id,
+            user_id: userId,
+            summary_type: target.summaryType,
+            period_start: new Date(target.periodStart),
+            period_end: new Date(target.periodEnd),
+            content: buildSummaryCoverageContent(target),
+          },
+        });
+        summaryCount++;
+      }
+
       console.log(
         JSON.stringify(
           {
             seededDiaries: seedDiaries.length,
             seededCalendarEvents: dataset.seedCalendarEvents.length,
+            seededSummaries: summaryCount,
             diaryChunkCount,
             calendarChunkCount,
             calendarIndexErrors: calendarIndexed.errors,
@@ -175,6 +253,36 @@ if (!process.env.GEMINI_API_KEY) {
   } finally {
     await prisma.$disconnect();
   }
+}
+
+function buildSummaryCoverageContent(target: NonNullable<EvaluationDataset["summaryCoverage"]>[number]): string {
+  return [
+    `Evaluation ${target.summaryType} summary`,
+    `Period: ${target.periodStart} to ${target.periodEnd}`,
+    ...target.expectedKeyEvents.map(
+      (event) => `- ${event.label}. Evidence keywords: ${event.anyOf.join(", ")}.`,
+    ),
+  ].join("\n");
+}
+
+function printHelp(): void {
+  console.log(`
+Second Brain memory evaluation seed
+
+Required env:
+  GEMINI_API_KEY
+  DATABASE_URL
+  SAMPLE_USER_ID or SAMPLE_USER_EMAIL
+
+Optional env:
+  MEMORY_EVAL_DATASET        Path to dataset JSON
+  MEMORY_SEED_DIARY_LIMIT    Limit diary rows for smoke runs
+  MEMORY_SEED_DELAY_MS       Delay between diary indexing calls (default: 13000)
+
+Output:
+  Seeds deterministic diary, calendar, and summary coverage rows, then indexes
+  diary/calendar memory chunks with the production AI indexing pipeline.
+`.trim());
 }
 
 function sleep(ms: number): Promise<void> {

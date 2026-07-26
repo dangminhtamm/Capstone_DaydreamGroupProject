@@ -84,14 +84,12 @@ function CallbackContent() {
   }, [supabase, router, searchParams]);
 
   return (
-    <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-xl dark:border-slate-700 dark:bg-slate-800">
+    <div className="w-full max-w-md enterprise-card p-8 text-center">
       {status === "processing" && (
         <>
-          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-indigo-100 dark:bg-indigo-900/40">
-            <svg className="h-7 w-7 animate-spin text-indigo-600 dark:text-indigo-400" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-            </svg>
+          <div className="mx-auto space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-900">
+            <div className="skeleton-line mx-auto h-3 w-36" />
+            <div className="skeleton-line mx-auto h-3 w-24" />
           </div>
           <p className="mt-4 text-sm font-medium text-slate-600 dark:text-slate-400">{message}</p>
         </>
@@ -130,15 +128,13 @@ function CallbackContent() {
 
 export default function AuthCallbackPage() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-50 via-white to-indigo-50 dark:from-slate-950 dark:via-slate-900 dark:to-indigo-950/40">
+    <div className="flex min-h-screen items-center justify-center bg-slate-100 dark:bg-slate-950">
       <Suspense
         fallback={
-          <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-xl dark:border-slate-700 dark:bg-slate-800">
-            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-indigo-100 dark:bg-indigo-900/40">
-              <svg className="h-7 w-7 animate-spin text-indigo-600 dark:text-indigo-400" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
+          <div className="w-full max-w-md enterprise-card p-8 text-center">
+            <div className="mx-auto space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-900">
+              <div className="skeleton-line mx-auto h-3 w-36" />
+              <div className="skeleton-line mx-auto h-3 w-24" />
             </div>
             <p className="mt-4 text-sm font-medium text-slate-600 dark:text-slate-400">Processing...</p>
           </div>

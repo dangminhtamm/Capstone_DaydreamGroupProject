@@ -5,9 +5,12 @@ import * as cron from 'node-cron';
 import { google } from 'googleapis';
 import { decryptOAuthToken, encryptOAuthToken } from '@second-brain/shared';
 import {
+  deleteEntityMentionsForSource,
   deleteMemoryChunksForSource,
+  insertEntityMentions as insertEntityMentionRows,
   insertMemoryChunks,
   pruneMemoryChunksForSource,
+  resolveMemoryChunkIds,
 } from '@second-brain/db';
 import {
   getGeminiVisionModel,
@@ -16,6 +19,7 @@ import {
   indexMemoryFromContact,
   indexMemoryFromDiary,
   indexMemoryFromDrive,
+  indexMemoryFromGmail,
   indexMemoryFromSummary,
 } from '@second-brain/ai';
 import { prisma } from '../../lib/prisma';
@@ -231,6 +235,9 @@ Return only the extracted text or factual description.
       case 'drive':
         await this.processDriveFile({ ...job, source_type: sourceType });
         return;
+      case 'gmail':
+        await this.processGmailMessage({ ...job, source_type: sourceType });
+        return;
       case 'summary':
         await this.processSummary({ ...job, source_type: sourceType });
         return;
@@ -257,6 +264,10 @@ Return only the extracted text or factual description.
       google_drive: 'drive',
       drive_file: 'drive',
       google_drive_file: 'drive',
+      google_mail: 'gmail',
+      google_gmail: 'gmail',
+      gmail_message: 'gmail',
+      email: 'gmail',
       generated_summary: 'summary',
     };
 
@@ -306,6 +317,35 @@ Return only the extracted text or factual description.
             sourceId: diary.id,
             keepChunkCount: chunks.length,
           });
+        }),
+      insertEntityMentions: (mentions) =>
+        prisma.$transaction(async (tx: any) => {
+          await deleteEntityMentionsForSource(tx, {
+            userId: job.user_id,
+            sourceType: 'diary',
+            sourceId: diary.id,
+          });
+
+          if (!mentions.length) return;
+
+          const chunkIdMap = await resolveMemoryChunkIds(tx, {
+            userId: job.user_id,
+            sourceType: 'diary',
+            sourceId: diary.id,
+          });
+          const mentionRows = mentions
+            .map((mention) => {
+              const chunkId = chunkIdMap.get(mention.chunkIndex);
+              if (!chunkId) return null;
+              return {
+                chunkId,
+                entityType: mention.entityType,
+                entityValue: mention.entityValue,
+              };
+            })
+            .filter((mention): mention is NonNullable<typeof mention> => mention !== null);
+
+          await insertEntityMentionRows(tx, mentionRows);
         }),
     });
 
@@ -542,6 +582,53 @@ Return only the extracted text or factual description.
         userId: job.user_id,
         sourceType: 'drive',
         sourceId: driveFile.id,
+      });
+    }
+  }
+
+  private static async processGmailMessage(job: IndexingJob) {
+    const message = await prisma.gmailMessage.findFirst({
+      where: { id: job.source_id, user_id: job.user_id },
+    });
+
+    if (!message) {
+      await deleteMemoryChunksForSource(prisma as any, {
+        userId: job.user_id,
+        sourceType: 'gmail',
+        sourceId: job.source_id,
+      });
+      return;
+    }
+
+    const result = await indexMemoryFromGmail({
+      userId: job.user_id,
+      message: {
+        messageId: message.id,
+        externalId: message.external_id,
+        threadId: message.thread_id,
+        sender: message.sender,
+        subject: message.subject,
+        snippet: message.snippet,
+        body: message.body,
+        receivedAt: message.received_at,
+      },
+      insertChunks: (chunks) =>
+        prisma.$transaction(async (tx: any) => {
+          await insertMemoryChunks(tx, chunks);
+          await pruneMemoryChunksForSource(tx, {
+            userId: job.user_id,
+            sourceType: 'gmail',
+            sourceId: message.id,
+            keepChunkCount: chunks.length,
+          });
+        }),
+    });
+
+    if (result.chunkCount === 0) {
+      await deleteMemoryChunksForSource(prisma as any, {
+        userId: job.user_id,
+        sourceType: 'gmail',
+        sourceId: message.id,
       });
     }
   }

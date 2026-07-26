@@ -5,7 +5,6 @@ import { SearchService } from './search.service';
 
 jest.mock('@second-brain/ai', () => ({
   answerMemory: jest.fn(),
-  answerMemoryStream: jest.fn(),
 }));
 
 jest.mock('@second-brain/db', () => ({

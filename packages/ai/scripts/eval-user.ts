@@ -1,6 +1,7 @@
 type PrismaLike = {
   user: {
     findUnique: (args: { where: { email: string } }) => Promise<{ id: string } | null>;
+    findFirst?: (args: { where: { supabaseId: string }; select: { id: boolean } }) => Promise<{ id: string } | null>;
     findMany: (args: {
       select: { id: boolean; email: boolean; display_name: boolean };
       take: number;
@@ -15,6 +16,23 @@ export async function resolveEvaluationUserId(
 ): Promise<string | null> {
   const userId = process.env.SAMPLE_USER_ID ?? process.env.USER_ID;
   if (userId) return userId;
+
+  const supabaseId =
+    process.env.DEMO_SUPABASE_USER_ID ??
+    process.env.SAMPLE_SUPABASE_USER_ID ??
+    process.env.TEST_SUPABASE_USER_ID ??
+    process.env.SUPABASE_USER_ID;
+  if (supabaseId && prisma.user.findFirst) {
+    const user = await prisma.user.findFirst({
+      where: { supabaseId },
+      select: { id: true },
+    });
+    if (user) return user.id;
+
+    console.error(`No user found for configured Supabase id ${supabaseId}.`);
+    process.exitCode = 1;
+    return null;
+  }
 
   const email = process.env.SAMPLE_USER_EMAIL ?? process.env.USER_EMAIL;
   if (email) {

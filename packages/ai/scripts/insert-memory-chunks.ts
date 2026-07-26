@@ -14,8 +14,19 @@ async function main(): Promise<void> {
     throw new Error("GEMINI_API_KEY is required to generate embeddings.");
   }
 
-  const [{ prisma }, { GeminiEmbeddingProvider, indexMemoryFromDiary }] =
+  const [
+    {
+      createPrismaClient,
+      deleteEntityMentionsForSource,
+      insertEntityMentions,
+      insertMemoryChunks,
+      pruneMemoryChunksForSource,
+      resolveMemoryChunkIds,
+    },
+    { GeminiEmbeddingProvider, indexMemoryFromDiary },
+  ] =
     await Promise.all([import("@second-brain/db"), import("../src/index.ts")]);
+  const prisma = createPrismaClient();
 
   const embeddingProvider = new GeminiEmbeddingProvider(apiKey);
   const sampleDiaryText = ` I met with the mobile team this morning and we agreed to postpone the notification redesign until next sprint. Customer support said users are confused by the onboarding copy, so we should simplify the first two screens. I finished the draft API contract for diary uploads and sent it to the team for review. Tomorrow I need to follow up with Minh about the analytics event naming. I felt calmer today because the plan is finally getting more concrete.`.trim();
@@ -27,6 +38,45 @@ async function main(): Promise<void> {
     entryDate: new Date(),
     sourceTitle: "Sample diary entry",
     embeddingProvider,
+    insertChunks: (chunks) =>
+      prisma.$transaction(async (tx) => {
+        await insertMemoryChunks(tx, chunks);
+        await pruneMemoryChunksForSource(tx, {
+          userId: sampleUserId,
+          sourceType: "diary",
+          sourceId: "sample-diary-entry",
+          keepChunkCount: chunks.length,
+        });
+      }),
+    insertEntityMentions: (mentions) =>
+      prisma.$transaction(async (tx) => {
+        await deleteEntityMentionsForSource(tx, {
+          userId: sampleUserId,
+          sourceType: "diary",
+          sourceId: "sample-diary-entry",
+        });
+
+        if (!mentions.length) return;
+
+        const chunkIdMap = await resolveMemoryChunkIds(tx, {
+          userId: sampleUserId,
+          sourceType: "diary",
+          sourceId: "sample-diary-entry",
+        });
+        const mentionRows = mentions
+          .map((mention) => {
+            const chunkId = chunkIdMap.get(mention.chunkIndex);
+            if (!chunkId) return null;
+            return {
+              chunkId,
+              entityType: mention.entityType,
+              entityValue: mention.entityValue,
+            };
+          })
+          .filter((mention): mention is NonNullable<typeof mention> => mention !== null);
+
+        await insertEntityMentions(tx, mentionRows);
+      }),
   });
 
   console.log(`Inserted/Updated ${result.chunkCount} memory chunk(s).`);

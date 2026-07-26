@@ -4,8 +4,11 @@ import {
 } from "../../ai/src/index.ts";
 import {
   createPrismaClient,
+  deleteEntityMentionsForSource,
+  insertEntityMentions,
   insertMemoryChunks,
   pruneMemoryChunksForSource,
+  resolveMemoryChunkIds,
 } from "../index.ts";
 
 async function main(): Promise<void> {
@@ -47,6 +50,35 @@ I felt calmer today because the plan is finally getting more concrete.
           sourceId: "sample-diary-entry",
           keepChunkCount: chunks.length,
         });
+      }),
+    insertEntityMentions: (mentions) =>
+      prisma.$transaction(async (tx) => {
+        await deleteEntityMentionsForSource(tx as any, {
+          userId: sampleUserId,
+          sourceType: "diary",
+          sourceId: "sample-diary-entry",
+        });
+
+        if (!mentions.length) return;
+
+        const chunkIdMap = await resolveMemoryChunkIds(tx as any, {
+          userId: sampleUserId,
+          sourceType: "diary",
+          sourceId: "sample-diary-entry",
+        });
+        const mentionRows = mentions
+          .map((mention) => {
+            const chunkId = chunkIdMap.get(mention.chunkIndex);
+            if (!chunkId) return null;
+            return {
+              chunkId,
+              entityType: mention.entityType,
+              entityValue: mention.entityValue,
+            };
+          })
+          .filter((mention): mention is NonNullable<typeof mention> => mention !== null);
+
+        await insertEntityMentions(tx as any, mentionRows);
       }),
   });
 

@@ -90,4 +90,5 @@ export interface AnswerMemoryOptions {
   minTopSimilarity?: number;
   responseLanguage?: ResponseLanguage;
   answerStrategy?: AnswerStrategy;
+  timeZone?: string;
 }
