@@ -36,7 +36,7 @@ export class SearchService {
 
     // ── Live search ──
     try {
-      const includeDebugTrace = this.debugTraceEnabled();
+      const includeDebugTrace = this.debugTraceEnabled(user.id);
 
       if (this.canUseExactAnswerCache(queryDto) && !includeDebugTrace) {
         const redisCached = await getCachedSearchAnswer({
@@ -303,7 +303,14 @@ export class SearchService {
     return /\b(?:minh|ban|ve|vi|boi|any|about|because|the|a|an|is|are|was|were|to|for|of|and|or)$/iu.test(normalized);
   }
 
-  private debugTraceEnabled() {
+  private debugTraceEnabled(userId?: string) {
+    // Per-user debug mode: check TRUSTED_DEBUG_USERS env var
+    const trustedUsers = process.env.TRUSTED_DEBUG_USERS?.split(',').map((u) => u.trim()).filter(Boolean) ?? [];
+    if (userId && trustedUsers.length > 0) {
+      return trustedUsers.includes(userId);
+    }
+
+    // Fallback to global toggle
     const configured = process.env.MEMORY_DEBUG_TRACE?.toLowerCase();
     if (configured === 'true') return true;
     if (configured === 'false') return false;

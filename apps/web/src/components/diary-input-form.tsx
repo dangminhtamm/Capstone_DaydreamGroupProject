@@ -382,7 +382,11 @@ export function DiaryInputForm() {
   const linkedCalendarEvents = useMemo(() => {
     return calendarEvents
       .filter((event) => isSameLocalDate(event.startTime, draft.entryDate))
-      .slice(0, 3);
+      .slice(0, 5);
+  }, [calendarEvents, draft.entryDate]);
+
+  const allDateEvents = useMemo(() => {
+    return calendarEvents.filter((event) => isSameLocalDate(event.startTime, draft.entryDate));
   }, [calendarEvents, draft.entryDate]);
 
   const canSubmit = useMemo(() => {
@@ -751,6 +755,27 @@ export function DiaryInputForm() {
                 ))
               )}
             </div>
+            {allDateEvents.length > 5 && (
+              <details className="mt-2">
+                <summary className="cursor-pointer text-[11px] font-semibold text-sky-600 hover:text-sky-800 dark:text-sky-300 dark:hover:text-sky-100">
+                  View all {allDateEvents.length} events
+                </summary>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {allDateEvents.slice(5).map((event) => (
+                    <a
+                      key={event.id}
+                      href={event.htmlLink ?? undefined}
+                      target={event.htmlLink ? "_blank" : undefined}
+                      rel={event.htmlLink ? "noopener noreferrer" : undefined}
+                      className="inline-flex max-w-full items-center gap-1 rounded-full border border-sky-100 bg-white px-2.5 py-1 text-xs font-medium text-sky-700 transition hover:bg-white dark:border-sky-900/60 dark:bg-slate-950 dark:text-sky-200"
+                    >
+                      <span className="truncate">{event.title}</span>
+                      <span className="shrink-0 text-sky-500 dark:text-sky-300">{formatCompactEventTime(event)}</span>
+                    </a>
+                  ))}
+                </div>
+              </details>
+            )}
           </div>
         )}
 

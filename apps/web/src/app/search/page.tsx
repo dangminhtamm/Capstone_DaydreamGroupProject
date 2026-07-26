@@ -95,6 +95,8 @@ const suggestedQuestions = [
   "What did I work on recently?",
   "What important events happened this week?",
   "Summarize my latest diary memories.",
+  "What meetings do I have coming up?",
+  "What happened at my last meeting?",
 ];
 
 const answerStrategies: Array<{ value: AnswerStrategy; label: string }> = [
@@ -654,52 +656,61 @@ export default function SearchPage() {
                 />
               </label>
 
-              <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900/70">
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Mode</span>
-                  <div className="segment-control">
-                    {answerStrategies.map((strategy) => {
-                      const active = answerStrategy === strategy.value;
-                      return (
-                        <button
-                          key={strategy.value}
-                          type="button"
-                          onClick={() => {
-                            setAnswerStrategy(strategy.value);
-                            localStorage.setItem("dd-answer-strategy", strategy.value);
-                          }}
-                          className={`segment-option ${active ? "segment-option-active" : ""}`}
-                        >
-                          {strategy.label}
-                        </button>
-                      );
-                    })}
+              <details className="group rounded-lg border border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-900/70">
+                <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:text-indigo-700 dark:text-slate-300 dark:hover:text-indigo-300">
+                  <svg className="h-4 w-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                  Options
+                  <span className="ml-1 rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-bold text-indigo-600 dark:bg-indigo-900/50 dark:text-indigo-300">
+                    {answerStrategy !== "auto" || responseLanguage !== "en" ? "Custom" : "Default"}
+                  </span>
+                  <svg className="ml-auto h-3.5 w-3.5 transition-transform group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                </summary>
+                <div className="flex flex-wrap items-center gap-3 border-t border-slate-200 px-3 py-2.5 dark:border-slate-700">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Mode</span>
+                    <div className="segment-control">
+                      {answerStrategies.map((strategy) => {
+                        const active = answerStrategy === strategy.value;
+                        return (
+                          <button
+                            key={strategy.value}
+                            type="button"
+                            onClick={() => {
+                              setAnswerStrategy(strategy.value);
+                              localStorage.setItem("dd-answer-strategy", strategy.value);
+                            }}
+                            className={`segment-option ${active ? "segment-option-active" : ""}`}
+                          >
+                            {strategy.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Language</span>
+                    <div className="segment-control">
+                      {(["en", "vi"] as const).map((language) => {
+                        const active = responseLanguage === language;
+                        return (
+                          <button
+                            key={language}
+                            type="button"
+                            onClick={() => {
+                              setResponseLanguage(language);
+                              localStorage.setItem("dd-response-lang", language);
+                            }}
+                            className={`segment-option ${active ? "segment-option-active" : ""}`}
+                          >
+                            {language.toUpperCase()}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
-
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Language</span>
-                  <div className="segment-control">
-                    {(["en", "vi"] as const).map((language) => {
-                      const active = responseLanguage === language;
-                      return (
-                        <button
-                          key={language}
-                          type="button"
-                          onClick={() => {
-                            setResponseLanguage(language);
-                            localStorage.setItem("dd-response-lang", language);
-                          }}
-                          className={`segment-option ${active ? "segment-option-active" : ""}`}
-                        >
-                          {language.toUpperCase()}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-              </div>
+              </details>
 
               <div className="flex flex-wrap gap-2">
                 {suggestedQuestions.map((suggestion) => (
@@ -792,11 +803,28 @@ export default function SearchPage() {
               <span className="status-badge">
                 Mode: {formatAnswerMode(result.answerMode ?? result.analytics?.answerMode)}
               </span>
-              {result.analytics?.tokenUsage.totalTokens === 0 ? (
-                <span className="status-badge status-badge-success">
-                  0 generate tokens
+              {result.analytics ? (
+                <span
+                  className="status-badge cursor-help"
+                  title={`Prompt: ${result.analytics.tokenUsage.promptTokens} · Completion: ${result.analytics.tokenUsage.completionTokens} · Model: ${result.analytics.tokenUsage.model}`}
+                >
+                  ⚡ {result.analytics.tokenUsage.totalTokens.toLocaleString()} tokens
                 </span>
               ) : null}
+              {result.analytics?.timing ? (
+                <span
+                  className="status-badge cursor-help"
+                  title={`Embed: ${formatDurationMs(result.analytics.timing.embedMs)} · Retrieve: ${formatDurationMs(result.analytics.timing.retrieveMs)} · Generate: ${formatDurationMs(result.analytics.timing.generateMs)}`}
+                >
+                  ⏱ {formatDurationMs(result.analytics.timing.totalMs)}
+                </span>
+              ) : null}
+              <span
+                className="status-badge cursor-help"
+                title={`${result.sources.length} memory chunks cited as evidence`}
+              >
+                📄 {result.sources.length} sources
+              </span>
             </div>
           ) : null}
 
