@@ -831,7 +831,7 @@ Return only the extracted text or factual description.
       .filter(Boolean)
       .join(' ');
 
-    return configuredModels.includes('gemini-2.5-flash');
+    return configuredModels.includes('gemini-3.6-flash') || configuredModels.includes('gemini-2.5-flash');
   }
 
   private static sleep(ms: number) {

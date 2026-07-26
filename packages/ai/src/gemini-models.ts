@@ -1,6 +1,6 @@
-export const DEFAULT_GEMINI_ANSWER_MODEL = "gemini-2.5-flash";
-export const DEFAULT_GEMINI_CHUNK_MODEL = "gemini-2.5-flash";
-export const DEFAULT_GEMINI_VISION_MODEL = "gemini-2.5-flash";
+export const DEFAULT_GEMINI_ANSWER_MODEL = "gemini-3.6-flash";
+export const DEFAULT_GEMINI_CHUNK_MODEL = "gemini-3.6-flash";
+export const DEFAULT_GEMINI_VISION_MODEL = "gemini-3.6-flash";
 
 export function getGeminiAnswerModel(): string {
   return process.env.GEMINI_ANSWER_MODEL ?? DEFAULT_GEMINI_ANSWER_MODEL;
