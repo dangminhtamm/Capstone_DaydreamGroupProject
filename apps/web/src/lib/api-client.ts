@@ -271,6 +271,25 @@ export async function analyzeAttachment(
   return response.json();
 }
 
+export async function analyzeFileDirectly(
+  file: File,
+  accessToken: string | null,
+): Promise<AttachmentAnalysis> {
+  const formData = new FormData();
+  formData.set('file', file);
+
+  const response = await authFetch('/api/upload/analyze-file', {
+    method: 'POST',
+    body: formData,
+  }, accessToken);
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response, 'Failed to analyze file'));
+  }
+
+  return response.json();
+}
+
 type AskPayload = {
   question: string;
 };

@@ -287,27 +287,13 @@ export class UploadController {
     let text = attachment.extracted_text?.trim() ?? '';
 
     if (!text) {
-      // Download file from storage and extract text via Gemini Vision
       const fileBuffer = await this.storageService.downloadFile(
         'attachments-bucket',
         attachment.storage_path,
       );
       const base64Data = fileBuffer.toString('base64');
+      text = await this.extractTextWithGemini(base64Data, attachment.file_type);
 
-      const { GoogleGenerativeAI } = await import('@google/generative-ai');
-      const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey) throw new BadRequestException('AI key not configured.');
-
-      const ai = new GoogleGenerativeAI(apiKey);
-      const model = ai.getGenerativeModel({ model: process.env.GEMINI_ANSWER_MODEL || 'gemini-2.5-flash' });
-
-      const extractResult = await model.generateContent([
-        'Extract all readable text from this file. Return only the extracted text.',
-        { inlineData: { data: base64Data, mimeType: attachment.file_type } },
-      ]);
-      text = extractResult.response.text().trim();
-
-      // Persist extracted text for future use
       if (text) {
         await this.prisma.attachment.update({
           where: { id: attachment.id },
@@ -316,6 +302,54 @@ export class UploadController {
       }
     }
 
+    return this.analyzeTextWithGemini(text);
+  }
+
+  @Post('analyze-file')
+  @UseInterceptors(FileInterceptor('file'))
+  async analyzeFileDirectly(
+    @Request() req: { user: { userId: string } },
+    @UploadedFile(
+      new ParseFilePipe({
+        validators: [
+          new MaxFileSizeValidator({ maxSize: 5 * 1024 * 1024 }),
+          new FileTypeValidator({
+            fileType: /^(image\/png|image\/jpe?g|application\/pdf|application\/msword|application\/vnd\.openxmlformats-officedocument\.wordprocessingml\.document|text\/plain)$/,
+          }),
+        ],
+      }),
+    )
+    file: Express.Multer.File,
+  ) {
+    await this.findUserOrThrow(req.user.userId);
+
+    let text = '';
+    if (file.mimetype === 'text/plain') {
+      text = file.buffer.toString('utf8').trim();
+    } else {
+      const base64Data = file.buffer.toString('base64');
+      text = await this.extractTextWithGemini(base64Data, file.mimetype);
+    }
+
+    return this.analyzeTextWithGemini(text);
+  }
+
+  private async extractTextWithGemini(base64Data: string, mimeType: string): Promise<string> {
+    const { GoogleGenerativeAI } = await import('@google/generative-ai');
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) throw new BadRequestException('AI key not configured.');
+
+    const ai = new GoogleGenerativeAI(apiKey);
+    const model = ai.getGenerativeModel({ model: process.env.GEMINI_ANSWER_MODEL || 'gemini-2.5-flash' });
+
+    const result = await model.generateContent([
+      'Extract all readable text from this file. Return only the extracted text.',
+      { inlineData: { data: base64Data, mimeType } },
+    ]);
+    return result.response.text().trim();
+  }
+
+  private async analyzeTextWithGemini(text: string) {
     if (!text) {
       return {
         summary: 'Could not extract any readable text from this file.',
@@ -324,7 +358,6 @@ export class UploadController {
       };
     }
 
-    // Analyze with Gemini
     const { GoogleGenerativeAI } = await import('@google/generative-ai');
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) throw new BadRequestException('AI key not configured.');
@@ -352,7 +385,6 @@ ${text.slice(0, 8000)}`;
     const rawResponse = analyzeResult.response.text().trim();
 
     try {
-      // Strip markdown code fences if present
       const cleaned = rawResponse.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
       const parsed = JSON.parse(cleaned);
       return {
@@ -361,7 +393,6 @@ ${text.slice(0, 8000)}`;
         actionItems: Array.isArray(parsed.actionItems) ? parsed.actionItems : [],
       };
     } catch {
-      // Fallback: return the raw text as summary
       return {
         summary: rawResponse.slice(0, 500),
         keyTakeaways: [],

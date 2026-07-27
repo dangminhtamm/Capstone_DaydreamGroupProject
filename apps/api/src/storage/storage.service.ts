@@ -47,7 +47,22 @@ export class StorageService {
         upsert: false,
       });
 
-    if (error) throw error;
+    if (error) {
+      const msg = error.message ?? String(error);
+      console.error(`[StorageService] Upload failed for bucket="${bucket}", path="${filePath}":`, msg);
+
+      if (msg.includes('Bucket not found') || msg.includes('not found')) {
+        throw new InternalServerErrorException(
+          `Storage bucket "${bucket}" does not exist. Please create it in your Supabase dashboard → Storage.`,
+        );
+      }
+      if (msg.includes('new row violates') || msg.includes('policy')) {
+        throw new InternalServerErrorException(
+          `Storage policy blocked the upload. Ensure the bucket "${bucket}" allows inserts for service-role keys.`,
+        );
+      }
+      throw new InternalServerErrorException(`File upload failed: ${msg}`);
+    }
 
     return {
       path: data.path,

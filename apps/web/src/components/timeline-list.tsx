@@ -62,9 +62,9 @@ function getAttachmentStatus(attachment: string | DiaryAttachment) {
   if (!isAttachmentObject(attachment)) return "linked";
   if (attachment.indexingStatus === "succeeded") return "indexed";
   if (attachment.indexingStatus === "processing") return "processing";
-  if (attachment.indexingStatus === "retry") return "retry";
-  if (attachment.indexingStatus === "dead_letter" || attachment.indexingStatus === "failed") return "failed";
-  return attachment.extractionStatus === "extracted" ? "queued" : "extracting";
+  if (attachment.indexingStatus === "retry") return "retrying";
+  if (attachment.indexingStatus === "dead_letter" || attachment.indexingStatus === "failed") return "indexing failed";
+  return attachment.extractionStatus === "extracted" ? "queued for indexing" : "extracting text";
 }
 
 function getStatusClass(status: string) {
@@ -72,7 +72,7 @@ function getStatusClass(status: string) {
     return "status-badge-success";
   }
 
-  if (status === "failed") {
+  if (status === "indexing failed" || status === "failed") {
     return "status-badge-danger";
   }
 

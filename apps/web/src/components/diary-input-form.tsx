@@ -9,6 +9,7 @@ import {
   processDiaryAttachment,
   uploadDiaryAttachment,
   analyzeAttachment,
+  analyzeFileDirectly,
   type AttachmentAnalysis,
   type AttachmentUploadResponse,
   type CalendarEventRecord,
@@ -940,34 +941,44 @@ export function DiaryInputForm() {
                         Open
                       </a>
                     ) : null}
-                    {item.attachmentId && item.status !== "queued" ? (
-                      <button
-                        type="button"
-                        disabled={analyzingAttachmentId === item.attachmentId}
-                        onClick={async () => {
-                          if (!item.attachmentId || !isAuthenticated) return;
-                          setAnalyzingAttachmentId(item.attachmentId);
-                          try {
-                            const result = await analyzeAttachment(item.attachmentId, getAccessToken());
-                            setAttachmentAnalyses((prev) => ({ ...prev, [item.attachmentId!]: result }));
-                          } catch (err) {
-                            setAttachmentAnalyses((prev) => ({
-                              ...prev,
-                              [item.attachmentId!]: {
-                                summary: err instanceof Error ? err.message : "Analysis failed.",
-                                keyTakeaways: [],
-                                actionItems: [],
-                              },
-                            }));
-                          } finally {
-                            setAnalyzingAttachmentId(null);
-                          }
-                        }}
-                        className="rounded-lg bg-violet-50 px-2 py-1 text-xs font-semibold text-violet-700 transition hover:bg-violet-100 disabled:opacity-50 dark:bg-violet-900/30 dark:text-violet-300 dark:hover:bg-violet-900/50"
-                      >
-                        {analyzingAttachmentId === item.attachmentId ? "Analyzing..." : "\uD83D\uDD0D Analyze with AI"}
-                      </button>
-                    ) : null}
+                    {(() => {
+                      const analyzeKey = item.attachmentId || item.id;
+                      const isAnalyzing = analyzingAttachmentId === analyzeKey;
+                      const hasAnalysis = !!attachmentAnalyses[analyzeKey];
+                      return (
+                        <button
+                          type="button"
+                          disabled={isAnalyzing}
+                          onClick={async () => {
+                            if (!isAuthenticated) return;
+                            setAnalyzingAttachmentId(analyzeKey);
+                            try {
+                              let result: AttachmentAnalysis;
+                              if (item.attachmentId) {
+                                result = await analyzeAttachment(item.attachmentId, getAccessToken());
+                              } else {
+                                result = await analyzeFileDirectly(item.file, getAccessToken());
+                              }
+                              setAttachmentAnalyses((prev) => ({ ...prev, [analyzeKey]: result }));
+                            } catch (err) {
+                              setAttachmentAnalyses((prev) => ({
+                                ...prev,
+                                [analyzeKey]: {
+                                  summary: err instanceof Error ? err.message : "Analysis failed.",
+                                  keyTakeaways: [],
+                                  actionItems: [],
+                                },
+                              }));
+                            } finally {
+                              setAnalyzingAttachmentId(null);
+                            }
+                          }}
+                          className="rounded-lg bg-violet-50 px-2 py-1 text-xs font-semibold text-violet-700 transition hover:bg-violet-100 disabled:opacity-50 dark:bg-violet-900/30 dark:text-violet-300 dark:hover:bg-violet-900/50"
+                        >
+                          {isAnalyzing ? "Analyzing\u2026" : hasAnalysis ? "\u2705 Re-analyze" : "\uD83D\uDD0D Analyze with AI"}
+                        </button>
+                      );
+                    })()}
                     {item.status === "queued" ? (
                       <button
                         type="button"
@@ -981,58 +992,61 @@ export function DiaryInputForm() {
                 </div>
 
                 {/* AI Analysis Results */}
-                {item.attachmentId && attachmentAnalyses[item.attachmentId] ? (
-                  <div className="mt-3 space-y-2 rounded-lg border border-violet-200 bg-violet-50/70 p-3 dark:border-violet-800 dark:bg-violet-950/30">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-violet-600 dark:text-violet-300">
-                        \uD83E\uDDE0 AI File Analysis
+                {(() => {
+                  const analyzeKey = item.attachmentId || item.id;
+                  const analysis = attachmentAnalyses[analyzeKey];
+                  if (!analysis) return null;
+                  return (
+                    <div className="mt-3 space-y-2 rounded-lg border border-violet-200 bg-violet-50/70 p-3 dark:border-violet-800 dark:bg-violet-950/30">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-violet-600 dark:text-violet-300">
+                          {"\uD83E\uDDE0"} AI File Analysis
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const insertText = [
+                              `\n\n---\n**${"\uD83D\uDD0D"} AI Analysis of ${item.file.name}:**`,
+                              `\n${analysis.summary}`,
+                              analysis.keyTakeaways.length ? `\n\n**Key Takeaways:**\n${analysis.keyTakeaways.map((t) => `- ${t}`).join("\n")}` : "",
+                              analysis.actionItems.length ? `\n\n**Action Items:**\n${analysis.actionItems.map((a) => `- [ ] ${a}`).join("\n")}` : "",
+                            ].filter(Boolean).join("");
+                            setDraft((prev) => ({ ...prev, content: prev.content.trimEnd() + insertText }));
+                          }}
+                          className="rounded-lg bg-violet-100 px-2.5 py-1 text-xs font-semibold text-violet-700 transition hover:bg-violet-200 dark:bg-violet-900/50 dark:text-violet-200 dark:hover:bg-violet-900/70"
+                        >
+                          {"\u2B07\uFE0F"} Insert into Diary
+                        </button>
+                      </div>
+
+                      <p className="text-sm leading-relaxed text-slate-700 dark:text-slate-300">
+                        {analysis.summary}
                       </p>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const analysis = attachmentAnalyses[item.attachmentId!];
-                          if (!analysis) return;
-                          const insertText = [
-                            `\n\n---\n**\uD83D\uDD0D AI Analysis of ${item.file.name}:**`,
-                            `\n${analysis.summary}`,
-                            analysis.keyTakeaways.length ? `\n\n**Key Takeaways:**\n${analysis.keyTakeaways.map((t) => `- ${t}`).join("\n")}` : "",
-                            analysis.actionItems.length ? `\n\n**Action Items:**\n${analysis.actionItems.map((a) => `- [ ] ${a}`).join("\n")}` : "",
-                          ].filter(Boolean).join("");
-                          setDraft((prev) => ({ ...prev, content: prev.content.trimEnd() + insertText }));
-                        }}
-                        className="rounded-lg bg-violet-100 px-2.5 py-1 text-xs font-semibold text-violet-700 transition hover:bg-violet-200 dark:bg-violet-900/50 dark:text-violet-200 dark:hover:bg-violet-900/70"
-                      >
-                        \u2B07\uFE0F Insert into Diary
-                      </button>
+
+                      {analysis.keyTakeaways.length > 0 && (
+                        <div>
+                          <p className="mb-1 text-xs font-bold text-violet-700 dark:text-violet-300">{"\uD83C\uDFAF"} Key Takeaways</p>
+                          <ul className="list-inside list-disc space-y-0.5 text-xs leading-5 text-slate-700 dark:text-slate-300">
+                            {analysis.keyTakeaways.map((t, i) => (
+                              <li key={i}>{t}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {analysis.actionItems.length > 0 && (
+                        <div>
+                          <p className="mb-1 text-xs font-bold text-violet-700 dark:text-violet-300">{"\uD83D\uDCCB"} Action Items</p>
+                          <ul className="list-inside list-disc space-y-0.5 text-xs leading-5 text-slate-700 dark:text-slate-300">
+                            {analysis.actionItems.map((a, i) => (
+                              <li key={i}>{a}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
                     </div>
-
-                    <p className="text-sm leading-relaxed text-slate-700 dark:text-slate-300">
-                      {attachmentAnalyses[item.attachmentId]!.summary}
-                    </p>
-
-                    {attachmentAnalyses[item.attachmentId]!.keyTakeaways.length > 0 && (
-                      <div>
-                        <p className="mb-1 text-xs font-bold text-violet-700 dark:text-violet-300">\uD83C\uDFAF Key Takeaways</p>
-                        <ul className="list-inside list-disc space-y-0.5 text-xs leading-5 text-slate-700 dark:text-slate-300">
-                          {attachmentAnalyses[item.attachmentId]!.keyTakeaways.map((t, i) => (
-                            <li key={i}>{t}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-
-                    {attachmentAnalyses[item.attachmentId]!.actionItems.length > 0 && (
-                      <div>
-                        <p className="mb-1 text-xs font-bold text-violet-700 dark:text-violet-300">\uD83D\uDCCB Action Items</p>
-                        <ul className="list-inside list-disc space-y-0.5 text-xs leading-5 text-slate-700 dark:text-slate-300">
-                          {attachmentAnalyses[item.attachmentId]!.actionItems.map((a, i) => (
-                            <li key={i}>{a}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                  </div>
-                ) : null}
+                  );
+                })()}
               </div>
             ))}
           </div>
