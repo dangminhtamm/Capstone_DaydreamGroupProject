@@ -125,6 +125,26 @@ const sourceToneStyles: Record<string, string> = {
   summary: "border-amber-100 bg-amber-50 text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300",
 };
 
+const sourceAccentStyles: Record<string, string> = {
+  diary: "from-indigo-500 to-blue-500",
+  calendar: "from-sky-500 to-cyan-500",
+  contact: "from-fuchsia-500 to-pink-500",
+  drive: "from-lime-500 to-emerald-500",
+  gmail: "from-rose-500 to-orange-500",
+  attachment: "from-emerald-500 to-teal-500",
+  summary: "from-amber-500 to-yellow-500",
+};
+
+const sourceShortLabels: Record<string, string> = {
+  diary: "Diary",
+  calendar: "Calendar",
+  contact: "Contact",
+  drive: "Drive",
+  gmail: "Gmail",
+  attachment: "File",
+  summary: "Summary",
+};
+
 function formatSourceType(value: string) {
   return value.replaceAll("_", " ");
 }
@@ -253,6 +273,26 @@ function formatDurationMs(value?: number | null) {
 function formatPercent(value?: number | null) {
   if (value == null || !Number.isFinite(value)) return "n/a";
   return `${Math.round(value * 100)}%`;
+}
+
+function formatSourceChunk(value: string) {
+  return value.replaceAll("_", " ");
+}
+
+function formatSimilarityScore(value: number) {
+  return `${Math.round(value * 100)}%`;
+}
+
+function sourceCardTone(sourceType: string) {
+  return sourceToneStyles[sourceType] ?? "border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200";
+}
+
+function sourceCardAccent(sourceType: string) {
+  return sourceAccentStyles[sourceType] ?? "from-slate-500 to-slate-400";
+}
+
+function sourceShortLabel(sourceType: string) {
+  return sourceShortLabels[sourceType] ?? formatSourceType(sourceType);
 }
 
 function debugStateClass(state: DebugPipelineState) {
@@ -485,6 +525,63 @@ function AiDebugPanel({ result }: { result: SearchResponse }) {
   );
 }
 
+function EvidenceSourceCard({ source }: { source: SearchCitation }) {
+  return (
+    <article className="group overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md dark:border-slate-800 dark:bg-slate-950/70 dark:hover:border-blue-800">
+      <div className={`h-1.5 bg-gradient-to-r ${sourceCardAccent(source.sourceType)}`} />
+      <div className="p-4">
+        <div className="flex items-start gap-3">
+          <div className="flex h-11 w-11 shrink-0 flex-col items-center justify-center rounded-xl border border-slate-200 bg-slate-950 text-white shadow-sm dark:border-slate-700 dark:bg-slate-100 dark:text-slate-950">
+            <span className="text-[10px] font-bold leading-none">{source.marker}</span>
+            <span className="mt-0.5 text-[9px] font-semibold uppercase leading-none opacity-70">
+              {sourceShortLabel(source.sourceType).slice(0, 4)}
+            </span>
+          </div>
+
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold capitalize ${sourceCardTone(source.sourceType)}`}>
+                {formatSourceType(source.sourceType)}
+              </span>
+              <span className="status-badge">
+                {formatSourceChunk(source.chunkType)}
+              </span>
+            </div>
+            <h4 className="mt-2 line-clamp-2 text-sm font-semibold leading-5 text-slate-950 dark:text-slate-100">
+              {source.sourceTitle || "Untitled memory"}
+            </h4>
+            <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+              <span>{formatSourceDate(source.occurredAt)}</span>
+              <span aria-hidden>·</span>
+              <span>{formatSimilarityScore(source.similarity)} match</span>
+            </div>
+          </div>
+        </div>
+
+        {source.claim ? (
+          <div className="mt-4 rounded-lg border border-blue-100 bg-blue-50/70 px-3 py-2.5 dark:border-blue-900/60 dark:bg-blue-950/30">
+            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-blue-600 dark:text-blue-300">
+              Claim supported
+            </p>
+            <p className="mt-1 line-clamp-2 text-xs font-medium leading-5 text-blue-950 dark:text-blue-100">
+              {source.claim}
+            </p>
+          </div>
+        ) : null}
+
+        <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 dark:border-slate-800 dark:bg-slate-900/70">
+          <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
+            Evidence quote
+          </p>
+          <blockquote className="line-clamp-4 text-sm leading-6 text-slate-700 dark:text-slate-300">
+            {highlightQuote(source.quote, source.claim)}
+          </blockquote>
+        </div>
+      </div>
+    </article>
+  );
+}
+
 export default function SearchPage() {
   const { isAuthenticated, isLoading: isAuthLoading, getAccessToken } = useAuth();
   const [question, setQuestion] = useState("");
@@ -506,6 +603,11 @@ export default function SearchPage() {
       const savedStrategy = localStorage.getItem("dd-answer-strategy") as AnswerStrategy | null;
       if (savedStrategy === "auto" || savedStrategy === "fast" || savedStrategy === "deep") {
         setAnswerStrategy(savedStrategy);
+      }
+
+      const initialQuestion = new URLSearchParams(window.location.search).get("q");
+      if (initialQuestion?.trim()) {
+        setQuestion(initialQuestion.trim());
       }
     }, 0);
 
@@ -952,42 +1054,7 @@ export default function SearchPage() {
         {result?.sources.length ? (
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {result.sources.map((source) => (
-              <article
-                key={`${source.marker}-${source.chunkId}`}
-                className="rounded-lg border border-slate-200 bg-slate-50/70 p-3 transition hover:border-indigo-200 hover:bg-white dark:border-slate-800 dark:bg-slate-900/60 dark:hover:border-indigo-800 dark:hover:bg-slate-950"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="mb-2 flex flex-wrap items-center gap-1.5">
-                      <span className="rounded-md bg-slate-900 px-2 py-0.5 text-[11px] font-bold text-white dark:bg-slate-100 dark:text-slate-950">
-                        {source.marker}
-                      </span>
-                      <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold capitalize ${sourceToneStyles[source.sourceType] ?? "border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"}`}>
-                        {formatSourceType(source.sourceType)}
-                      </span>
-                      <span className="status-badge">
-                        {source.chunkType.replaceAll("_", " ")}
-                      </span>
-                    </div>
-                    <p className="truncate text-sm font-semibold leading-5 text-slate-950 dark:text-slate-100">
-                      {source.sourceTitle || "Untitled memory"}
-                    </p>
-                    <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] font-medium text-slate-500 dark:text-slate-400">
-                      <span>{formatSourceDate(source.occurredAt)}</span>
-                      <span>{Math.round(source.similarity * 100)}% match</span>
-                    </div>
-                  </div>
-                </div>
-
-                {source.claim ? (
-                  <p className="mt-3 line-clamp-2 rounded-lg border border-indigo-100 bg-indigo-50/70 px-3 py-2 text-xs leading-5 text-indigo-950 dark:border-indigo-900/60 dark:bg-indigo-950/30 dark:text-indigo-100">
-                    {source.claim}
-                  </p>
-                ) : null}
-                <blockquote className="mt-3 line-clamp-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs leading-5 text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300">
-                  {highlightQuote(source.quote, source.claim)}
-                </blockquote>
-              </article>
+              <EvidenceSourceCard key={`${source.marker}-${source.chunkId}`} source={source} />
             ))}
           </div>
         ) : (

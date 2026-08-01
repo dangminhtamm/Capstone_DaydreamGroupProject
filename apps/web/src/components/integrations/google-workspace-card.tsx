@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { fetchCalendarConnectUrl } from '@/features/google-calendar/google-calendar-api';
@@ -59,6 +60,13 @@ const sourceAccent: Record<WorkspaceSource, string> = {
   contact: 'bg-fuchsia-500',
   drive: 'bg-lime-500',
   gmail: 'bg-rose-500',
+};
+
+const sourceSoftAccent: Record<WorkspaceSource, string> = {
+  calendar: 'border-sky-100 bg-sky-50 text-sky-700 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-300',
+  contact: 'border-fuchsia-100 bg-fuchsia-50 text-fuchsia-700 dark:border-fuchsia-900/50 dark:bg-fuchsia-950/30 dark:text-fuchsia-300',
+  drive: 'border-lime-100 bg-lime-50 text-lime-700 dark:border-lime-900/50 dark:bg-lime-950/30 dark:text-lime-300',
+  gmail: 'border-rose-100 bg-rose-50 text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-300',
 };
 
 export function GoogleWorkspaceCard({ indexingStatus }: GoogleWorkspaceCardProps) {
@@ -157,6 +165,7 @@ export function GoogleWorkspaceCard({ indexingStatus }: GoogleWorkspaceCardProps
   const connected = rows.some((row) => row.connected);
   const readyCount = rows.filter((row) => presentations[row.source].tone === 'ready').length;
   const attentionCount = rows.filter((row) => presentations[row.source].tone === 'attention').length;
+  const activeIndexingCount = rows.filter((row) => getIndexingInfo(row.source, indexingStatus).active).length;
   const importedCount = rows.reduce((total, row) => total + (row.valueCount > 0 ? 1 : 0), 0);
   const overallTone: SourceTone = attentionCount > 0 ? 'attention' : readyCount > 0 ? 'ready' : connected ? 'working' : 'idle';
   const overallLabel = !connected
@@ -224,10 +233,10 @@ export function GoogleWorkspaceCard({ indexingStatus }: GoogleWorkspaceCardProps
             Memory sources
           </p>
           <h3 className="mt-1.5 text-xl font-semibold tracking-tight text-slate-950 dark:text-slate-100">
-            Google context for Second Brain
+            Google memory setup
           </h3>
           <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
-            Choose which Google data Second Brain can remember. Imported sources become searchable citations in Ask your Second Brain.
+            Connect your Google account, import the sources you want, then ask questions with citations from Calendar, Gmail, Drive, and Contacts.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -245,21 +254,27 @@ export function GoogleWorkspaceCard({ indexingStatus }: GoogleWorkspaceCardProps
         </div>
       </div>
 
-      <div className="mt-5 grid gap-3 md:grid-cols-3">
+      <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <StepItem
           step="1"
-          title="Connect Google"
-          description={connected ? 'Google account access is available.' : 'Grant read-only access once.'}
+          title="Connect account"
+          description={connected ? 'Google OAuth is ready.' : 'Grant read-only access once.'}
           done={connected}
         />
         <StepItem
           step="2"
-          title="Import sources"
-          description={importedCount > 0 ? `${importedCount}/4 sources have data.` : 'Pick the sources you want to import.'}
+          title="Import data"
+          description={importedCount > 0 ? `${importedCount}/4 sources have imported data.` : 'Pick one source and import it.'}
           done={importedCount > 0}
         />
         <StepItem
           step="3"
+          title="Prepare memory"
+          description={activeIndexingCount > 0 ? `${activeIndexingCount} source${activeIndexingCount === 1 ? '' : 's'} still indexing.` : readyCount > 0 ? 'Imported data is searchable.' : 'Indexing starts after import.'}
+          done={readyCount > 0 && activeIndexingCount === 0}
+        />
+        <StepItem
+          step="4"
           title="Ask with citations"
           description={readyCount > 0 ? 'Search can cite ready sources.' : 'Ready sources will appear in AI answers.'}
           done={readyCount > 0}
@@ -350,16 +365,21 @@ function MemorySourceRow({
     ? isConnecting
     : !row.connected || isBusy;
   const action = presentation.buttonKind === 'connect' ? onConnect : row.onImport;
+  const imported = row.valueCount > 0 || Boolean(row.lastSyncedAt);
+  const memoryReady = presentation.tone === 'ready';
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40">
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_180px_180px_auto] lg:items-center">
+    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-blue-200 hover:shadow-md dark:border-slate-800 dark:bg-slate-950/40 dark:hover:border-blue-900/70">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(280px,360px)_auto] xl:items-start">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <span className={`h-2.5 w-2.5 rounded-full ${sourceAccent[row.source]}`} aria-hidden />
             <h4 className="text-base font-semibold text-slate-950 dark:text-slate-100">
               {row.label}
             </h4>
+            <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${sourceSoftAccent[row.source]}`}>
+              {row.valueLabel}
+            </span>
             <span className={`status-badge ${toneBadgeClass(presentation.tone)}`}>
               {presentation.statusLabel}
             </span>
@@ -367,9 +387,17 @@ function MemorySourceRow({
           <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
             {row.description}
           </p>
-          <p className="mt-2 text-xs font-medium text-slate-600 dark:text-slate-300">
-            Try: {row.examples[0]}
-          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {row.examples.map((example) => (
+              <Link
+                key={example}
+                href={`/search?q=${encodeURIComponent(example)}`}
+                className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-blue-800 dark:hover:bg-blue-950/30 dark:hover:text-blue-300"
+              >
+                Ask: {example}
+              </Link>
+            ))}
+          </div>
           {row.feedback?.type === 'error' && (
             <p className="mt-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-300">
               {row.feedback.text}
@@ -382,8 +410,21 @@ function MemorySourceRow({
           )}
         </div>
 
-        <SourceMetric label="Imported" value={row.valueLabel} />
-        <SourceMetric label="Last updated" value={formatLastSynced(row.lastSyncedAt)} />
+        <div className="rounded-lg border border-slate-100 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/50">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+              Source flow
+            </p>
+            <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+              {formatLastSynced(row.lastSyncedAt)}
+            </span>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-3 xl:grid-cols-1">
+            <FlowState label="Connected" done={row.connected} active={!row.connected && presentation.buttonKind === 'connect'} />
+            <FlowState label="Imported" done={imported} active={row.isSyncing} />
+            <FlowState label="Searchable" done={memoryReady} active={indexingInfo.active} attention={indexingInfo.failed || presentation.tone === 'attention'} />
+          </div>
+        </div>
 
         <div className="flex flex-col gap-2 lg:items-end">
           <button
@@ -403,14 +444,31 @@ function MemorySourceRow({
   );
 }
 
-function SourceMetric({ label, value }: { label: string; value: string }) {
+function FlowState({
+  label,
+  done,
+  active,
+  attention = false,
+}: {
+  label: string;
+  done: boolean;
+  active: boolean;
+  attention?: boolean;
+}) {
+  const tone = attention ? 'attention' : done ? 'ready' : active ? 'working' : 'idle';
   return (
-    <div className="min-w-0 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900/50">
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+    <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 dark:border-slate-800 dark:bg-slate-950">
+      <span className={`h-2.5 w-2.5 rounded-full ${
+        tone === 'ready'
+          ? 'bg-emerald-500'
+          : tone === 'attention'
+            ? 'bg-rose-500'
+            : tone === 'working'
+              ? 'bg-amber-500'
+              : 'bg-slate-300 dark:bg-slate-600'
+      }`} aria-hidden />
+      <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">
         {label}
-      </p>
-      <p className="mt-1 truncate text-sm font-semibold text-slate-800 dark:text-slate-100">
-        {value}
       </p>
     </div>
   );
