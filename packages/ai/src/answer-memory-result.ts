@@ -195,6 +195,9 @@ function explainResult(result: AnswerMemoryResult, chunks: MemorySearchHit[]): s
       result.analytics.tokenUsage.model === "fast-path" ||
       result.analytics.tokenUsage.model === "temporal-fast-path"
     ) {
+      if (result.analytics.tokenUsage.totalTokens > 0) {
+        return "Fast answer assembled from retrieved chunks, then translated or polished with a small model call.";
+      }
       return "Answer assembled from retrieved chunks without model generation.";
     }
 

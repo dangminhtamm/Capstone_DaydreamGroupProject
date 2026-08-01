@@ -11,6 +11,9 @@ export interface GenerateGeminiJsonOptions<T> {
   validator: z.ZodType<T>;
   temperature?: number;
   maxOutputTokens?: number;
+  maxRetries?: number;
+  maxFormatRetries?: number;
+  maxRetryDelayMs?: number;
 }
 
 export interface GeminiTokenUsage {
@@ -68,11 +71,11 @@ export async function generateGeminiJsonWithMeta<T>(
   });
 
   let lastError: Error | null = null;
-  const configuredRetries = Number(process.env.GEMINI_JSON_MAX_RETRIES ?? 2);
+  const configuredRetries = Number(options.maxRetries ?? process.env.GEMINI_JSON_MAX_RETRIES ?? 2);
   const maxRetries = Number.isFinite(configuredRetries)
     ? Math.max(0, Math.floor(configuredRetries))
     : 2;
-  const configuredFormatRetries = Number(process.env.GEMINI_JSON_FORMAT_RETRIES ?? 1);
+  const configuredFormatRetries = Number(options.maxFormatRetries ?? process.env.GEMINI_JSON_FORMAT_RETRIES ?? 1);
   const maxFormatRetries = Number.isFinite(configuredFormatRetries)
     ? Math.max(0, Math.floor(configuredFormatRetries))
     : 1;
@@ -117,7 +120,7 @@ export async function generateGeminiJsonWithMeta<T>(
 
       if (!isTransient || transientRetries >= maxRetries) break;
 
-      const delayMs = getRetryDelayMs(lastError, transientRetries);
+      const delayMs = getRetryDelayMs(lastError, transientRetries, options.maxRetryDelayMs);
       transientRetries++;
       console.warn(
         `[GeminiJSON] ${summarizeTransientError(lastError)}; retrying in ${delayMs}ms (attempt ${transientRetries}/${maxRetries}).`,
@@ -220,8 +223,12 @@ function isQuotaExhaustedError(error: Error): boolean {
   );
 }
 
-function getRetryDelayMs(error: Error, attempt: number): number {
-  const configuredMax = Number(process.env.GEMINI_JSON_MAX_RETRY_DELAY_MS ?? 60_000);
+function getRetryDelayMs(
+  error: Error,
+  attempt: number,
+  maxRetryDelayMs?: number,
+): number {
+  const configuredMax = Number(maxRetryDelayMs ?? process.env.GEMINI_JSON_MAX_RETRY_DELAY_MS ?? 60_000);
   const maxDelayMs = Number.isFinite(configuredMax) ? configuredMax : 60_000;
   const status = getErrorStatus(error);
   const retryInfoDelay = extractRetryInfoDelayMs(error);

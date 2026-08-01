@@ -25,6 +25,7 @@ type TokenStats = {
 };
 
 type SettingsTab = "profile" | "google" | "memory" | "preferences";
+type HealthTone = "ready" | "working" | "attention" | "idle";
 
 const settingsTabs: Array<{
   id: SettingsTab;
@@ -73,6 +74,112 @@ function getPasswordStrength(pw: string): { score: number; label: string; color:
   if (score <= 2) return { score, label: "Fair", color: "bg-amber-500" };
   if (score <= 3) return { score, label: "Good", color: "bg-sky-500" };
   return { score, label: "Strong", color: "bg-emerald-500" };
+}
+
+function healthToneBadgeClass(tone: HealthTone) {
+  if (tone === "ready") return "status-badge-success";
+  if (tone === "attention") return "status-badge-danger";
+  if (tone === "working") return "status-badge-warning";
+  return "";
+}
+
+function healthPanelClass(tone: HealthTone) {
+  if (tone === "ready") return "border-emerald-200 bg-emerald-50/70 dark:border-emerald-900/50 dark:bg-emerald-950/20";
+  if (tone === "attention") return "border-rose-200 bg-rose-50/70 dark:border-rose-900/50 dark:bg-rose-950/20";
+  if (tone === "working") return "border-amber-200 bg-amber-50/70 dark:border-amber-900/50 dark:bg-amber-950/20";
+  return "border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-900/60";
+}
+
+function healthDotClass(tone: HealthTone) {
+  if (tone === "ready") return "bg-emerald-500";
+  if (tone === "attention") return "bg-rose-500";
+  if (tone === "working") return "bg-amber-500";
+  return "bg-slate-300 dark:bg-slate-600";
+}
+
+function friendlyJobStatus(status: string) {
+  const normalized = status.replaceAll("_", " ");
+  if (status === "succeeded" || status === "completed") return "Searchable";
+  if (status === "processing") return "Processing";
+  if (status === "pending") return "Queued";
+  if (status === "retry") return "Retry scheduled";
+  if (status === "dead_letter") return "Needs requeue";
+  if (status === "failed") return "Failed";
+  return normalized;
+}
+
+function jobTone(status: string): HealthTone {
+  if (status === "succeeded" || status === "completed") return "ready";
+  if (status === "dead_letter" || status === "failed") return "attention";
+  if (status === "processing" || status === "retry" || status === "pending") return "working";
+  return "idle";
+}
+
+function formatConfigStatus(ok: boolean | undefined, optional = false) {
+  if (ok) return { label: "Ready", tone: "ready" as HealthTone };
+  if (optional) return { label: "Optional", tone: "idle" as HealthTone };
+  return { label: "Missing", tone: "attention" as HealthTone };
+}
+
+function HealthSnapshotCard({
+  label,
+  value,
+  detail,
+  tone,
+  loading,
+}: {
+  label: string;
+  value: string;
+  detail: string;
+  tone: HealthTone;
+  loading?: boolean;
+}) {
+  return (
+    <div className={`rounded-xl border p-4 ${healthPanelClass(tone)}`}>
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+          {label}
+        </p>
+        <span className={`h-2.5 w-2.5 rounded-full ${healthDotClass(tone)}`} aria-hidden />
+      </div>
+      {loading ? (
+        <>
+          <div className="skeleton-line mt-3 h-5 w-24" />
+          <div className="skeleton-line mt-2 h-3 w-36" />
+        </>
+      ) : (
+        <>
+          <p className="mt-2 text-lg font-bold text-slate-950 dark:text-slate-100">{value}</p>
+          <p className="mt-1 text-xs leading-5 text-slate-600 dark:text-slate-400">{detail}</p>
+        </>
+      )}
+    </div>
+  );
+}
+
+function ConfigCheckRow({
+  label,
+  detail,
+  ok,
+  optional = false,
+}: {
+  label: string;
+  detail: string;
+  ok: boolean | undefined;
+  optional?: boolean;
+}) {
+  const status = formatConfigStatus(ok, optional);
+  return (
+    <div className="flex items-start justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 dark:border-slate-800 dark:bg-slate-900/70">
+      <div className="min-w-0">
+        <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">{label}</p>
+        <p className="mt-0.5 text-xs leading-5 text-slate-500 dark:text-slate-400">{detail}</p>
+      </div>
+      <span className={`shrink-0 status-badge ${healthToneBadgeClass(status.tone)}`}>
+        {status.label}
+      </span>
+    </div>
+  );
 }
 
 export default function SettingsPage() {
@@ -310,32 +417,85 @@ export default function SettingsPage() {
   const hasNameChanged = useMemo(() => displayNameEdit.trim() !== displayName, [displayNameEdit, displayName]);
   const outboxCounts = systemHealth?.indexingOutbox.counts ?? {};
   const userIndexingCounts = indexingStatus?.counts ?? {};
-  const environmentChecks: Array<[string, boolean | undefined]> = [
-    ["Database URL", systemHealth?.environment.databaseConfigured],
-    ["Supabase service", systemHealth?.environment.supabaseConfigured],
-    ["Gemini API", systemHealth?.environment.geminiConfigured],
-    ["Google OAuth", systemHealth?.environment.googleOAuthConfigured],
-    ["Redis configured", systemHealth?.environment.redisConfigured],
-    ["Redis reachable", systemHealth?.environment.redisReachable],
-    ["Temporal", systemHealth?.environment.temporalConfigured],
-    ["Sentry", systemHealth?.environment.sentryConfigured],
-    ["OpenTelemetry", systemHealth?.environment.openTelemetryConfigured],
+  const coreEnvironmentChecks = [
+    {
+      label: "Database URL",
+      detail: "API can locate the primary Postgres connection.",
+      ok: systemHealth?.environment.databaseConfigured,
+    },
+    {
+      label: "Supabase service",
+      detail: "Auth sync and private storage operations can run.",
+      ok: systemHealth?.environment.supabaseConfigured,
+    },
+    {
+      label: "Gemini API",
+      detail: "AI memory embedding and deep answer generation are configured.",
+      ok: systemHealth?.environment.geminiConfigured,
+    },
+    {
+      label: "Google OAuth",
+      detail: "Calendar, Gmail, Drive, and Contacts can request Google access.",
+      ok: systemHealth?.environment.googleOAuthConfigured,
+    },
+  ];
+  const enterpriseEnvironmentChecks = [
+    {
+      label: "Redis",
+      detail: systemHealth?.environment.redisReachable
+        ? "Rate limit and search cache are using Redis."
+        : "Falls back to local/database behavior when Redis is unavailable.",
+      ok: Boolean(systemHealth?.environment.redisConfigured && systemHealth?.environment.redisReachable),
+      optional: false,
+    },
+    {
+      label: "Temporal",
+      detail: "Optional orchestration layer for production-grade workflows.",
+      ok: systemHealth?.environment.temporalConfigured,
+      optional: true,
+    },
+    {
+      label: "Sentry",
+      detail: "Optional error reporting for deployed API and worker runtime.",
+      ok: systemHealth?.environment.sentryConfigured,
+      optional: true,
+    },
+    {
+      label: "OpenTelemetry",
+      detail: "Optional distributed tracing for enterprise observability.",
+      ok: systemHealth?.environment.openTelemetryConfigured,
+      optional: true,
+    },
   ];
   const userPendingJobs = (userIndexingCounts.pending ?? 0) + (userIndexingCounts.retry ?? 0);
   const userProcessingJobs = userIndexingCounts.processing ?? 0;
   const userFailedJobs = (userIndexingCounts.dead_letter ?? 0) + (userIndexingCounts.failed ?? 0);
+  const userDoneJobs = userIndexingCounts.succeeded ?? 0;
+  const totalActiveJobs = userPendingJobs + userProcessingJobs;
+  const outboxFailedJobs = (outboxCounts.dead_letter ?? 0) + (outboxCounts.failed ?? 0);
+  const outboxActiveJobs = (outboxCounts.pending ?? 0) + (outboxCounts.retry ?? 0) + (outboxCounts.processing ?? 0);
+  const coreMissingCount = coreEnvironmentChecks.filter((check) => !check.ok).length;
+  const systemOverallTone: HealthTone = systemHealth?.status === "ok" && coreMissingCount === 0 && userFailedJobs === 0
+    ? "ready"
+    : systemHealth || indexingStatus
+      ? "attention"
+      : "idle";
+  const indexingOverallTone: HealthTone = userFailedJobs > 0 || outboxFailedJobs > 0 || (indexingStatus?.staleProcessingCount ?? 0) > 0
+    ? "attention"
+    : totalActiveJobs > 0 || outboxActiveJobs > 0
+      ? "working"
+      : indexingStatus?.available
+        ? "ready"
+        : "idle";
+  const demoOverallTone: HealthTone = demoReadiness?.ready
+    ? "ready"
+    : demoReadiness
+      ? "working"
+      : "idle";
   const schemaChecks = Object.entries({
     ...(systemHealth?.schema.tables ?? {}),
     ...(systemHealth?.schema.indexes ?? {}),
   });
-  const formatCounts = (counts: Record<string, number>) => {
-    const order = ["pending", "retry", "processing", "succeeded", "dead_letter", "failed"];
-    const entries = Object.entries(counts).sort(
-      ([first], [second]) => order.indexOf(first) - order.indexOf(second),
-    );
-    if (entries.length === 0) return "0 jobs";
-    return entries.map(([status, count]) => `${status}: ${count}`).join(" · ");
-  };
   const formatDuration = (ms: number | null | undefined) => {
     if (ms == null) return null;
     const seconds = Math.max(0, Math.round(ms / 1000));
@@ -345,25 +505,6 @@ export default function SettingsPage() {
     if (minutes < 60) return `${minutes}m ${remainingSeconds}s`;
     const hours = Math.floor(minutes / 60);
     return `${hours}h ${minutes % 60}m`;
-  };
-  const getIndexingBadgeClass = (status: string) => {
-    if (status === "succeeded" || status === "completed") {
-      return "status-badge-success";
-    }
-
-    if (status === "dead_letter" || status === "failed") {
-      return "status-badge-danger";
-    }
-
-    if (status === "processing") {
-      return "border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-300";
-    }
-
-    if (status === "retry") {
-      return "status-badge-warning";
-    }
-
-    return "";
   };
   return (
     <DashboardShell
@@ -622,48 +763,85 @@ export default function SettingsPage() {
             </p>
           )}
 
-          <div className="grid gap-3 sm:grid-cols-3">
-            <div className="enterprise-panel bg-white p-4 dark:bg-slate-950">
-              <p className="text-xs font-medium text-slate-500 dark:text-slate-400">API Health</p>
-              {isLoadingSystemStatus && !systemHealth ? (
-                <div className="skeleton-line mt-2 h-5 w-24" />
-              ) : (
-                <p className={`mt-1 text-lg font-bold ${systemHealth?.status === "ok" ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}`}>
-                  {systemHealth ? systemHealth.status.toUpperCase() : "UNKNOWN"}
-                </p>
-              )}
-              {systemHealth?.checkedAt && (
-                <p className="mt-1 truncate text-xs text-slate-400 dark:text-slate-500">
-                  {new Date(systemHealth.checkedAt).toLocaleString()}
-                </p>
-              )}
-            </div>
-            <div className="enterprise-panel bg-white p-4 dark:bg-slate-950">
-              <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Database</p>
-              {isLoadingSystemStatus && !systemHealth ? (
-                <div className="skeleton-line mt-2 h-5 w-28" />
-              ) : (
-                <p className={`mt-1 text-lg font-bold ${systemHealth?.database.ok ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
-                  {systemHealth?.database.ok ? "Connected" : "Needs attention"}
-                </p>
-              )}
-            </div>
-            <div className="enterprise-panel bg-white p-4 dark:bg-slate-950">
-              <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Outbox</p>
-              {isLoadingSystemStatus && !systemHealth ? (
-                <>
-                  <div className="skeleton-line mt-2 h-5 w-24" />
-                  <div className="skeleton-line mt-2 h-3 w-36" />
-                </>
-              ) : (
-                <>
-                  <p className={`mt-1 text-lg font-bold ${systemHealth?.indexingOutbox.available ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
-                    {systemHealth?.indexingOutbox.available ? "Available" : "Unavailable"}
+          <div className={`rounded-2xl border p-4 ${healthPanelClass(systemOverallTone)}`}>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className={`h-2.5 w-2.5 rounded-full ${healthDotClass(systemOverallTone)}`} aria-hidden />
+                  <p className="text-sm font-bold text-slate-950 dark:text-slate-100">
+                    {systemOverallTone === "ready"
+                      ? "System ready for demo"
+                      : isLoadingSystemStatus
+                        ? "Checking system status"
+                        : "System needs attention"}
                   </p>
-                  <p className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">{formatCounts(outboxCounts)}</p>
-                </>
-              )}
+                  <span className={`status-badge ${healthToneBadgeClass(systemOverallTone)}`}>
+                    {systemHealth?.status ?? "unknown"}
+                  </span>
+                </div>
+                <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-400">
+                  {systemOverallTone === "ready"
+                    ? "API, database, required environment, and indexing queue look healthy."
+                    : "Review the highlighted checks below before running a demo or importing more memory sources."}
+                </p>
+              </div>
+              {systemHealth?.checkedAt ? (
+                <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                  Checked {new Date(systemHealth.checkedAt).toLocaleString()}
+                </p>
+              ) : null}
             </div>
+          </div>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <HealthSnapshotCard
+              label="API"
+              value={systemHealth ? systemHealth.status.toUpperCase() : "Unknown"}
+              detail={systemHealth?.checkedAt ? "Health endpoint responded." : "Refresh to check the API health endpoint."}
+              tone={systemHealth?.status === "ok" ? "ready" : systemHealth ? "attention" : "idle"}
+              loading={isLoadingSystemStatus && !systemHealth}
+            />
+            <HealthSnapshotCard
+              label="Database"
+              value={systemHealth?.database.ok ? "Connected" : "Needs attention"}
+              detail={systemHealth?.database.detail ?? "Prisma can read/write the app database."}
+              tone={systemHealth?.database.ok ? "ready" : systemHealth ? "attention" : "idle"}
+              loading={isLoadingSystemStatus && !systemHealth}
+            />
+            <HealthSnapshotCard
+              label="Indexing"
+              value={
+                indexingOverallTone === "ready"
+                  ? "Queue clear"
+                  : indexingOverallTone === "working"
+                    ? "Working"
+                    : indexingOverallTone === "attention"
+                      ? "Needs action"
+                      : "Unknown"
+              }
+              detail={
+                indexingOverallTone === "ready"
+                  ? "No failed or active indexing jobs for your account."
+                  : indexingOverallTone === "working"
+                    ? `${totalActiveJobs} user job(s) and ${outboxActiveJobs} outbox job(s) are queued or processing.`
+                    : indexingOverallTone === "attention"
+                      ? `${userFailedJobs + outboxFailedJobs} failed job(s) need review or requeue.`
+                      : "Refresh after signing in to inspect indexing jobs."
+              }
+              tone={indexingOverallTone}
+              loading={isLoadingSystemStatus && !indexingStatus}
+            />
+            <HealthSnapshotCard
+              label="Demo"
+              value={demoReadiness?.ready ? "Ready" : demoReadiness ? "Needs work" : "Unknown"}
+              detail={
+                demoReadiness
+                  ? `${demoReadiness.checks.filter((check) => check.ok).length}/${demoReadiness.checks.length} readiness checks passing.`
+                  : "Run a readiness check to verify demo data and memory indexing."
+              }
+              tone={demoOverallTone}
+              loading={isLoadingSystemStatus && !demoReadiness}
+            />
           </div>
 
           {demoReadiness ? (
@@ -739,34 +917,72 @@ export default function SettingsPage() {
 
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             <div className="enterprise-panel bg-white p-4 dark:bg-slate-950">
-              <p className="mb-3 text-sm font-semibold text-slate-700 dark:text-slate-300">Environment</p>
-              <div className="grid gap-2 text-sm">
-                {environmentChecks.map(([label, ok]) => (
-                  <div key={label} className="flex items-center justify-between gap-3">
-                    <span className="text-slate-600 dark:text-slate-400">{label}</span>
-                    <span className={`status-badge ${ok ? "status-badge-success" : "status-badge-danger"}`}>
-                      {ok ? "Configured" : "Missing"}
-                    </span>
-                  </div>
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">Required for MVP</p>
+                  <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">These should be ready before demo.</p>
+                </div>
+                <span className={`status-badge ${coreMissingCount === 0 ? "status-badge-success" : "status-badge-danger"}`}>
+                  {coreMissingCount === 0 ? "All ready" : `${coreMissingCount} missing`}
+                </span>
+              </div>
+              <div className="grid gap-2">
+                {coreEnvironmentChecks.map((check) => (
+                  <ConfigCheckRow
+                    key={check.label}
+                    label={check.label}
+                    detail={check.detail}
+                    ok={check.ok}
+                  />
                 ))}
               </div>
             </div>
 
             <div className="enterprise-panel bg-white p-4 dark:bg-slate-950">
-              <p className="mb-3 text-sm font-semibold text-slate-700 dark:text-slate-300">Schema</p>
-              <div className="grid gap-2 text-sm">
-                {schemaChecks.map(([name, check]) => (
-                  <div key={name} className="flex items-center justify-between gap-3">
-                    <span className="min-w-0 truncate text-slate-600 dark:text-slate-400">{name}</span>
-                    <span className={`shrink-0 status-badge ${check.ok ? "status-badge-success" : "status-badge-danger"}`}>
-                      {check.ok ? "OK" : "Missing"}
-                    </span>
-                  </div>
-                ))}
-                {!systemHealth && (
-                  <p className="text-sm text-slate-500 dark:text-slate-400">No health check loaded yet.</p>
-                )}
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">Enterprise add-ons</p>
+                  <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">Useful for production proof, not all required for MVP.</p>
+                </div>
               </div>
+              <div className="grid gap-2">
+                {enterpriseEnvironmentChecks.map((check) => (
+                  <ConfigCheckRow
+                    key={check.label}
+                    label={check.label}
+                    detail={check.detail}
+                    ok={check.ok}
+                    optional={check.optional}
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 enterprise-panel bg-white p-4 dark:bg-slate-950">
+            <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">Database schema checks</p>
+                <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">Required tables and indexes used by memory indexing.</p>
+              </div>
+              {schemaChecks.length ? (
+                <span className={`status-badge ${schemaChecks.every(([, check]) => check.ok) ? "status-badge-success" : "status-badge-danger"}`}>
+                  {schemaChecks.filter(([, check]) => check.ok).length}/{schemaChecks.length} OK
+                </span>
+              ) : null}
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {schemaChecks.map(([name, check]) => (
+                <div key={name} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900/70">
+                  <span className="min-w-0 truncate text-sm font-medium text-slate-600 dark:text-slate-400">{name}</span>
+                  <span className={`shrink-0 status-badge ${check.ok ? "status-badge-success" : "status-badge-danger"}`}>
+                    {check.ok ? "OK" : "Missing"}
+                  </span>
+                </div>
+              ))}
+              {!systemHealth && (
+                <p className="text-sm text-slate-500 dark:text-slate-400">No health check loaded yet.</p>
+              )}
             </div>
           </div>
 
@@ -846,29 +1062,55 @@ export default function SettingsPage() {
           ) : null}
 
           <div className="mt-4 enterprise-panel bg-white p-4 dark:bg-slate-950">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">Your Indexing Jobs</p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">{formatCounts(userIndexingCounts)}</p>
+            <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">Memory indexing queue</p>
+                <p className="mt-0.5 text-xs leading-5 text-slate-500 dark:text-slate-400">
+                  This shows whether new diary, attachment, Google, and summary data has become searchable memory.
+                </p>
+              </div>
+              <span className={`status-badge ${healthToneBadgeClass(indexingOverallTone)}`}>
+                {indexingOverallTone === "ready"
+                  ? "Ready"
+                  : indexingOverallTone === "working"
+                    ? "Working"
+                    : indexingOverallTone === "attention"
+                      ? "Needs action"
+                      : "Unknown"}
+              </span>
             </div>
 
             <div className="mb-4 grid gap-2 sm:grid-cols-4">
               {[
-                { label: "Waiting", value: userPendingJobs, tone: userPendingJobs ? "amber" : "emerald" },
-                { label: "Processing", value: userProcessingJobs, tone: userProcessingJobs ? "sky" : "emerald" },
-                { label: "Failed", value: userFailedJobs, tone: userFailedJobs ? "rose" : "emerald" },
-                { label: "Done", value: userIndexingCounts.succeeded ?? 0, tone: "emerald" },
+                {
+                  label: "Queued",
+                  value: userPendingJobs,
+                  detail: userPendingJobs ? "Waiting for worker" : "Nothing waiting",
+                  tone: userPendingJobs ? "working" as HealthTone : "ready" as HealthTone,
+                },
+                {
+                  label: "Processing",
+                  value: userProcessingJobs,
+                  detail: userProcessingJobs ? "Worker is indexing" : "No active locks",
+                  tone: userProcessingJobs ? "working" as HealthTone : "ready" as HealthTone,
+                },
+                {
+                  label: "Needs action",
+                  value: userFailedJobs,
+                  detail: userFailedJobs ? "Requeue or inspect error" : "No failed jobs",
+                  tone: userFailedJobs ? "attention" as HealthTone : "ready" as HealthTone,
+                },
+                {
+                  label: "Searchable",
+                  value: userDoneJobs,
+                  detail: "Finished jobs",
+                  tone: "ready" as HealthTone,
+                },
               ].map((item) => (
-                <div key={item.label} className={`rounded-lg border px-3 py-2 ${
-                  item.tone === "rose"
-                    ? "border-rose-200 bg-rose-50 dark:border-rose-900/50 dark:bg-rose-950/20"
-                    : item.tone === "amber"
-                      ? "border-amber-200 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/20"
-                      : item.tone === "sky"
-                        ? "border-sky-200 bg-sky-50 dark:border-sky-900/50 dark:bg-sky-950/20"
-                        : "border-emerald-200 bg-emerald-50 dark:border-emerald-900/50 dark:bg-emerald-950/20"
-                }`}>
+                <div key={item.label} className={`rounded-lg border px-3 py-2 ${healthPanelClass(item.tone)}`}>
                   <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{item.label}</p>
                   <p className="mt-1 text-lg font-bold text-slate-900 dark:text-slate-100">{item.value}</p>
+                  <p className="mt-0.5 text-xs text-slate-600 dark:text-slate-400">{item.detail}</p>
                 </div>
               ))}
             </div>
@@ -887,25 +1129,33 @@ export default function SettingsPage() {
                   <div key={job.id} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 dark:border-slate-800 dark:bg-slate-900/70">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
-                          {job.sourceType} · {job.jobType}
-                        </p>
-                        <p className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">
-                          {job.sourceId} · updated {new Date(job.updatedAt).toLocaleString()}
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="truncate text-sm font-semibold capitalize text-slate-900 dark:text-slate-100">
+                            {job.sourceType} memory
+                          </p>
+                          <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-400">
+                            {job.jobType.replaceAll("_", " ")}
+                          </span>
+                        </div>
+                        <p className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">
+                          Updated {new Date(job.updatedAt).toLocaleString()} · source {job.sourceId}
                         </p>
                       </div>
-                      <span className={`shrink-0 status-badge ${getIndexingBadgeClass(job.status)}`}>
-                        {job.status}
+                      <span className={`shrink-0 status-badge ${healthToneBadgeClass(jobTone(job.status))}`}>
+                        {friendlyJobStatus(job.status)}
                       </span>
                     </div>
                     {job.error && (
-                      <p className="mt-2 line-clamp-2 text-xs leading-5 text-rose-600 dark:text-rose-300">{job.error}</p>
+                      <div className="mt-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 dark:border-rose-900/50 dark:bg-rose-950/20">
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-rose-700 dark:text-rose-300">Last error</p>
+                        <p className="mt-1 line-clamp-2 text-xs leading-5 text-rose-600 dark:text-rose-300">{job.error}</p>
+                      </div>
                     )}
                     <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
                       <p className="text-xs text-slate-500 dark:text-slate-400">
-                        retries {job.retryCount}/{job.maxRetries} · age {formatDuration(job.ageMs)}
-                        {job.nextRunAfter ? ` · next ${new Date(job.nextRunAfter).toLocaleString()}` : ""}
-                        {job.processingAgeMs ? ` · processing ${formatDuration(job.processingAgeMs)}` : ""}
+                        Retry {job.retryCount}/{job.maxRetries} · age {formatDuration(job.ageMs) ?? "unknown"}
+                        {job.nextRunAfter ? ` · next run ${new Date(job.nextRunAfter).toLocaleString()}` : ""}
+                        {job.processingAgeMs ? ` · processing for ${formatDuration(job.processingAgeMs)}` : ""}
                         {job.lastErrorAt ? ` · last error ${new Date(job.lastErrorAt).toLocaleString()}` : ""}
                       </p>
                       {["dead_letter", "failed", "retry", "processing"].includes(job.status) ? (

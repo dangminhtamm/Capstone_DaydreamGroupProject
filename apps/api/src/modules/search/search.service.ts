@@ -31,7 +31,7 @@ export class SearchService {
     }
 
     const normalizedQuestion = queryDto.question.trim();
-    const lang = queryDto.responseLanguage ?? 'en';
+    const lang = queryDto.responseLanguage ?? this.inferResponseLanguage(normalizedQuestion);
     const timeZone = queryDto.timeZone?.trim() || undefined;
 
     // ── Live search ──
@@ -227,6 +227,17 @@ export class SearchService {
 
   private isDefaultAnswerStrategy(strategy: SearchQueryDto['answerStrategy']) {
     return strategy === undefined || strategy === 'auto';
+  }
+
+  private inferResponseLanguage(question: string): 'en' | 'vi' {
+    const hasVietnameseDiacritics =
+      /[ăâđêôơưáàảãạấầẩẫậắằẳẵặéèẻẽẹếềểễệíìỉĩịóòỏõọốồổỗộớờởỡợúùủũụứừửữựýỳỷỹỵ]/iu.test(question);
+    const hasVietnameseWords =
+      /\b(làm gì|hôm nay|hôm qua|ngày|tháng|tuần|tôi|mình|nhật ký|tâm trạng|cảm xúc|dựa trên|phân tích)\b/iu.test(
+        question.toLowerCase(),
+      );
+
+    return hasVietnameseDiacritics || hasVietnameseWords ? 'vi' : 'en';
   }
 
   private isCacheableLiveResult(

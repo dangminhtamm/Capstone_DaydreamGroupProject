@@ -89,7 +89,7 @@ type SearchResponse = {
   cacheStorage?: "redis" | "database";
 };
 
-type ResponseLanguage = "en" | "vi";
+type ResponseLanguage = "auto" | "en" | "vi";
 
 
 const suggestedQuestions = [
@@ -106,6 +106,13 @@ const answerStrategies: Array<{ value: AnswerStrategy; label: string }> = [
   { value: "deep", label: "Deep" },
 ];
 
+function inferResponseLanguage(question: string): Exclude<ResponseLanguage, "auto"> {
+  const normalized = question.toLowerCase();
+  const hasVietnameseDiacritics = /[ăâđêôơưáàảãạấầẩẫậắằẳẵặéèẻẽẹếềểễệíìỉĩịóòỏõọốồổỗộớờởỡợúùủũụứừửữựýỳỷỹỵ]/iu.test(question);
+  const hasVietnameseWords = /\b(làm gì|hôm nay|hôm qua|ngày|tháng|tuần|tôi|mình|nhật ký|tâm trạng|cảm xúc|dựa trên|phân tích)\b/iu.test(normalized);
+  return hasVietnameseDiacritics || hasVietnameseWords ? "vi" : "en";
+}
+
 const confidenceStyles = {
   high: "status-badge-success",
   medium: "status-badge-warning",
@@ -120,6 +127,26 @@ const sourceToneStyles: Record<string, string> = {
   gmail: "border-rose-100 bg-rose-50 text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-300",
   attachment: "border-emerald-100 bg-emerald-50 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-300",
   summary: "border-amber-100 bg-amber-50 text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300",
+};
+
+const sourceAccentStyles: Record<string, string> = {
+  diary: "from-indigo-500 to-blue-500",
+  calendar: "from-sky-500 to-cyan-500",
+  contact: "from-fuchsia-500 to-pink-500",
+  drive: "from-lime-500 to-emerald-500",
+  gmail: "from-rose-500 to-orange-500",
+  attachment: "from-emerald-500 to-teal-500",
+  summary: "from-amber-500 to-yellow-500",
+};
+
+const sourceShortLabels: Record<string, string> = {
+  diary: "Diary",
+  calendar: "Calendar",
+  contact: "Contact",
+  drive: "Drive",
+  gmail: "Gmail",
+  attachment: "File",
+  summary: "Summary",
 };
 
 function formatSourceType(value: string) {
@@ -250,6 +277,26 @@ function formatDurationMs(value?: number | null) {
 function formatPercent(value?: number | null) {
   if (value == null || !Number.isFinite(value)) return "n/a";
   return `${Math.round(value * 100)}%`;
+}
+
+function formatSourceChunk(value: string) {
+  return value.replaceAll("_", " ");
+}
+
+function formatSimilarityScore(value: number) {
+  return `${Math.round(value * 100)}%`;
+}
+
+function sourceCardTone(sourceType: string) {
+  return sourceToneStyles[sourceType] ?? "border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200";
+}
+
+function sourceCardAccent(sourceType: string) {
+  return sourceAccentStyles[sourceType] ?? "from-slate-500 to-slate-400";
+}
+
+function sourceShortLabel(sourceType: string) {
+  return sourceShortLabels[sourceType] ?? formatSourceType(sourceType);
 }
 
 function debugStateClass(state: DebugPipelineState) {
@@ -497,13 +544,70 @@ function AiDebugPanel({ result }: { result: SearchResponse }) {
   );
 }
 
+function EvidenceSourceCard({ source }: { source: SearchCitation }) {
+  return (
+    <article className="group overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md dark:border-slate-800 dark:bg-slate-950/70 dark:hover:border-blue-800">
+      <div className={`h-1.5 bg-gradient-to-r ${sourceCardAccent(source.sourceType)}`} />
+      <div className="p-4">
+        <div className="flex items-start gap-3">
+          <div className="flex h-11 w-11 shrink-0 flex-col items-center justify-center rounded-xl border border-slate-200 bg-slate-950 text-white shadow-sm dark:border-slate-700 dark:bg-slate-100 dark:text-slate-950">
+            <span className="text-[10px] font-bold leading-none">{source.marker}</span>
+            <span className="mt-0.5 text-[9px] font-semibold uppercase leading-none opacity-70">
+              {sourceShortLabel(source.sourceType).slice(0, 4)}
+            </span>
+          </div>
+
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold capitalize ${sourceCardTone(source.sourceType)}`}>
+                {formatSourceType(source.sourceType)}
+              </span>
+              <span className="status-badge">
+                {formatSourceChunk(source.chunkType)}
+              </span>
+            </div>
+            <h4 className="mt-2 line-clamp-2 text-sm font-semibold leading-5 text-slate-950 dark:text-slate-100">
+              {source.sourceTitle || "Untitled memory"}
+            </h4>
+            <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+              <span>{formatSourceDate(source.occurredAt)}</span>
+              <span aria-hidden>·</span>
+              <span>{formatSimilarityScore(source.similarity)} match</span>
+            </div>
+          </div>
+        </div>
+
+        {source.claim ? (
+          <div className="mt-4 rounded-lg border border-blue-100 bg-blue-50/70 px-3 py-2.5 dark:border-blue-900/60 dark:bg-blue-950/30">
+            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-blue-600 dark:text-blue-300">
+              Claim supported
+            </p>
+            <p className="mt-1 line-clamp-2 text-xs font-medium leading-5 text-blue-950 dark:text-blue-100">
+              {source.claim}
+            </p>
+          </div>
+        ) : null}
+
+        <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 dark:border-slate-800 dark:bg-slate-900/70">
+          <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
+            Evidence quote
+          </p>
+          <blockquote className="line-clamp-4 text-sm leading-6 text-slate-700 dark:text-slate-300">
+            {highlightQuote(source.quote, source.claim)}
+          </blockquote>
+        </div>
+      </div>
+    </article>
+  );
+}
+
 export default function SearchPage() {
   const { isAuthenticated, isLoading: isAuthLoading, getAccessToken } = useAuth();
   const [question, setQuestion] = useState("");
   const [result, setResult] = useState<SearchResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSearching, setIsSearching] = useState(false);
-  const [responseLanguage, setResponseLanguage] = useState<ResponseLanguage>("en");
+  const [responseLanguage, setResponseLanguage] = useState<ResponseLanguage>("auto");
   const [answerStrategy, setAnswerStrategy] = useState<AnswerStrategy>("auto");
   const [showAuthPrompt, setShowAuthPrompt] = useState(false);
   const [searchHistory, setSearchHistory] = useState<SearchHistoryEntry[]>([]);
@@ -511,14 +615,22 @@ export default function SearchPage() {
 
   // Load language preference on mount
   useEffect(() => {
-    const saved = localStorage.getItem("dd-response-lang") as ResponseLanguage | null;
-    if (saved === "en" || saved === "vi") setResponseLanguage(saved);
+    const timeoutId = window.setTimeout(() => {
+      const saved = localStorage.getItem("dd-response-lang") as ResponseLanguage | null;
+      if (saved === "auto" || saved === "en" || saved === "vi") setResponseLanguage(saved);
 
-    const savedStrategy = localStorage.getItem("dd-answer-strategy") as AnswerStrategy | null;
-    if (savedStrategy === "auto" || savedStrategy === "fast" || savedStrategy === "deep") {
-      setAnswerStrategy(savedStrategy);
-    }
+      const savedStrategy = localStorage.getItem("dd-answer-strategy") as AnswerStrategy | null;
+      if (savedStrategy === "auto" || savedStrategy === "fast" || savedStrategy === "deep") {
+        setAnswerStrategy(savedStrategy);
+      }
 
+      const initialQuestion = new URLSearchParams(window.location.search).get("q");
+      if (initialQuestion?.trim()) {
+        setQuestion(initialQuestion.trim());
+      }
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
   }, []);
 
   // Load search history from server when authenticated
@@ -535,8 +647,14 @@ export default function SearchPage() {
 
   useEffect(() => {
     if (!isAuthLoading && isAuthenticated) {
-      loadServerHistory();
+      const timeoutId = window.setTimeout(() => {
+        void loadServerHistory();
+      }, 0);
+
+      return () => window.clearTimeout(timeoutId);
     }
+
+    return undefined;
   }, [isAuthLoading, isAuthenticated, loadServerHistory]);
 
   const handleClearHistory = useCallback(async () => {
@@ -591,6 +709,10 @@ export default function SearchPage() {
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
       const timeZone = getBrowserTimeZone();
+      const effectiveResponseLanguage =
+        responseLanguage === "auto"
+          ? inferResponseLanguage(normalizedQuestion)
+          : responseLanguage;
       const response = await fetch(`${apiUrl}/api/search`, {
         method: "POST",
         headers: {
@@ -600,7 +722,7 @@ export default function SearchPage() {
         body: JSON.stringify({
           question: normalizedQuestion,
           limit: 8,
-          responseLanguage,
+          responseLanguage: effectiveResponseLanguage,
           ...(timeZone ? { timeZone } : {}),
           ...(answerStrategy === "auto" ? {} : { answerStrategy }),
         }),
@@ -643,6 +765,9 @@ export default function SearchPage() {
     event.preventDefault();
     await runSearch(question.trim());
   }
+
+  const displayLanguage =
+    responseLanguage === "auto" ? inferResponseLanguage(question) : responseLanguage;
 
   return (
     <DashboardShell
@@ -704,26 +829,25 @@ export default function SearchPage() {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
-                    <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Language</span>
-                    <div className="segment-control">
-                      {(["en", "vi"] as const).map((language) => {
-                        const active = responseLanguage === language;
-                        return (
-                          <button
-                            key={language}
-                            type="button"
-                            onClick={() => {
-                              setResponseLanguage(language);
-                              localStorage.setItem("dd-response-lang", language);
-                            }}
-                            className={`segment-option ${active ? "segment-option-active" : ""}`}
-                          >
-                            {language.toUpperCase()}
-                          </button>
-                        );
-                      })}
-                    </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Language</span>
+                  <div className="segment-control">
+                    {(["auto", "en", "vi"] as const).map((language) => {
+                      const active = responseLanguage === language;
+                      return (
+                        <button
+                          key={language}
+                          type="button"
+                          onClick={() => {
+                            setResponseLanguage(language);
+                            localStorage.setItem("dd-response-lang", language);
+                          }}
+                          className={`segment-option ${active ? "segment-option-active" : ""}`}
+                        >
+                          {language.toUpperCase()}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               </details>
@@ -915,7 +1039,7 @@ export default function SearchPage() {
                     className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 dark:border-slate-600 dark:bg-slate-700/50 dark:text-slate-300 dark:hover:border-indigo-500 dark:hover:bg-indigo-900/30 dark:hover:text-indigo-400"
                   >
                     <svg className="h-5 w-5 shrink-0 text-slate-500 dark:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                    {responseLanguage === "vi" ? "Thêm nhật ký mới về chủ đề này" : "Add a new diary entry about this topic"}
+                    {displayLanguage === "vi" ? "Thêm nhật ký mới về chủ đề này" : "Add a new diary entry about this topic"}
                   </Link>
                   <button
                     type="button"
@@ -927,7 +1051,7 @@ export default function SearchPage() {
                     className="flex w-full cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 dark:border-slate-600 dark:bg-slate-700/50 dark:text-slate-300 dark:hover:border-indigo-500 dark:hover:bg-indigo-900/30 dark:hover:text-indigo-400"
                   >
                     <svg className="h-5 w-5 shrink-0 text-slate-500 dark:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-                    {responseLanguage === "vi" ? "Thử diễn đạt lại câu hỏi" : "Try rephrasing your question"}
+                    {displayLanguage === "vi" ? "Thử diễn đạt lại câu hỏi" : "Try rephrasing your question"}
                   </button>
                   <button
                     type="button"
@@ -935,7 +1059,7 @@ export default function SearchPage() {
                     className="flex w-full cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 dark:border-slate-600 dark:bg-slate-700/50 dark:text-slate-300 dark:hover:border-indigo-500 dark:hover:bg-indigo-900/30 dark:hover:text-indigo-400"
                   >
                     <svg className="h-5 w-5 shrink-0 text-slate-500 dark:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
-                    {responseLanguage === "vi" ? "Thử một câu hỏi gợi ý" : "Try a suggested question instead"}
+                    {displayLanguage === "vi" ? "Thử một câu hỏi gợi ý" : "Try a suggested question instead"}
                   </button>
                 </div>
               </div>
@@ -974,42 +1098,7 @@ export default function SearchPage() {
         {result?.sources.length ? (
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {result.sources.map((source) => (
-              <article
-                key={`${source.marker}-${source.chunkId}`}
-                className="rounded-lg border border-slate-200 bg-slate-50/70 p-3 transition hover:border-indigo-200 hover:bg-white dark:border-slate-800 dark:bg-slate-900/60 dark:hover:border-indigo-800 dark:hover:bg-slate-950"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="mb-2 flex flex-wrap items-center gap-1.5">
-                      <span className="rounded-md bg-slate-900 px-2 py-0.5 text-[11px] font-bold text-white dark:bg-slate-100 dark:text-slate-950">
-                        {source.marker}
-                      </span>
-                      <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold capitalize ${sourceToneStyles[source.sourceType] ?? "border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"}`}>
-                        {formatSourceType(source.sourceType)}
-                      </span>
-                      <span className="status-badge">
-                        {source.chunkType.replaceAll("_", " ")}
-                      </span>
-                    </div>
-                    <p className="truncate text-sm font-semibold leading-5 text-slate-950 dark:text-slate-100">
-                      {source.sourceTitle || "Untitled memory"}
-                    </p>
-                    <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] font-medium text-slate-500 dark:text-slate-400">
-                      <span>{formatSourceDate(source.occurredAt)}</span>
-                      <span>{Math.round(source.similarity * 100)}% match</span>
-                    </div>
-                  </div>
-                </div>
-
-                {source.claim ? (
-                  <p className="mt-3 line-clamp-2 rounded-lg border border-indigo-100 bg-indigo-50/70 px-3 py-2 text-xs leading-5 text-indigo-950 dark:border-indigo-900/60 dark:bg-indigo-950/30 dark:text-indigo-100">
-                    {source.claim}
-                  </p>
-                ) : null}
-                <blockquote className="mt-3 line-clamp-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs leading-5 text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300">
-                  {highlightQuote(source.quote, source.claim)}
-                </blockquote>
-              </article>
+              <EvidenceSourceCard key={`${source.marker}-${source.chunkId}`} source={source} />
             ))}
           </div>
         ) : (

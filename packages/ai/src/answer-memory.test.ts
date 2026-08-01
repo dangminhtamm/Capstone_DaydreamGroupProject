@@ -9,6 +9,11 @@ import {
   inferRetrievalFilters,
   rerankMemoryHits,
 } from "./answer-memory.ts";
+import {
+  shouldTranslateFastAnswer,
+  translateFastAnswerIfUseful,
+} from "./answer-memory-translation.ts";
+import type { AnswerMemoryResult } from "./answer-memory.ts";
 import type { MemorySearchHit } from "./retrieval.ts";
 
 test("inferRetrievalFilters prefers calendar sources for calendar questions", () => {
@@ -1247,7 +1252,55 @@ test("answerFromChunks fast strategy returns extractive answer without generatio
   assert.equal(generateCalled, false);
   assert.equal(result.answerMode, "fast_path");
   assert.equal(result.analytics?.tokenUsage.totalTokens, 0);
-  assert.match(result.answer, /trả lời nhanh/);
+  assert.match(result.answer, /Mình tìm thấy ký ức khớp nhất/);
+  assert.match(result.answer, /felt focused/);
+});
+
+test("answerFromChunks fast strategy filters noisy sample-question memories", async () => {
+  let generateCalled = false;
+  const result = await answerFromChunks(
+    "What did I work on for search quality?",
+    [
+      makeHit({
+        id: "sample-question",
+        sourceType: "diary",
+        sourceId: "sample-question",
+        chunkType: "general",
+        text: "The best questions are: what feedback did Linh give, what blockers did we have this week, and why did we separate retrieval latency.",
+        evidence: "best questions are",
+        similarity: 0.88,
+        vectorSimilarity: 0.88,
+        occurredAt: new Date("2026-07-18T00:00:00.000Z"),
+      }),
+      makeHit({
+        id: "real-search-work",
+        sourceType: "diary",
+        sourceId: "real-search-work",
+        chunkType: "general",
+        text: "I improved search source cards, citation highlighting, and AI debug visibility for the MVP demo.",
+        evidence: "improved search source cards, citation highlighting, and AI debug visibility",
+        similarity: 0.8,
+        vectorSimilarity: 0.8,
+        occurredAt: new Date("2026-07-17T00:00:00.000Z"),
+      }),
+    ],
+    {
+      responseLanguage: "en",
+      answerStrategy: "fast",
+      generateAnswer: async () => {
+        generateCalled = true;
+        throw new Error("should not generate in fast strategy");
+      },
+    },
+  );
+
+  assert.equal(generateCalled, false);
+  assert.equal(result.answerMode, "fast_path");
+  assert.equal(result.citations.length, 1);
+  assert.equal(result.citations[0]?.chunkId, "real-search-work");
+  assert.match(result.answer, /The strongest match is from/);
+  assert.match(result.answer, /improved search source cards/);
+  assert.doesNotMatch(result.answer, /best questions are/i);
 });
 
 test("answerFromChunks auto uses Gemini for reasoning-heavy latency questions", async () => {
@@ -1331,7 +1384,135 @@ test("answerSingleDayFastPath assembles simple day answers without model generat
   assert.equal(result.analytics?.answerMode, "fast_path");
   assert.equal(result.analytics?.timing.generateMs, 0);
   assert.equal(result.citations.length, 2);
-  assert.match(result.answer, /I went to a cafe to study today/);
+  assert.match(result.answer, /you went to a cafe to study that day/);
+});
+
+test("answerSingleDayFastPath prefers raw diary facts over generated daily summaries", () => {
+  const result = answerSingleDayFastPath(
+    "9/7 làm gì?",
+    [
+      makeHit({
+        id: "daily-summary",
+        sourceType: "summary",
+        sourceId: "summary-2026-07-09",
+        chunkType: "reflection",
+        text: 'Daily Log: 2026-07-09 * **Events:** The entire day was spent sleeping. * **Weather:** It rained consistently throughout the day, described as "not good."',
+        evidence: 'Daily Log: 2026-07-09 * **Events:** The entire day was spent sleeping. * **Weather:** It rained consistently throughout the day, described as "not good."',
+        similarity: 0.91,
+        vectorSimilarity: 0.91,
+        occurredAt: new Date("2026-07-09T02:00:00.000Z"),
+      }),
+      makeHit({
+        id: "diary-rest",
+        sourceType: "diary",
+        sourceId: "diary-2026-07-09",
+        chunkType: "general",
+        text: "Hôm nay tôi không làm gì, chỉ nằm ngủ từ sáng tới tối.",
+        evidence: "Hôm nay tôi không làm gì, chỉ nằm ngủ từ sáng tới tối.",
+        similarity: 0.87,
+        vectorSimilarity: 0.87,
+        occurredAt: new Date("2026-07-09T02:00:00.000Z"),
+      }),
+      makeHit({
+        id: "diary-weather",
+        sourceType: "diary",
+        sourceId: "diary-2026-07-09",
+        chunkType: "general",
+        text: "Thời tiết hôm nay không đẹp, trời mưa nguyên ngày.",
+        evidence: "Thời tiết hôm nay không đẹp, trời mưa nguyên ngày.",
+        similarity: 0.82,
+        vectorSimilarity: 0.82,
+        occurredAt: new Date("2026-07-09T02:00:00.000Z"),
+      }),
+    ],
+    {
+      startDate: new Date("2026-07-09T00:00:00.000Z"),
+      endDate: new Date("2026-07-09T23:59:59.999Z"),
+    },
+    "vi",
+    0.62,
+    "Asia/Ho_Chi_Minh",
+  );
+
+  assert.ok(result);
+  assert.equal(result.answerMode, "fast_path");
+  assert.equal(result.citations.length, 2);
+  assert.ok(result.citations.every((citation) => citation.sourceType === "diary"));
+  assert.match(result.answer, /09\/07\/2026/);
+  assert.match(result.answer, /bạn không làm gì/);
+  assert.match(result.answer, /nằm ngủ từ sáng tới tối/);
+  assert.match(result.answer, /Thời tiết hôm đó không đẹp/);
+  assert.match(result.answer, /trời mưa nguyên ngày/);
+  assert.doesNotMatch(result.answer, /found these memories|ký ức nổi bật|Daily Log|Events/i);
+  assert.doesNotMatch(result.answer, /\*\*/);
+});
+
+test("translateFastAnswerIfUseful uses a small Gemini call for cross-language fast answers", async () => {
+  const baseResult = makeFastAnswerResult({
+    answer:
+      "Mình trả lời nhanh từ các ký ức liên quan nhất:\n- 12/07/2026: I felt focused while polishing capstone search sources and memory answers.",
+    quote: "I felt focused while polishing capstone search sources and memory answers.",
+  });
+  let generateCalled = false;
+
+  assert.equal(shouldTranslateFastAnswer(baseResult, "vi"), true);
+
+  const result = await translateFastAnswerIfUseful(baseResult, {
+    question: "Tôi đã tập trung vào gì?",
+    responseLanguage: "vi",
+    generateTranslation: async (options) => {
+      generateCalled = true;
+      assert.match(options.prompt, /Existing fast answer/);
+      assert.equal(options.maxOutputTokens, 180);
+      assert.equal(options.maxRetries, 0);
+      assert.equal(options.maxFormatRetries, 0);
+      return {
+        data: {
+          answer:
+            "Mình trả lời nhanh từ ký ức liên quan nhất: ngày 12/07/2026, bạn tập trung polish search sources và memory answers cho capstone.",
+        },
+        tokenUsage: {
+          promptTokens: 48,
+          completionTokens: 26,
+          totalTokens: 74,
+          model: "test-gemini",
+        },
+      };
+    },
+  });
+
+  assert.equal(generateCalled, true);
+  assert.equal(result.answerMode, "fast_path");
+  assert.match(result.answer, /bạn tập trung polish search sources/);
+  assert.equal(result.citations, baseResult.citations);
+  assert.equal(result.analytics?.tokenUsage.totalTokens, 74);
+  assert.equal(result.analytics?.tokenUsage.model, "test-gemini");
+  assert.ok((result.analytics?.timing.generateMs ?? 0) >= 0);
+});
+
+test("translateFastAnswerIfUseful skips Gemini when fast answer already matches target language", async () => {
+  const baseResult = makeFastAnswerResult({
+    answer:
+      "Ngày 09/07/2026, bạn không làm gì, chỉ nằm ngủ từ sáng tới tối. Thời tiết hôm đó không đẹp, trời mưa nguyên ngày.",
+    quote:
+      "Hôm nay tôi không làm gì, chỉ nằm ngủ từ sáng tới tối. Thời tiết hôm nay không đẹp, trời mưa nguyên ngày.",
+  });
+  let generateCalled = false;
+
+  assert.equal(shouldTranslateFastAnswer(baseResult, "vi"), false);
+
+  const result = await translateFastAnswerIfUseful(baseResult, {
+    question: "9/7 làm gì?",
+    responseLanguage: "vi",
+    generateTranslation: async () => {
+      generateCalled = true;
+      throw new Error("should not translate Vietnamese fast answers");
+    },
+  });
+
+  assert.equal(generateCalled, false);
+  assert.equal(result.answer, baseResult.answer);
+  assert.equal(result.analytics?.tokenUsage.totalTokens, 0);
 });
 
 test("answerSingleDayFastPath skips reasoning-heavy temporal questions", () => {
@@ -1549,6 +1730,104 @@ test("inferRetrievalFilters parses Vietnamese written day/month dates", () => {
   assert.equal(filters.endDate.toISOString(), "2026-05-18T23:59:59.999Z");
 });
 
+test("inferRetrievalFilters parses Vietnamese spelled day/month dates", () => {
+  const filters = inferRetrievalFilters(
+    "Ngày chín tháng bảy tôi làm gì?",
+    new Date("2026-07-26T12:00:00.000Z"),
+    "Asia/Ho_Chi_Minh",
+  );
+
+  assert.ok(filters.startDate instanceof Date);
+  assert.equal(filters.startDate.toISOString(), "2026-07-08T17:00:00.000Z");
+  assert.ok(filters.endDate instanceof Date);
+  assert.equal(filters.endDate.toISOString(), "2026-07-09T16:59:59.999Z");
+});
+
+test("inferRetrievalFilters parses Vietnamese compound spelled dates", () => {
+  const filters = inferRetrievalFilters(
+    "Ngày hai mươi mốt tháng bảy tôi đã làm gì?",
+    new Date("2026-07-26T12:00:00.000Z"),
+  );
+
+  assert.ok(filters.startDate instanceof Date);
+  assert.equal(filters.startDate.toISOString(), "2026-07-21T00:00:00.000Z");
+  assert.ok(filters.endDate instanceof Date);
+  assert.equal(filters.endDate.toISOString(), "2026-07-21T23:59:59.999Z");
+});
+
+test("inferRetrievalFilters parses Vietnamese spelled month ranges", () => {
+  const filters = inferRetrievalFilters(
+    "Tháng bảy tôi làm gì?",
+    new Date("2026-07-26T12:00:00.000Z"),
+  );
+
+  assert.ok(filters.startDate instanceof Date);
+  assert.equal(filters.startDate.toISOString(), "2026-07-01T00:00:00.000Z");
+  assert.ok(filters.endDate instanceof Date);
+  assert.equal(filters.endDate.toISOString(), "2026-07-31T23:59:59.999Z");
+});
+
+test("inferRetrievalFilters parses English ordinal day before month", () => {
+  const filters = inferRetrievalFilters(
+    "What did I do on the ninth of July?",
+    new Date("2026-07-26T12:00:00.000Z"),
+    "Asia/Ho_Chi_Minh",
+  );
+
+  assert.ok(filters.startDate instanceof Date);
+  assert.equal(filters.startDate.toISOString(), "2026-07-08T17:00:00.000Z");
+  assert.ok(filters.endDate instanceof Date);
+  assert.equal(filters.endDate.toISOString(), "2026-07-09T16:59:59.999Z");
+});
+
+test("inferRetrievalFilters parses English ordinal day after month", () => {
+  const filters = inferRetrievalFilters(
+    "What did I do on July ninth?",
+    new Date("2026-07-26T12:00:00.000Z"),
+  );
+
+  assert.ok(filters.startDate instanceof Date);
+  assert.equal(filters.startDate.toISOString(), "2026-07-09T00:00:00.000Z");
+  assert.ok(filters.endDate instanceof Date);
+  assert.equal(filters.endDate.toISOString(), "2026-07-09T23:59:59.999Z");
+});
+
+test("inferRetrievalFilters parses English compound spelled dates", () => {
+  const filters = inferRetrievalFilters(
+    "What happened on the twenty first of July?",
+    new Date("2026-07-26T12:00:00.000Z"),
+  );
+
+  assert.ok(filters.startDate instanceof Date);
+  assert.equal(filters.startDate.toISOString(), "2026-07-21T00:00:00.000Z");
+  assert.ok(filters.endDate instanceof Date);
+  assert.equal(filters.endDate.toISOString(), "2026-07-21T23:59:59.999Z");
+});
+
+test("inferRetrievalFilters parses English month before compound day", () => {
+  const filters = inferRetrievalFilters(
+    "What happened on July twenty first 2026?",
+    new Date("2026-07-26T12:00:00.000Z"),
+  );
+
+  assert.ok(filters.startDate instanceof Date);
+  assert.equal(filters.startDate.toISOString(), "2026-07-21T00:00:00.000Z");
+  assert.ok(filters.endDate instanceof Date);
+  assert.equal(filters.endDate.toISOString(), "2026-07-21T23:59:59.999Z");
+});
+
+test("inferRetrievalFilters parses English ordinal month day", () => {
+  const filters = inferRetrievalFilters(
+    "What happened on May eighteenth?",
+    new Date("2026-07-26T12:00:00.000Z"),
+  );
+
+  assert.ok(filters.startDate instanceof Date);
+  assert.equal(filters.startDate.toISOString(), "2026-05-18T00:00:00.000Z");
+  assert.ok(filters.endDate instanceof Date);
+  assert.equal(filters.endDate.toISOString(), "2026-05-18T23:59:59.999Z");
+});
+
 test("inferRetrievalFilters parses ISO dates", () => {
   const filters = inferRetrievalFilters("What happened on 2026-05-18?");
 
@@ -1557,6 +1836,49 @@ test("inferRetrievalFilters parses ISO dates", () => {
   assert.ok(filters.endDate instanceof Date);
   assert.equal(filters.endDate.toISOString(), "2026-05-18T23:59:59.999Z");
 });
+
+function makeFastAnswerResult(overrides: {
+  answer: string;
+  quote: string;
+}): AnswerMemoryResult {
+  return {
+    answer: overrides.answer,
+    confidence: "medium",
+    citations: [
+      {
+        marker: "S1",
+        chunkId: "chunk-fast",
+        sourceType: "diary",
+        sourceId: "diary-fast",
+        occurredAt: "2026-07-12T00:00:00.000Z",
+        chunkType: "general",
+        quote: overrides.quote,
+        similarity: 0.84,
+        vectorSimilarity: 0.84,
+        lexicalScore: 0,
+        retrievalMode: "hybrid",
+      },
+    ],
+    answerMode: "fast_path",
+    analytics: {
+      tokenUsage: {
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+        model: "fast-extractive",
+      },
+      timing: {
+        embedMs: 0,
+        retrieveMs: 0,
+        generateMs: 0,
+        totalMs: 0,
+      },
+      chunksRetrieved: 1,
+      status: "success",
+      answerMode: "fast_path",
+    },
+  };
+}
 
 function makeHit(overrides: Partial<MemorySearchHit>): MemorySearchHit {
   return {

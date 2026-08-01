@@ -7,16 +7,18 @@ import type {
   ResponseLanguage,
 } from "./answer-memory-types.ts";
 import {
-  dedupeCitationsBySource,
   buildReadableClaim,
   formatDateForAnswer,
   formatDateRangeForAnswer,
-  formatFallbackSourceDate,
-  formatLocalizedMemoryBullet,
   formatSingleDayAnswer,
-  formatTemporalRangeAnswer,
+  selectSingleDayCitations,
 } from "./answer-memory-format.ts";
 import { detectMemoryIntent } from "./answer-memory-intents.ts";
+import {
+  formatGenericFastAnswer,
+  formatTemporalFastAnswer,
+  prepareFastCitations,
+} from "./answer-memory-fast-compose.ts";
 import {
   buildQueryAnalytics,
   noMemoryResult,
@@ -43,11 +45,11 @@ export function answerSingleDayFastPath(
     return null;
   }
 
-  const citations = buildCitations(sortedChunks)
+  const citations = selectSingleDayCitations(buildCitations(sortedChunks))
     .slice(0, 6)
     .map((citation) => ({
       ...citation,
-      claim: citation.quote,
+      claim: citation.claim ?? buildReadableClaim(citation),
     }));
 
   if (!citations.length) return null;
@@ -93,21 +95,22 @@ export function answerTemporalRangeFastPath(
     return null;
   }
 
-  const citations = dedupeCitationsBySource(buildCitations(sortedChunks))
-    .slice(0, 6)
-    .map((citation) => ({
-      ...citation,
-      claim: buildReadableClaim(citation),
-    }));
+  const intent = detectMemoryIntent(question);
+  const citations = prepareFastCitations(buildCitations(sortedChunks), {
+    intent,
+    maxCitations: 6,
+  });
 
   if (!citations.length) return null;
 
-  const answer = formatTemporalRangeAnswer(
+  const answer = formatTemporalFastAnswer({
+    question,
     citations,
-    formatDateRangeForAnswer(filters.startDate!, filters.endDate!, lang, timeZone),
+    rangeLabel: formatDateRangeForAnswer(filters.startDate!, filters.endDate!, lang, timeZone),
     lang,
+    intent,
     timeZone,
-  );
+  });
   const confidence = classifyRetrievalConfidence(topSimilarity, citations.length);
 
   return {
@@ -165,24 +168,20 @@ export function answerFastExtractiveFromChunks(
     return result;
   }
 
-  const citations = dedupeCitationsBySource(buildCitations(sortedChunks))
-    .slice(0, 6)
-    .map((citation) => ({
-      ...citation,
-      claim: buildReadableClaim(citation),
-    }));
-
-  const bullets = citations
-    .map((citation) => {
-      const date = formatFallbackSourceDate(citation.occurredAt, lang, timeZone);
-      return `- ${date}: ${formatLocalizedMemoryBullet(citation, detectMemoryIntent(question), lang)}.`;
-    })
-    .join("\n");
+  const intent = detectMemoryIntent(question);
+  const citations = prepareFastCitations(buildCitations(sortedChunks), {
+    intent,
+    maxCitations: 6,
+  });
 
   return {
-    answer: lang === "vi"
-      ? ["Mình trả lời nhanh từ các ký ức liên quan nhất:", bullets].join("\n")
-      : ["Fast answer from the most relevant memories:", bullets].join("\n"),
+    answer: formatGenericFastAnswer({
+      question,
+      citations,
+      lang,
+      intent,
+      timeZone,
+    }),
     confidence: classifyRetrievalConfidence(topSimilarity, citations.length),
     citations,
     answerMode: "fast_path",
