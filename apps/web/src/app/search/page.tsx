@@ -850,6 +850,7 @@ export default function SearchPage() {
                     })}
                   </div>
                 </div>
+                </div>
               </details>
 
               <div className="flex flex-wrap gap-2">
