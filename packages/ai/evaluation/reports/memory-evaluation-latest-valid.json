@@ -1,0 +1,1704 @@
+{
+  "summary": {
+    "generatedAt": "2026-08-06T16:00:45.561Z",
+    "dataset": "Second Brain MVP Evaluation Dataset",
+    "userId": "cca496d3-7c4d-48c5-b1a5-fcd2ea0b8faa",
+    "questionCount": 20,
+    "validRun": true,
+    "answerStrategy": "fast",
+    "config": {
+      "retrievalLimit": 8,
+      "questionLimit": null,
+      "delayMs": 1000,
+      "noDataSimilarityThreshold": 0.55,
+      "failOnThreshold": false,
+      "writeInvalidReports": false
+    },
+    "thresholds": {
+      "retrievalP95Ms": 500,
+      "recallAt5": 0.9,
+      "citationPrecision": 0.9,
+      "summaryCoverage": 0.9
+    },
+    "latency": {
+      "retrievalP50Ms": 283,
+      "retrievalP95Ms": 462,
+      "totalRecallP95Ms": 1302,
+      "answerP95Ms": 812
+    },
+    "quality": {
+      "recallAt5": 0.9,
+      "citationPrecision": 0.39,
+      "citationSourceRelevantRate": 0.9,
+      "answerKeywordCoverage": 0.7458333333333333,
+      "confidenceOkRate": 0.9,
+      "summaryCoverage": 1
+    },
+    "failures": {
+      "retrievalErrors": 0,
+      "answerErrors": 0,
+      "modelErrors": 0,
+      "distinctErrors": [],
+      "missedRecallAt5": [
+        "summary-02",
+        "no-data-01"
+      ],
+      "lowCitationPrecision": [
+        "timeline-01",
+        "timeline-02",
+        "feedback-01",
+        "feedback-02",
+        "task-01",
+        "task-02",
+        "calendar-01",
+        "calendar-02",
+        "summary-01",
+        "summary-02",
+        "memory-01",
+        "memory-02",
+        "decision-01",
+        "decision-02",
+        "frontend-01",
+        "workflow-01",
+        "no-data-01"
+      ],
+      "summaryCoverageMisses": []
+    },
+    "pass": {
+      "retrievalLatency": true,
+      "recallAt5": true,
+      "citationPrecision": false,
+      "summaryCoverage": true
+    },
+    "overallPass": false
+  },
+  "retrieval": [
+    {
+      "id": "timeline-01",
+      "category": "timeline",
+      "question": "What happened during the capstone kickoff?",
+      "embeddingMs": 840,
+      "retrievalMs": 462,
+      "totalRecallMs": 1302,
+      "sourceCount": 8,
+      "topSimilarity": 0.861388799813096,
+      "recallAt5": true,
+      "retrievalUnder500ms": true,
+      "topSources": [
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-11",
+          "chunkType": "event",
+          "similarity": 0.861388799813096,
+          "vectorSimilarity": 0.801983999732994,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-11T21:00:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "bab84fac-cd20-495d-810f-8d3836566c19",
+          "chunkType": "action_item",
+          "similarity": 0.801787697416507,
+          "vectorSimilarity": 0.716839567737867,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-07-13T05:00:00.000Z"
+        },
+        {
+          "sourceType": "summary",
+          "sourceId": "d0563eb9-21db-4b7c-8f8a-592fc8bdd17d",
+          "chunkType": "reflection",
+          "similarity": 0.794038976660033,
+          "vectorSimilarity": 0.70576996665719,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-06-29T00:00:00.000Z"
+        },
+        {
+          "sourceType": "calendar",
+          "sourceId": "eval-calendar-mentor-review",
+          "chunkType": "general",
+          "similarity": 0.791891489319147,
+          "vectorSimilarity": 0.702702127598782,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-15T09:00:00.000Z"
+        },
+        {
+          "sourceType": "calendar",
+          "sourceId": "eval-calendar-mentor-review",
+          "chunkType": "event",
+          "similarity": 0.789210604335145,
+          "vectorSimilarity": 0.69887229190735,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-15T09:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "id": "timeline-02",
+      "category": "timeline",
+      "question": "What did the team rehearse for the demo?",
+      "embeddingMs": 743,
+      "retrievalMs": 279,
+      "totalRecallMs": 1022,
+      "sourceCount": 8,
+      "topSimilarity": 0.872080844776837,
+      "recallAt5": true,
+      "retrievalUnder500ms": true,
+      "topSources": [
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-17",
+          "chunkType": "event",
+          "similarity": 0.872080844776837,
+          "vectorSimilarity": 0.817258349681196,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-17T21:10:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-17",
+          "chunkType": "action_item",
+          "similarity": 0.818377904988653,
+          "vectorSimilarity": 0.740539864269504,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-17T21:10:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-17",
+          "chunkType": "reflection",
+          "similarity": 0.812950469607185,
+          "vectorSimilarity": 0.732786385153122,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-17T21:10:00.000Z"
+        },
+        {
+          "sourceType": "calendar",
+          "sourceId": "eval-calendar-demo-rehearsal",
+          "chunkType": "event",
+          "similarity": 0.767995802165336,
+          "vectorSimilarity": 0.668565431664766,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-17T13:00:00.000Z"
+        },
+        {
+          "sourceType": "calendar",
+          "sourceId": "eval-calendar-demo-rehearsal",
+          "chunkType": "general",
+          "similarity": 0.767831274012492,
+          "vectorSimilarity": 0.668330391446418,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-17T13:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "id": "feedback-01",
+      "category": "feedback",
+      "question": "What feedback did mentor Linh give about onboarding?",
+      "embeddingMs": 863,
+      "retrievalMs": 229,
+      "totalRecallMs": 1092,
+      "sourceCount": 8,
+      "topSimilarity": 1,
+      "recallAt5": true,
+      "retrievalUnder500ms": true,
+      "topSources": [
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-11",
+          "chunkType": "feedback",
+          "similarity": 1,
+          "vectorSimilarity": 0.787880471258073,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-11T21:00:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-13",
+          "chunkType": "feedback",
+          "similarity": 0.995495596587136,
+          "vectorSimilarity": 0.73726472106752,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-13T22:00:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-17",
+          "chunkType": "reflection",
+          "similarity": 0.91699671691598,
+          "vectorSimilarity": 0.703630394392691,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-17T21:10:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-11",
+          "chunkType": "event",
+          "similarity": 0.894391120817404,
+          "vectorSimilarity": 0.662529310577099,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-11T21:00:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-12",
+          "chunkType": "feedback",
+          "similarity": 0.891664224316604,
+          "vectorSimilarity": 0.548480407848371,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-12T21:15:00.000Z"
+        }
+      ]
+    },
+    {
+      "id": "feedback-02",
+      "category": "feedback",
+      "question": "What feedback did Linh give about the citation UI?",
+      "embeddingMs": 877,
+      "retrievalMs": 1077,
+      "totalRecallMs": 1954,
+      "sourceCount": 8,
+      "topSimilarity": 1,
+      "recallAt5": true,
+      "retrievalUnder500ms": false,
+      "topSources": [
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-13",
+          "chunkType": "feedback",
+          "similarity": 1,
+          "vectorSimilarity": 0.814496912300224,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-13T22:00:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-11",
+          "chunkType": "feedback",
+          "similarity": 0.967815835996678,
+          "vectorSimilarity": 0.686937883630323,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-11T21:00:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-14",
+          "chunkType": "general",
+          "similarity": 0.947798838997809,
+          "vectorSimilarity": 0.65054334363238,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-14T20:40:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-12",
+          "chunkType": "feedback",
+          "similarity": 0.926357281695523,
+          "vectorSimilarity": 0.611558693991861,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-12T21:15:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-17",
+          "chunkType": "reflection",
+          "similarity": 0.913092346744367,
+          "vectorSimilarity": 0.696531539535213,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-17T21:10:00.000Z"
+        }
+      ]
+    },
+    {
+      "id": "task-01",
+      "category": "task",
+      "question": "What action item was assigned after the upload discussion?",
+      "embeddingMs": 1020,
+      "retrievalMs": 237,
+      "totalRecallMs": 1257,
+      "sourceCount": 8,
+      "topSimilarity": 0.823798553490814,
+      "recallAt5": true,
+      "retrievalUnder500ms": true,
+      "topSources": [
+        {
+          "sourceType": "calendar",
+          "sourceId": "eval-calendar-api-check",
+          "chunkType": "general",
+          "similarity": 0.823798553490814,
+          "vectorSimilarity": 0.619029924985184,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-12T08:00:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-17",
+          "chunkType": "action_item",
+          "similarity": 0.782423045635223,
+          "vectorSimilarity": 0.649069428443909,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-17T21:10:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-12",
+          "chunkType": "decision",
+          "similarity": 0.775228128717654,
+          "vectorSimilarity": 0.637464723738152,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-12T21:15:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-12",
+          "chunkType": "feedback",
+          "similarity": 0.775043315739731,
+          "vectorSimilarity": 0.637166638289888,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-12T21:15:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-14",
+          "chunkType": "action_item",
+          "similarity": 0.769413928039129,
+          "vectorSimilarity": 0.628086980708272,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-14T20:40:00.000Z"
+        }
+      ]
+    },
+    {
+      "id": "task-02",
+      "category": "task",
+      "question": "What remaining tasks were listed after demo rehearsal?",
+      "embeddingMs": 970,
+      "retrievalMs": 237,
+      "totalRecallMs": 1207,
+      "sourceCount": 8,
+      "topSimilarity": 1,
+      "recallAt5": true,
+      "retrievalUnder500ms": true,
+      "topSources": [
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-17",
+          "chunkType": "action_item",
+          "similarity": 1,
+          "vectorSimilarity": 0.875831186771393,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-17T21:10:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-17",
+          "chunkType": "event",
+          "similarity": 0.924697849520482,
+          "vectorSimilarity": 0.761073614646895,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-17T21:10:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-17",
+          "chunkType": "reflection",
+          "similarity": 0.881145297493697,
+          "vectorSimilarity": 0.694069688451842,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-17T21:10:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-11",
+          "chunkType": "feedback",
+          "similarity": 0.860328722517807,
+          "vectorSimilarity": 0.662044188488934,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-11T21:00:00.000Z"
+        },
+        {
+          "sourceType": "calendar",
+          "sourceId": "eval-calendar-demo-rehearsal",
+          "chunkType": "general",
+          "similarity": 0.858128184341471,
+          "vectorSimilarity": 0.689427975909955,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-17T13:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "id": "calendar-01",
+      "category": "calendar",
+      "question": "What was the Capstone Mentor Review event about?",
+      "embeddingMs": 863,
+      "retrievalMs": 283,
+      "totalRecallMs": 1146,
+      "sourceCount": 8,
+      "topSimilarity": 0.937524393578492,
+      "recallAt5": true,
+      "retrievalUnder500ms": true,
+      "topSources": [
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-13",
+          "chunkType": "feedback",
+          "similarity": 0.937524393578492,
+          "vectorSimilarity": 0.631862533779077,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-13T22:00:00.000Z"
+        },
+        {
+          "sourceType": "calendar",
+          "sourceId": "eval-calendar-mentor-review",
+          "chunkType": "general",
+          "similarity": 0.937319647218194,
+          "vectorSimilarity": 0.776944813123989,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-15T09:00:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-11",
+          "chunkType": "feedback",
+          "similarity": 0.933592658103625,
+          "vectorSimilarity": 0.624713923824772,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-11T21:00:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-17",
+          "chunkType": "reflection",
+          "similarity": 0.927562670053961,
+          "vectorSimilarity": 0.72284121827993,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-17T21:10:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-11",
+          "chunkType": "event",
+          "similarity": 0.923938262173814,
+          "vectorSimilarity": 0.71625138577057,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-11T21:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "id": "calendar-02",
+      "category": "calendar",
+      "question": "When was the Backend API Check scheduled?",
+      "embeddingMs": 812,
+      "retrievalMs": 242,
+      "totalRecallMs": 1054,
+      "sourceCount": 8,
+      "topSimilarity": 1,
+      "recallAt5": true,
+      "retrievalUnder500ms": true,
+      "topSources": [
+        {
+          "sourceType": "calendar",
+          "sourceId": "eval-calendar-api-check",
+          "chunkType": "event",
+          "similarity": 1,
+          "vectorSimilarity": 0.792911885056474,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-12T08:00:00.000Z"
+        },
+        {
+          "sourceType": "calendar",
+          "sourceId": "eval-calendar-api-check",
+          "chunkType": "general",
+          "similarity": 0.983032810507256,
+          "vectorSimilarity": 0.738388017512094,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-12T08:00:00.000Z"
+        },
+        {
+          "sourceType": "calendar",
+          "sourceId": "eval-calendar-demo-rehearsal",
+          "chunkType": "event",
+          "similarity": 0.838965779727874,
+          "vectorSimilarity": 0.631609624932503,
+          "lexicalScore": 0.800000011920929,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-17T13:00:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-15",
+          "chunkType": "general",
+          "similarity": 0.8317616302825,
+          "vectorSimilarity": 0.6196027171375,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-15T21:30:00.000Z"
+        },
+        {
+          "sourceType": "calendar",
+          "sourceId": "eval-calendar-mentor-review",
+          "chunkType": "event",
+          "similarity": 0.830384060809146,
+          "vectorSimilarity": 0.617306760067958,
+          "lexicalScore": 0.800000011920929,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-15T09:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "id": "summary-01",
+      "category": "summary",
+      "question": "Summarize the team's progress across the week.",
+      "embeddingMs": 814,
+      "retrievalMs": 331,
+      "totalRecallMs": 1145,
+      "sourceCount": 8,
+      "topSimilarity": 0.960996467619643,
+      "recallAt5": true,
+      "retrievalUnder500ms": true,
+      "topSources": [
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-17",
+          "chunkType": "event",
+          "similarity": 0.960996467619643,
+          "vectorSimilarity": 0.720306980655692,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-17T21:10:00.000Z"
+        },
+        {
+          "sourceType": "summary",
+          "sourceId": "d0563eb9-21db-4b7c-8f8a-592fc8bdd17d",
+          "chunkType": "reflection",
+          "similarity": 0.95341044423207,
+          "vectorSimilarity": 0.708453819112609,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-06-29T00:00:00.000Z"
+        },
+        {
+          "sourceType": "summary",
+          "sourceId": "65ed760d-391c-422b-b0cd-81a2c53fd4e8",
+          "chunkType": "reflection",
+          "similarity": 0.941976644403743,
+          "vectorSimilarity": 0.690588506880849,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-07-13T00:00:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-17",
+          "chunkType": "action_item",
+          "similarity": 0.936449151462421,
+          "vectorSimilarity": 0.681951799160032,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-17T21:10:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-14",
+          "chunkType": "action_item",
+          "similarity": 0.935556017292866,
+          "vectorSimilarity": 0.680556277020103,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-14T20:40:00.000Z"
+        }
+      ]
+    },
+    {
+      "id": "summary-02",
+      "category": "summary",
+      "question": "What were the main risks mentioned this week?",
+      "embeddingMs": 805,
+      "retrievalMs": 295,
+      "totalRecallMs": 1100,
+      "sourceCount": 0,
+      "topSimilarity": 0,
+      "recallAt5": false,
+      "retrievalUnder500ms": true,
+      "topSources": []
+    },
+    {
+      "id": "memory-01",
+      "category": "memory",
+      "question": "Why did the team keep Search on the validated grounded answer path for MVP?",
+      "embeddingMs": 871,
+      "retrievalMs": 300,
+      "totalRecallMs": 1171,
+      "sourceCount": 8,
+      "topSimilarity": 0.915677319088306,
+      "recallAt5": true,
+      "retrievalUnder500ms": true,
+      "topSources": [
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-16",
+          "chunkType": "decision",
+          "similarity": 0.915677319088306,
+          "vectorSimilarity": 0.879539027269009,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-16T19:50:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-14",
+          "chunkType": "general",
+          "similarity": 0.815856230838742,
+          "vectorSimilarity": 0.736937472626775,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-14T20:40:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-13",
+          "chunkType": "decision",
+          "similarity": 0.809537602332438,
+          "vectorSimilarity": 0.727910860474911,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-13T22:00:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-16",
+          "chunkType": "general",
+          "similarity": 0.783456036470427,
+          "vectorSimilarity": 0.690651480672039,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-16T19:50:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-13",
+          "chunkType": "reflection",
+          "similarity": 0.771384231952469,
+          "vectorSimilarity": 0.673406045646384,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-13T22:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "id": "memory-02",
+      "category": "memory",
+      "question": "Which indexes were mentioned for memory retrieval performance?",
+      "embeddingMs": 748,
+      "retrievalMs": 240,
+      "totalRecallMs": 988,
+      "sourceCount": 8,
+      "topSimilarity": 0.81669015586797,
+      "recallAt5": true,
+      "retrievalUnder500ms": true,
+      "topSources": [
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-16",
+          "chunkType": "general",
+          "similarity": 0.81669015586797,
+          "vectorSimilarity": 0.738128794097101,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-16T19:50:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-16",
+          "chunkType": "decision",
+          "similarity": 0.813831695407344,
+          "vectorSimilarity": 0.734045279153349,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-16T19:50:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-12",
+          "chunkType": "decision",
+          "similarity": 0.784490323991161,
+          "vectorSimilarity": 0.692129034273087,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-12T21:15:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-13",
+          "chunkType": "reflection",
+          "similarity": 0.765088025493631,
+          "vectorSimilarity": 0.664411464990901,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-13T22:00:00.000Z"
+        },
+        {
+          "sourceType": "attachment",
+          "sourceId": "076ab085-189a-42e6-8d2e-27b4b39ee1e3",
+          "chunkType": "general_note",
+          "similarity": 0.75,
+          "vectorSimilarity": 0,
+          "lexicalScore": 1,
+          "retrievalMode": "lexical",
+          "occurredAt": "2026-07-13T05:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "id": "decision-01",
+      "category": "decision",
+      "question": "What did the team decide about POST /diary?",
+      "embeddingMs": 838,
+      "retrievalMs": 330,
+      "totalRecallMs": 1168,
+      "sourceCount": 8,
+      "topSimilarity": 0.958048349371849,
+      "recallAt5": true,
+      "retrievalUnder500ms": true,
+      "topSources": [
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-12",
+          "chunkType": "decision",
+          "similarity": 0.958048349371849,
+          "vectorSimilarity": 0.81238207595669,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-12T21:15:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-14",
+          "chunkType": "event",
+          "similarity": 0.948686866769392,
+          "vectorSimilarity": 0.705672102722141,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-14T20:40:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-17",
+          "chunkType": "event",
+          "similarity": 0.919150403909478,
+          "vectorSimilarity": 0.660231390629965,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-17T21:10:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-15",
+          "chunkType": "general",
+          "similarity": 0.89672997752071,
+          "vectorSimilarity": 0.625738426954938,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-15T21:30:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-17",
+          "chunkType": "reflection",
+          "similarity": 0.89,
+          "vectorSimilarity": 0,
+          "lexicalScore": 1,
+          "retrievalMode": "lexical",
+          "occurredAt": "2026-05-17T21:10:00.000Z"
+        }
+      ]
+    },
+    {
+      "id": "decision-02",
+      "category": "decision",
+      "question": "What did the team agree about generated answers?",
+      "embeddingMs": 796,
+      "retrievalMs": 277,
+      "totalRecallMs": 1073,
+      "sourceCount": 8,
+      "topSimilarity": 0.847742166923239,
+      "recallAt5": true,
+      "retrievalUnder500ms": true,
+      "topSources": [
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-13",
+          "chunkType": "decision",
+          "similarity": 0.847742166923239,
+          "vectorSimilarity": 0.782488809890342,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-13T22:00:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-16",
+          "chunkType": "general",
+          "similarity": 0.706575183451967,
+          "vectorSimilarity": 0.706575183451967,
+          "lexicalScore": 0,
+          "retrievalMode": "vector",
+          "occurredAt": "2026-05-16T19:50:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-16",
+          "chunkType": "decision",
+          "similarity": 0.697062310839097,
+          "vectorSimilarity": 0.697062310839097,
+          "lexicalScore": 0,
+          "retrievalMode": "vector",
+          "occurredAt": "2026-05-16T19:50:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-11",
+          "chunkType": "decision",
+          "similarity": 0.678348060255567,
+          "vectorSimilarity": 0.626211509541841,
+          "lexicalScore": 0.800000011920929,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-11T21:00:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-14",
+          "chunkType": "general",
+          "similarity": 0.670024948997271,
+          "vectorSimilarity": 0.670024948997271,
+          "lexicalScore": 0,
+          "retrievalMode": "vector",
+          "occurredAt": "2026-05-14T20:40:00.000Z"
+        }
+      ]
+    },
+    {
+      "id": "frontend-01",
+      "category": "frontend",
+      "question": "What frontend work did Duc Anh and Nhan complete?",
+      "embeddingMs": 783,
+      "retrievalMs": 307,
+      "totalRecallMs": 1090,
+      "sourceCount": 8,
+      "topSimilarity": 0.835653250736434,
+      "recallAt5": true,
+      "retrievalUnder500ms": true,
+      "topSources": [
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-14",
+          "chunkType": "event",
+          "similarity": 0.835653250736434,
+          "vectorSimilarity": 0.765218929623478,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-14T20:40:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-11",
+          "chunkType": "decision",
+          "similarity": 0.819607064595182,
+          "vectorSimilarity": 0.742295806564546,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-11T21:00:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-11",
+          "chunkType": "event",
+          "similarity": 0.795575226408203,
+          "vectorSimilarity": 0.707964609154576,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-11T21:00:00.000Z"
+        },
+        {
+          "sourceType": "attachment",
+          "sourceId": "076ab085-189a-42e6-8d2e-27b4b39ee1e3",
+          "chunkType": "general_note",
+          "similarity": 0.75,
+          "vectorSimilarity": 0,
+          "lexicalScore": 1,
+          "retrievalMode": "lexical",
+          "occurredAt": "2026-07-13T05:00:00.000Z"
+        },
+        {
+          "sourceType": "summary",
+          "sourceId": "d0563eb9-21db-4b7c-8f8a-592fc8bdd17d",
+          "chunkType": "reflection",
+          "similarity": 0.734183774189062,
+          "vectorSimilarity": 0.620262534555802,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-06-29T00:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "id": "workflow-01",
+      "category": "workflow",
+      "question": "How did the linking job match diary entries to calendar events?",
+      "embeddingMs": 845,
+      "retrievalMs": 301,
+      "totalRecallMs": 1146,
+      "sourceCount": 8,
+      "topSimilarity": 0.936462645741544,
+      "recallAt5": true,
+      "retrievalUnder500ms": true,
+      "topSources": [
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-15",
+          "chunkType": "general",
+          "similarity": 0.936462645741544,
+          "vectorSimilarity": 0.79410440956924,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-15T21:30:00.000Z"
+        },
+        {
+          "sourceType": "calendar",
+          "sourceId": "eval-calendar-demo-rehearsal",
+          "chunkType": "general",
+          "similarity": 0.932317031898156,
+          "vectorSimilarity": 0.65386171983026,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-17T13:00:00.000Z"
+        },
+        {
+          "sourceType": "calendar",
+          "sourceId": "eval-calendar-api-check",
+          "chunkType": "general",
+          "similarity": 0.915747947261105,
+          "vectorSimilarity": 0.626246578768509,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-12T08:00:00.000Z"
+        },
+        {
+          "sourceType": "calendar",
+          "sourceId": "eval-calendar-mentor-review",
+          "chunkType": "general",
+          "similarity": 0.908062465634247,
+          "vectorSimilarity": 0.613437442723746,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-15T09:00:00.000Z"
+        },
+        {
+          "sourceType": "calendar",
+          "sourceId": "eval-calendar-demo-rehearsal",
+          "chunkType": "event",
+          "similarity": 0.903829242041939,
+          "vectorSimilarity": 0.606382070069898,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-17T13:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "id": "temporal-01",
+      "category": "temporal",
+      "question": "What happened on May 15, 2026?",
+      "embeddingMs": 791,
+      "retrievalMs": 226,
+      "totalRecallMs": 1017,
+      "sourceCount": 4,
+      "topSimilarity": 0.79879866235249,
+      "recallAt5": true,
+      "retrievalUnder500ms": true,
+      "topSources": [
+        {
+          "sourceType": "calendar",
+          "sourceId": "eval-calendar-mentor-review",
+          "chunkType": "event",
+          "similarity": 0.79879866235249,
+          "vectorSimilarity": 0.712569517646415,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-15T09:00:00.000Z"
+        },
+        {
+          "sourceType": "calendar",
+          "sourceId": "eval-calendar-mentor-review",
+          "chunkType": "general",
+          "similarity": 0.776052738161448,
+          "vectorSimilarity": 0.68007534023064,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-15T09:00:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-15",
+          "chunkType": "general",
+          "similarity": 0.717221306728048,
+          "vectorSimilarity": 0.596030438182925,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-15T21:30:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-15",
+          "chunkType": "event",
+          "similarity": 0.708207309979863,
+          "vectorSimilarity": 0.583153299971233,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-15T21:30:00.000Z"
+        }
+      ]
+    },
+    {
+      "id": "temporal-02",
+      "category": "temporal",
+      "question": "What did the team do in May 2026?",
+      "embeddingMs": 874,
+      "retrievalMs": 309,
+      "totalRecallMs": 1183,
+      "sourceCount": 8,
+      "topSimilarity": 0.777331613938437,
+      "recallAt5": true,
+      "retrievalUnder500ms": true,
+      "topSources": [
+        {
+          "sourceType": "calendar",
+          "sourceId": "eval-calendar-demo-rehearsal",
+          "chunkType": "event",
+          "similarity": 0.777331613938437,
+          "vectorSimilarity": 0.681902305626339,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-17T13:00:00.000Z"
+        },
+        {
+          "sourceType": "calendar",
+          "sourceId": "eval-calendar-api-check",
+          "chunkType": "general",
+          "similarity": 0.768265084235065,
+          "vectorSimilarity": 0.668950120335808,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-12T08:00:00.000Z"
+        },
+        {
+          "sourceType": "calendar",
+          "sourceId": "eval-calendar-api-check",
+          "chunkType": "event",
+          "similarity": 0.765544853340366,
+          "vectorSimilarity": 0.665064076200522,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-12T08:00:00.000Z"
+        },
+        {
+          "sourceType": "calendar",
+          "sourceId": "eval-calendar-demo-rehearsal",
+          "chunkType": "general",
+          "similarity": 0.763077854468446,
+          "vectorSimilarity": 0.66153979209778,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-17T13:00:00.000Z"
+        },
+        {
+          "sourceType": "calendar",
+          "sourceId": "eval-calendar-mentor-review",
+          "chunkType": "event",
+          "similarity": 0.757955420965606,
+          "vectorSimilarity": 0.654222029950865,
+          "lexicalScore": 1,
+          "retrievalMode": "hybrid",
+          "occurredAt": "2026-05-15T09:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "id": "no-data-01",
+      "category": "no_data",
+      "question": "What did the team decide about mobile push notification pricing?",
+      "embeddingMs": 807,
+      "retrievalMs": 282,
+      "totalRecallMs": 1089,
+      "sourceCount": 7,
+      "topSimilarity": 0.750683124939113,
+      "recallAt5": false,
+      "retrievalUnder500ms": true,
+      "topSources": [
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-12",
+          "chunkType": "decision",
+          "similarity": 0.750683124939113,
+          "vectorSimilarity": 0.610683124939113,
+          "lexicalScore": 0,
+          "retrievalMode": "vector",
+          "occurredAt": "2026-05-12T21:15:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-13",
+          "chunkType": "decision",
+          "similarity": 0.733561018676464,
+          "vectorSimilarity": 0.593561018676464,
+          "lexicalScore": 0,
+          "retrievalMode": "vector",
+          "occurredAt": "2026-05-13T22:00:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-15",
+          "chunkType": "general",
+          "similarity": 0.729174943839757,
+          "vectorSimilarity": 0.589174943839757,
+          "lexicalScore": 0,
+          "retrievalMode": "vector",
+          "occurredAt": "2026-05-15T21:30:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-11",
+          "chunkType": "feedback",
+          "similarity": 0.683748851232492,
+          "vectorSimilarity": 0.603748851232492,
+          "lexicalScore": 0,
+          "retrievalMode": "vector",
+          "occurredAt": "2026-05-11T21:00:00.000Z"
+        },
+        {
+          "sourceType": "diary",
+          "sourceId": "eval-diary-2026-05-14",
+          "chunkType": "action_item",
+          "similarity": 0.679757266015682,
+          "vectorSimilarity": 0.599757266015682,
+          "lexicalScore": 0,
+          "retrievalMode": "vector",
+          "occurredAt": "2026-05-14T20:40:00.000Z"
+        }
+      ]
+    },
+    {
+      "id": "no-data-02",
+      "category": "no_data",
+      "question": "What was the user's medical diagnosis this week?",
+      "embeddingMs": 868,
+      "retrievalMs": 302,
+      "totalRecallMs": 1170,
+      "sourceCount": 0,
+      "topSimilarity": 0,
+      "recallAt5": true,
+      "retrievalUnder500ms": true,
+      "topSources": []
+    }
+  ],
+  "citations": [
+    {
+      "id": "timeline-01",
+      "category": "timeline",
+      "question": "What happened during the capstone kickoff?",
+      "answerMs": 334,
+      "answerMode": "fast_path",
+      "confidence": "high",
+      "keywordCoverage": 1,
+      "keywordHits": [
+        "kickoff",
+        "Tam",
+        "Quan",
+        "Google Calendar"
+      ],
+      "citationCount": 6,
+      "relevantCitationCount": 2,
+      "citationPrecision": 0.3333333333333333,
+      "sourceRelevant": true,
+      "confidenceOk": true
+    },
+    {
+      "id": "timeline-02",
+      "category": "timeline",
+      "question": "What did the team rehearse for the demo?",
+      "answerMs": 239,
+      "answerMode": "fast_path",
+      "confidence": "high",
+      "keywordCoverage": 1,
+      "keywordHits": [
+        "create a diary entry",
+        "search",
+        "citations"
+      ],
+      "citationCount": 6,
+      "relevantCitationCount": 4,
+      "citationPrecision": 0.6666666666666666,
+      "sourceRelevant": true,
+      "confidenceOk": true
+    },
+    {
+      "id": "feedback-01",
+      "category": "feedback",
+      "question": "What feedback did mentor Linh give about onboarding?",
+      "answerMs": 301,
+      "answerMode": "fast_path",
+      "confidence": "high",
+      "keywordCoverage": 1,
+      "keywordHits": [
+        "onboarding",
+        "confusing",
+        "shortened"
+      ],
+      "citationCount": 6,
+      "relevantCitationCount": 1,
+      "citationPrecision": 0.16666666666666666,
+      "sourceRelevant": true,
+      "confidenceOk": true
+    },
+    {
+      "id": "feedback-02",
+      "category": "feedback",
+      "question": "What feedback did Linh give about the citation UI?",
+      "answerMs": 351,
+      "answerMode": "fast_path",
+      "confidence": "high",
+      "keywordCoverage": 1,
+      "keywordHits": [
+        "citation UI",
+        "obvious",
+        "trust"
+      ],
+      "citationCount": 6,
+      "relevantCitationCount": 1,
+      "citationPrecision": 0.16666666666666666,
+      "sourceRelevant": true,
+      "confidenceOk": true
+    },
+    {
+      "id": "task-01",
+      "category": "task",
+      "question": "What action item was assigned after the upload discussion?",
+      "answerMs": 318,
+      "answerMode": "fast_path",
+      "confidence": "high",
+      "keywordCoverage": 1,
+      "keywordHits": [
+        "test attachment upload",
+        "PDF",
+        "plain text"
+      ],
+      "citationCount": 6,
+      "relevantCitationCount": 1,
+      "citationPrecision": 0.16666666666666666,
+      "sourceRelevant": true,
+      "confidenceOk": true
+    },
+    {
+      "id": "task-02",
+      "category": "task",
+      "question": "What remaining tasks were listed after demo rehearsal?",
+      "answerMs": 289,
+      "answerMode": "fast_path",
+      "confidence": "high",
+      "keywordCoverage": 1,
+      "keywordHits": [
+        "seed one week",
+        "web font",
+        "evaluation report"
+      ],
+      "citationCount": 6,
+      "relevantCitationCount": 2,
+      "citationPrecision": 0.3333333333333333,
+      "sourceRelevant": true,
+      "confidenceOk": true
+    },
+    {
+      "id": "calendar-01",
+      "category": "calendar",
+      "question": "What was the Capstone Mentor Review event about?",
+      "answerMs": 237,
+      "answerMode": "fast_path",
+      "confidence": "high",
+      "keywordCoverage": 1,
+      "keywordHits": [
+        "prototype progress",
+        "citation UI",
+        "demo readiness"
+      ],
+      "citationCount": 6,
+      "relevantCitationCount": 3,
+      "citationPrecision": 0.5,
+      "sourceRelevant": true,
+      "confidenceOk": true
+    },
+    {
+      "id": "calendar-02",
+      "category": "calendar",
+      "question": "When was the Backend API Check scheduled?",
+      "answerMs": 283,
+      "answerMode": "fast_path",
+      "confidence": "high",
+      "keywordCoverage": 1,
+      "keywordHits": [
+        "Backend API Check",
+        "May 12",
+        "Quan"
+      ],
+      "citationCount": 6,
+      "relevantCitationCount": 2,
+      "citationPrecision": 0.3333333333333333,
+      "sourceRelevant": true,
+      "confidenceOk": true
+    },
+    {
+      "id": "summary-01",
+      "category": "summary",
+      "question": "Summarize the team's progress across the week.",
+      "answerMs": 237,
+      "answerMode": "fast_path",
+      "confidence": "high",
+      "keywordCoverage": 0.25,
+      "keywordHits": [
+        "calendar"
+      ],
+      "citationCount": 6,
+      "relevantCitationCount": 5,
+      "citationPrecision": 0.8333333333333334,
+      "sourceRelevant": true,
+      "confidenceOk": true
+    },
+    {
+      "id": "summary-02",
+      "category": "summary",
+      "question": "What were the main risks mentioned this week?",
+      "answerMs": 812,
+      "answerMode": "no_memory",
+      "confidence": "low",
+      "keywordCoverage": 0,
+      "keywordHits": [],
+      "citationCount": 0,
+      "relevantCitationCount": 0,
+      "citationPrecision": 0,
+      "sourceRelevant": false,
+      "confidenceOk": false
+    },
+    {
+      "id": "memory-01",
+      "category": "memory",
+      "question": "Why did the team keep Search on the validated grounded answer path for MVP?",
+      "answerMs": 250,
+      "answerMode": "fast_path",
+      "confidence": "high",
+      "keywordCoverage": 1,
+      "keywordHits": [
+        "validated",
+        "citation recovery",
+        "fallback"
+      ],
+      "citationCount": 6,
+      "relevantCitationCount": 2,
+      "citationPrecision": 0.3333333333333333,
+      "sourceRelevant": true,
+      "confidenceOk": true
+    },
+    {
+      "id": "memory-02",
+      "category": "memory",
+      "question": "Which indexes were mentioned for memory retrieval performance?",
+      "answerMs": 310,
+      "answerMode": "fast_path",
+      "confidence": "high",
+      "keywordCoverage": 1,
+      "keywordHits": [
+        "HNSW",
+        "GIN",
+        "database retrieval"
+      ],
+      "citationCount": 6,
+      "relevantCitationCount": 2,
+      "citationPrecision": 0.3333333333333333,
+      "sourceRelevant": true,
+      "confidenceOk": true
+    },
+    {
+      "id": "decision-01",
+      "category": "decision",
+      "question": "What did the team decide about POST /diary?",
+      "answerMs": 256,
+      "answerMode": "fast_path",
+      "confidence": "high",
+      "keywordCoverage": 1,
+      "keywordHits": [
+        "save the raw entry",
+        "trigger memory indexing"
+      ],
+      "citationCount": 6,
+      "relevantCitationCount": 1,
+      "citationPrecision": 0.16666666666666666,
+      "sourceRelevant": true,
+      "confidenceOk": true
+    },
+    {
+      "id": "decision-02",
+      "category": "decision",
+      "question": "What did the team agree about generated answers?",
+      "answerMs": 283,
+      "answerMode": "fast_path",
+      "confidence": "high",
+      "keywordCoverage": 0.6666666666666666,
+      "keywordHits": [
+        "require",
+        "sources"
+      ],
+      "citationCount": 6,
+      "relevantCitationCount": 1,
+      "citationPrecision": 0.16666666666666666,
+      "sourceRelevant": true,
+      "confidenceOk": true
+    },
+    {
+      "id": "frontend-01",
+      "category": "frontend",
+      "question": "What frontend work did Duc Anh and Nhan complete?",
+      "answerMs": 1454,
+      "answerMode": "fast_path",
+      "confidence": "high",
+      "keywordCoverage": 1,
+      "keywordHits": [
+        "diary input",
+        "loading",
+        "empty states",
+        "timeline"
+      ],
+      "citationCount": 6,
+      "relevantCitationCount": 1,
+      "citationPrecision": 0.16666666666666666,
+      "sourceRelevant": true,
+      "confidenceOk": true
+    },
+    {
+      "id": "workflow-01",
+      "category": "workflow",
+      "question": "How did the linking job match diary entries to calendar events?",
+      "answerMs": 255,
+      "answerMode": "fast_path",
+      "confidence": "high",
+      "keywordCoverage": 0,
+      "keywordHits": [],
+      "citationCount": 6,
+      "relevantCitationCount": 1,
+      "citationPrecision": 0.16666666666666666,
+      "sourceRelevant": true,
+      "confidenceOk": true
+    },
+    {
+      "id": "temporal-01",
+      "category": "temporal",
+      "question": "What happened on May 15, 2026?",
+      "answerMs": 349,
+      "answerMode": "fast_path",
+      "confidence": "high",
+      "keywordCoverage": 1,
+      "keywordHits": [
+        "Calendar",
+        "linking",
+        "Capstone Mentor Review"
+      ],
+      "citationCount": 4,
+      "relevantCitationCount": 4,
+      "citationPrecision": 1,
+      "sourceRelevant": true,
+      "confidenceOk": true
+    },
+    {
+      "id": "temporal-02",
+      "category": "temporal",
+      "question": "What did the team do in May 2026?",
+      "answerMs": 391,
+      "answerMode": "fast_path",
+      "confidence": "high",
+      "keywordCoverage": 1,
+      "keywordHits": [
+        "capstone",
+        "calendar",
+        "demo"
+      ],
+      "citationCount": 6,
+      "relevantCitationCount": 6,
+      "citationPrecision": 1,
+      "sourceRelevant": true,
+      "confidenceOk": true
+    },
+    {
+      "id": "no-data-01",
+      "category": "no_data",
+      "question": "What did the team decide about mobile push notification pricing?",
+      "answerMs": 232,
+      "answerMode": "fast_path",
+      "confidence": "high",
+      "keywordCoverage": 0,
+      "keywordHits": [],
+      "citationCount": 6,
+      "relevantCitationCount": 0,
+      "citationPrecision": 0,
+      "sourceRelevant": false,
+      "confidenceOk": false
+    },
+    {
+      "id": "no-data-02",
+      "category": "no_data",
+      "question": "What was the user's medical diagnosis this week?",
+      "answerMs": 448,
+      "answerMode": "no_memory",
+      "confidence": "low",
+      "keywordCoverage": 0,
+      "keywordHits": [],
+      "citationCount": 0,
+      "relevantCitationCount": 0,
+      "citationPrecision": 1,
+      "sourceRelevant": true,
+      "confidenceOk": true
+    }
+  ],
+  "summaryCoverage": [
+    {
+      "id": "weekly-2026-05-11",
+      "summaryType": "weekly",
+      "periodStart": "2026-05-11T00:00:00.000Z",
+      "periodEnd": "2026-05-17T23:59:59.999Z",
+      "summaryCount": 1,
+      "expectedKeyEventCount": 10,
+      "matchedKeyEventCount": 10,
+      "coverage": 1,
+      "matched": [
+        {
+          "label": "Capstone kickoff roles were assigned",
+          "matchedBy": [
+            "kickoff",
+            "Tam",
+            "Quan",
+            "Google Calendar"
+          ]
+        },
+        {
+          "label": "Mentor Linh said onboarding copy was confusing",
+          "matchedBy": [
+            "onboarding",
+            "confusing",
+            "shortened"
+          ]
+        },
+        {
+          "label": "POST /diary saves raw entry before indexing",
+          "matchedBy": [
+            "POST /diary",
+            "save the raw entry",
+            "trigger memory indexing"
+          ]
+        },
+        {
+          "label": "Attachment upload should cover PDF and plain text",
+          "matchedBy": [
+            "attachment upload",
+            "PDF",
+            "plain text"
+          ]
+        },
+        {
+          "label": "Generated answers must include sources/citations",
+          "matchedBy": [
+            "citations",
+            "sources",
+            "trust"
+          ]
+        },
+        {
+          "label": "Timeline moved from mock data to real entries",
+          "matchedBy": [
+            "timeline",
+            "real diary entries",
+            "mock data"
+          ]
+        },
+        {
+          "label": "Calendar sync linked Capstone Mentor Review",
+          "matchedBy": [
+            "Capstone Mentor Review",
+            "calendar",
+            "linking"
+          ]
+        },
+        {
+          "label": "Duplicate summaries/idempotency were a risk",
+          "matchedBy": [
+            "duplicate summaries",
+            "idempotency"
+          ]
+        },
+        {
+          "label": "500ms memory recall must be measured separately",
+          "matchedBy": [
+            "500ms",
+            "retrieval time",
+            "answer generation"
+          ]
+        },
+        {
+          "label": "Demo rehearsal covered diary, search, tasks, weekly reflection",
+          "matchedBy": [
+            "demo scenario",
+            "search for mentor feedback",
+            "weekly reflection"
+          ]
+        }
+      ],
+      "missed": []
+    }
+  ]
+}
