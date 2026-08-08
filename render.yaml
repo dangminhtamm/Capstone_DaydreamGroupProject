@@ -6,10 +6,9 @@ services:
     region: singapore
     plan: free
     buildCommand: |
-      npm install -g pnpm@10.33.0 &&
-      pnpm install --frozen-lockfile &&
-      pnpm --filter @second-brain/db prisma:generate &&
-      pnpm --filter @second-brain/api build
+      npx -y pnpm@10.33.0 install --frozen-lockfile &&
+      npx -y pnpm@10.33.0 --filter @second-brain/db prisma:generate &&
+      npx -y pnpm@10.33.0 --filter @second-brain/api build
     startCommand: node apps/api/dist/main.js
     healthCheckPath: /api/health
     envVars:
@@ -75,10 +74,9 @@ services:
     region: singapore
     plan: free
     buildCommand: |
-      npm install -g pnpm@10.33.0 &&
-      pnpm install --frozen-lockfile &&
-      pnpm --filter @second-brain/db prisma:generate &&
-      pnpm --filter @second-brain/worker build
+      npx -y pnpm@10.33.0 install --frozen-lockfile &&
+      npx -y pnpm@10.33.0 --filter @second-brain/db prisma:generate &&
+      npx -y pnpm@10.33.0 --filter @second-brain/worker build
     startCommand: node apps/worker/dist/index.js
     envVars:
       - key: NODE_ENV
