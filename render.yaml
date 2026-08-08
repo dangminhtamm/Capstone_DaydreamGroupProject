@@ -6,7 +6,7 @@ services:
     region: singapore
     plan: free
     buildCommand: |
-      corepack enable &&
+      npm install -g pnpm@10.33.0 &&
       pnpm install --frozen-lockfile &&
       pnpm --filter @second-brain/db prisma:generate &&
       pnpm --filter @second-brain/api build
@@ -75,7 +75,7 @@ services:
     region: singapore
     plan: free
     buildCommand: |
-      corepack enable &&
+      npm install -g pnpm@10.33.0 &&
       pnpm install --frozen-lockfile &&
       pnpm --filter @second-brain/db prisma:generate &&
       pnpm --filter @second-brain/worker build
