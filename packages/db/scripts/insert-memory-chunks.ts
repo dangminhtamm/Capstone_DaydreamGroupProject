@@ -19,9 +19,9 @@ async function main(): Promise<void> {
     throw new Error("Set SAMPLE_USER_ID to an existing users.id value before running this script.");
   }
 
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.TUTURUUU_AI_API_KEY;
   if (!apiKey) {
-    throw new Error("GEMINI_API_KEY is required to generate embeddings.");
+    throw new Error("TUTURUUU_AI_API_KEY is required to generate embeddings.");
   }
 
   const embeddingProvider = new GeminiEmbeddingProvider(apiKey);

@@ -9,6 +9,13 @@ import { google, people_v1 } from 'googleapis';
 import { PrismaService } from '../../prisma/prisma.service';
 import { decryptOAuthToken, encryptOAuthToken } from '../calendar/oauth-token-crypto';
 import { invalidateUserSearchCache } from '../../common/cache/search-answer-cache';
+import {
+  GOOGLE_SOURCE_SCOPES,
+  getAllGoogleWorkspaceScopes,
+  getGoogleConnectionStatus,
+  recordGoogleSyncFailure,
+  recordGoogleSyncSuccess,
+} from '../google-connections/google-connections';
 
 type GoogleContactRow = {
   external_id: string;
@@ -87,10 +94,21 @@ export class ContactsService {
       }),
     ]);
 
+    const fallbackConnected = user.google_connected && Boolean(user.google_refresh_token || user.google_access_token);
+    const connection = await getGoogleConnectionStatus(this.prisma, user.id, 'contact', fallbackConnected);
+
     return {
-      connected: user.google_connected && Boolean(user.google_refresh_token || user.google_access_token),
+      source: 'contact',
+      oauthMode: 'all_google_sources',
+      connected: connection.connected && fallbackConnected,
+      scopes: connection.scopes,
+      requestedScopes: GOOGLE_SOURCE_SCOPES.contact,
+      workspaceScopes: getAllGoogleWorkspaceScopes(),
       contactCount,
-      lastSyncedAt: latestContact?.updated_at ?? null,
+      lastSyncedAt: connection.lastSyncAt ?? latestContact?.updated_at ?? null,
+      lastError: connection.lastError,
+      lastErrorAt: connection.lastErrorAt,
+      syncCursor: connection.syncCursor,
     };
   }
 
@@ -198,6 +216,8 @@ export class ContactsService {
         return queuedCount;
       });
 
+      await recordGoogleSyncSuccess(this.prisma, { userId: user.id, source: 'contact' });
+
       return {
         message: 'Google Contacts synced successfully; contact memory indexing queued.',
         syncedCount: normalizedContacts.length,
@@ -205,6 +225,7 @@ export class ContactsService {
         memoryIndexingStatus: 'queued',
       };
     } catch (error) {
+      await recordGoogleSyncFailure(this.prisma, { userId: user.id, source: 'contact', error });
       if (this.isInsufficientScopeError(error)) {
         throw new ForbiddenException('Reconnect Google to grant Contacts permission.');
       }

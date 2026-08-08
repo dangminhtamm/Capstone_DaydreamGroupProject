@@ -3,7 +3,12 @@
 import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient, type Session, type User, type SupabaseClient } from '@supabase/supabase-js';
-import { getAuthCallbackUrl, syncSessionWithBackend } from '@/lib/auth-flow';
+import {
+  getAuthCallbackUrl,
+  syncSessionWithBackend,
+  type BackendAuthProfile,
+  type UserRole,
+} from '@/lib/auth-flow';
 
 // Initialize Supabase client
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -19,6 +24,9 @@ type AuthContextType = {
   session: Session | null;
   isLoading: boolean;
   isAuthenticated: boolean;
+  backendProfile: BackendAuthProfile | null;
+  role: UserRole;
+  isAdmin: boolean;
   configError: string | null;
   signInWithGoogle: () => Promise<{ error?: string }>;
   signUpWithEmail: (email: string, password: string, displayName: string) => Promise<{ error?: string }>;
@@ -34,6 +42,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
+  const [backendProfile, setBackendProfile] = useState<BackendAuthProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [configError, setConfigError] = useState<string | null>(
     hasSupabaseConfig ? null : "Missing Supabase environment variables"
@@ -53,12 +62,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await supabase.auth.signOut({ scope: 'local' }).catch(() => undefined);
         setSession(null);
         setUser(null);
+        setBackendProfile(null);
         setIsLoading(false);
         return;
       }
 
       setSession(session);
       setUser(session?.user ?? null);
+      if (session) {
+        syncSessionWithBackend(session)
+          .then(setBackendProfile)
+          .catch(() => setBackendProfile(null));
+      } else {
+        setBackendProfile(null);
+      }
       setIsLoading(false);
     });
 
@@ -67,13 +84,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       async (event, session) => {
         setSession(session);
         setUser(session?.user ?? null);
+        if (!session) setBackendProfile(null);
         setIsLoading(false);
 
         // Sync with backend on sign in (non-blocking, skip if backend unavailable)
         if (event === 'SIGNED_IN' && session) {
-          syncSessionWithBackend(session).catch(() => {
-            // Silently ignore - backend may not be running
-          });
+          syncSessionWithBackend(session)
+            .then(setBackendProfile)
+            .catch(() => {
+              setBackendProfile(null);
+            });
         }
       }
     );
@@ -156,6 +176,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
     await supabase.auth.signOut();
+    setBackendProfile(null);
     router.push('/');
   }, [router]);
 
@@ -163,11 +184,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return session?.access_token ?? null;
   }, [session]);
 
+  const role = backendProfile?.role ?? 'user';
   const value: AuthContextType = {
     user,
     session,
     isLoading,
     isAuthenticated: !!user,
+    backendProfile,
+    role,
+    isAdmin: role === 'admin',
     configError,
     signInWithGoogle,
     signUpWithEmail,

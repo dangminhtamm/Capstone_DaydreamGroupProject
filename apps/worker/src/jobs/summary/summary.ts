@@ -1,5 +1,7 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
-import { getGeminiSummaryModel } from '@second-brain/ai';
+import {
+  generateAiText,
+  getGeminiSummaryModel,
+} from '@second-brain/ai';
 import * as cron from 'node-cron';
 import { prisma } from '../../lib/prisma';
 
@@ -187,17 +189,11 @@ async function buildRawActivityContext(userId: string, period: Period) {
 }
 
 async function callAI(type: SummaryType, period: Period, context: string) {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error('GEMINI_API_KEY is missing in environment variables.');
-
-  const ai = new GoogleGenerativeAI(apiKey);
-  const model = ai.getGenerativeModel({
+  const text = await generateAiText({
     model: getGeminiSummaryModel(),
+    prompt: buildSummaryPrompt(type, period, context),
   });
-
-  const result = await model.generateContent(buildSummaryPrompt(type, period, context));
-  const text = result.response.text().trim();
-  if (!text) throw new Error('Gemini returned an empty summary.');
+  if (!text) throw new Error('AI returned an empty summary.');
   return sanitizeSummaryContent(text);
 }
 

@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { TUTURUUU_EMBEDDING_MODEL } from '@second-brain/ai';
 
 type AuthenticatedUserInput = {
   supabaseId: string;
@@ -31,6 +32,15 @@ type RecentJobRow = {
   updated_at: Date;
 };
 
+type EmbeddingSummaryRow = {
+  totalChunks: number | bigint | string;
+  embeddedChunks: number | bigint | string;
+  currentEmbeddingModelChunks: number | bigint | string;
+  staleEmbeddingModelChunks: number | bigint | string;
+  missingEmbeddingChunks: number | bigint | string;
+  latestChunkUpdatedAt: Date | null;
+};
+
 @Injectable()
 export class IndexingService {
   constructor(private readonly prisma: PrismaService) {}
@@ -49,16 +59,18 @@ export class IndexingService {
       };
     }
 
-    const [counts, staleProcessing, recent] = await Promise.all([
+    const [counts, staleProcessing, recent, embeddingIndex] = await Promise.all([
       this.getCounts(user.id),
       this.getStaleProcessingCount(user.id),
       this.getRecentJobs(user.id),
+      this.getUserEmbeddingIndex(user.id),
     ]);
 
     return {
       available: true,
       counts,
       staleProcessingCount: staleProcessing,
+      embeddingIndex,
       recent: recent.map((job) => this.toClientJob(job)),
     };
   }
@@ -145,6 +157,8 @@ export class IndexingService {
       linkedDiaries,
       attachments,
       extractedAttachments,
+      staleProcessingOutbox,
+      embeddingIndex,
     ] = await Promise.all([
       this.prisma.diaryEntry.count({ where: { user_id: user.id } }),
       this.prisma.memoryChunk.count({ where: { userId: user.id } }),
@@ -165,6 +179,8 @@ export class IndexingService {
           extracted_text: { not: null },
         },
       }),
+      available ? this.getStaleProcessingCount(user.id) : Promise.resolve(0),
+      this.getUserEmbeddingIndex(user.id),
     ]);
 
     const pendingOutbox =
@@ -224,14 +240,23 @@ export class IndexingService {
       {
         id: 'outbox_clean',
         label: 'Outbox health',
-        ok: failedOutbox === 0,
+        ok: failedOutbox === 0 && pendingOutbox === 0 && staleProcessingOutbox === 0,
         required: true,
         detail:
           failedOutbox > 0
             ? `${failedOutbox} failed/dead-letter jobs need attention`
+            : staleProcessingOutbox > 0
+              ? `${staleProcessingOutbox} processing jobs are stuck and need worker restart or requeue`
             : pendingOutbox > 0
               ? `${pendingOutbox} jobs still pending or processing`
-              : 'No failed jobs',
+              : 'No pending, processing, failed, or dead-letter jobs',
+      },
+      {
+        id: 'embedding_model',
+        label: 'Embedding model',
+        ok: embeddingIndex.healthy,
+        required: true,
+        detail: `${embeddingIndex.currentEmbeddingModelChunks}/${embeddingIndex.totalChunks} chunks current · ${embeddingIndex.missingEmbeddingChunks} missing · ${embeddingIndex.staleEmbeddingModelChunks} stale`,
       },
     ];
 
@@ -251,11 +276,16 @@ export class IndexingService {
         extractedAttachments,
         pendingOutbox,
         failedOutbox,
+        staleProcessingOutbox,
+        currentEmbeddingModelChunks: embeddingIndex.currentEmbeddingModelChunks,
+        staleEmbeddingModelChunks: embeddingIndex.staleEmbeddingModelChunks,
+        missingEmbeddingChunks: embeddingIndex.missingEmbeddingChunks,
       },
       outbox: {
         available,
         counts,
       },
+      embeddingIndex,
       checks,
       nextActions: checks
         .filter((check) => !check.ok)
@@ -329,6 +359,45 @@ export class IndexingService {
     );
   }
 
+  private async getUserEmbeddingIndex(userId: string) {
+    const rows = await this.prisma.$queryRawUnsafe<EmbeddingSummaryRow[]>(
+      `
+      SELECT
+        COUNT(*) AS "totalChunks",
+        COUNT(*) FILTER (WHERE embedding IS NOT NULL) AS "embeddedChunks",
+        COUNT(*) FILTER (
+          WHERE embedding IS NOT NULL
+            AND metadata->>'embeddingModel' = $2
+        ) AS "currentEmbeddingModelChunks",
+        COUNT(*) FILTER (
+          WHERE embedding IS NOT NULL
+            AND metadata->>'embeddingModel' IS DISTINCT FROM $2
+        ) AS "staleEmbeddingModelChunks",
+        COUNT(*) FILTER (WHERE embedding IS NULL) AS "missingEmbeddingChunks",
+        MAX(updated_at) AS "latestChunkUpdatedAt"
+      FROM memory_chunks
+      WHERE user_id = $1
+      `,
+      userId,
+      TUTURUUU_EMBEDDING_MODEL,
+    );
+    const row = rows[0];
+    const totalChunks = toNumber(row?.totalChunks);
+    const missingEmbeddingChunks = toNumber(row?.missingEmbeddingChunks);
+    const staleEmbeddingModelChunks = toNumber(row?.staleEmbeddingModelChunks);
+
+    return {
+      embeddingModel: TUTURUUU_EMBEDDING_MODEL,
+      totalChunks,
+      embeddedChunks: toNumber(row?.embeddedChunks),
+      currentEmbeddingModelChunks: toNumber(row?.currentEmbeddingModelChunks),
+      staleEmbeddingModelChunks,
+      missingEmbeddingChunks,
+      latestChunkUpdatedAt: row?.latestChunkUpdatedAt?.toISOString() ?? null,
+      healthy: totalChunks === 0 || (missingEmbeddingChunks === 0 && staleEmbeddingModelChunks === 0),
+    };
+  }
+
   private requeueData() {
     return {
       status: 'pending',
@@ -379,8 +448,14 @@ export class IndexingService {
       attachments: 'Upload one text/PDF/image attachment and let the worker extract/index it.',
       outbox_available: 'Apply database migrations before relying on async indexing.',
       outbox_clean: 'Inspect retry/dead-letter indexing jobs and requeue or fix the underlying error.',
+      embedding_model: `Re-embed memory chunks with ${TUTURUUU_EMBEDDING_MODEL} so semantic search uses the current model.`,
     };
 
     return actions[checkId] ?? 'Review this readiness check before the demo.';
   }
+}
+
+function toNumber(value: number | bigint | string | null | undefined) {
+  if (value == null) return 0;
+  return Number(value);
 }

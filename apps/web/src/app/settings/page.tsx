@@ -183,7 +183,7 @@ function ConfigCheckRow({
 }
 
 export default function SettingsPage() {
-  const { user, isAuthenticated, isLoading, supabase, getAccessToken } = useAuth();
+  const { user, isAuthenticated, isLoading, supabase, getAccessToken, role, isAdmin } = useAuth();
   const { theme, resolvedTheme, setTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
 
@@ -417,6 +417,10 @@ export default function SettingsPage() {
   const hasNameChanged = useMemo(() => displayNameEdit.trim() !== displayName, [displayNameEdit, displayName]);
   const outboxCounts = systemHealth?.indexingOutbox.counts ?? {};
   const userIndexingCounts = indexingStatus?.counts ?? {};
+  const workerStatus = systemHealth?.worker;
+  const userEmbeddingIndex = indexingStatus?.embeddingIndex;
+  const globalEmbeddingIndex = systemHealth?.embeddingIndex;
+  const activeEmbeddingIndex = userEmbeddingIndex ?? globalEmbeddingIndex;
   const coreEnvironmentChecks = [
     {
       label: "Database URL",
@@ -429,8 +433,8 @@ export default function SettingsPage() {
       ok: systemHealth?.environment.supabaseConfigured,
     },
     {
-      label: "Gemini API",
-      detail: "AI memory embedding and deep answer generation are configured.",
+      label: "AI gateway",
+      detail: "Tuturuuu AI gateway is configured for embedding and answer generation.",
       ok: systemHealth?.environment.geminiConfigured,
     },
     {
@@ -474,13 +478,25 @@ export default function SettingsPage() {
   const totalActiveJobs = userPendingJobs + userProcessingJobs;
   const outboxFailedJobs = (outboxCounts.dead_letter ?? 0) + (outboxCounts.failed ?? 0);
   const outboxActiveJobs = (outboxCounts.pending ?? 0) + (outboxCounts.retry ?? 0) + (outboxCounts.processing ?? 0);
+  const staleProcessingJobs = Math.max(indexingStatus?.staleProcessingCount ?? 0, systemHealth?.indexingOutbox.staleProcessingCount ?? 0);
+  const embeddingIssueCount =
+    (activeEmbeddingIndex?.missingEmbeddingChunks ?? 0) +
+    (activeEmbeddingIndex?.staleEmbeddingModelChunks ?? 0);
   const coreMissingCount = coreEnvironmentChecks.filter((check) => !check.ok).length;
-  const systemOverallTone: HealthTone = systemHealth?.status === "ok" && coreMissingCount === 0 && userFailedJobs === 0
+  const workerTone: HealthTone = workerStatus?.ok ? "ready" : workerStatus ? "attention" : "idle";
+  const embeddingOverallTone: HealthTone = activeEmbeddingIndex?.healthy
+    ? "ready"
+    : activeEmbeddingIndex
+      ? embeddingIssueCount > 0
+        ? "attention"
+        : "idle"
+      : "idle";
+  const systemOverallTone: HealthTone = systemHealth?.status === "ok" && coreMissingCount === 0 && userFailedJobs === 0 && workerTone !== "attention" && embeddingOverallTone !== "attention"
     ? "ready"
     : systemHealth || indexingStatus
       ? "attention"
       : "idle";
-  const indexingOverallTone: HealthTone = userFailedJobs > 0 || outboxFailedJobs > 0 || (indexingStatus?.staleProcessingCount ?? 0) > 0
+  const indexingOverallTone: HealthTone = userFailedJobs > 0 || outboxFailedJobs > 0 || staleProcessingJobs > 0
     ? "attention"
     : totalActiveJobs > 0 || outboxActiveJobs > 0
       ? "working"
@@ -607,6 +623,13 @@ export default function SettingsPage() {
                         <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
                       )}
                       {provider === "google" ? "Google" : "Email"}
+                    </span>
+                    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                      isAdmin
+                        ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
+                        : "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300"
+                    }`}>
+                      {isAdmin ? "Admin" : "User"}
                     </span>
                   </div>
                 </div>
@@ -793,7 +816,7 @@ export default function SettingsPage() {
             </div>
           </div>
 
-          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-6">
             <HealthSnapshotCard
               label="API"
               value={systemHealth ? systemHealth.status.toUpperCase() : "Unknown"}
@@ -806,6 +829,27 @@ export default function SettingsPage() {
               value={systemHealth?.database.ok ? "Connected" : "Needs attention"}
               detail={systemHealth?.database.detail ?? "Prisma can read/write the app database."}
               tone={systemHealth?.database.ok ? "ready" : systemHealth ? "attention" : "idle"}
+              loading={isLoadingSystemStatus && !systemHealth}
+            />
+            <HealthSnapshotCard
+              label="Worker"
+              value={
+                workerStatus?.ok
+                  ? "Running"
+                  : workerStatus?.status === "missing"
+                    ? "Missing"
+                    : workerStatus?.status === "stale"
+                      ? "Stale"
+                      : workerStatus
+                        ? "Needs attention"
+                        : "Unknown"
+              }
+              detail={
+                workerStatus?.heartbeatAgeMs != null
+                  ? `Last heartbeat ${formatDuration(workerStatus.heartbeatAgeMs)} ago.`
+                  : workerStatus?.detail ?? "Start the worker to drain indexing jobs."
+              }
+              tone={workerTone}
               loading={isLoadingSystemStatus && !systemHealth}
             />
             <HealthSnapshotCard
@@ -824,12 +868,33 @@ export default function SettingsPage() {
                   ? "No failed or active indexing jobs for your account."
                   : indexingOverallTone === "working"
                     ? `${totalActiveJobs} user job(s) and ${outboxActiveJobs} outbox job(s) are queued or processing.`
-                    : indexingOverallTone === "attention"
-                      ? `${userFailedJobs + outboxFailedJobs} failed job(s) need review or requeue.`
+                  : indexingOverallTone === "attention"
+                      ? staleProcessingJobs > 0
+                        ? `${staleProcessingJobs} processing job(s) are stale. Worker may need restart.`
+                        : `${userFailedJobs + outboxFailedJobs} failed job(s) need review or requeue.`
                       : "Refresh after signing in to inspect indexing jobs."
               }
               tone={indexingOverallTone}
               loading={isLoadingSystemStatus && !indexingStatus}
+            />
+            <HealthSnapshotCard
+              label="Embeddings"
+              value={
+                embeddingOverallTone === "ready"
+                  ? "Aligned"
+                  : embeddingIssueCount > 0
+                    ? "Re-embed"
+                    : userEmbeddingIndex || globalEmbeddingIndex
+                      ? "No chunks"
+                      : "Unknown"
+              }
+              detail={
+                activeEmbeddingIndex
+                  ? `${activeEmbeddingIndex.currentEmbeddingModelChunks}/${activeEmbeddingIndex.totalChunks} current for ${activeEmbeddingIndex.embeddingModel}.`
+                  : "Refresh to inspect memory chunk embeddings."
+              }
+              tone={embeddingOverallTone}
+              loading={isLoadingSystemStatus && !indexingStatus && !systemHealth}
             />
             <HealthSnapshotCard
               label="Demo"
@@ -860,7 +925,7 @@ export default function SettingsPage() {
                     Demo readiness: {demoReadiness.ready ? "Ready" : "Needs work"}
                   </p>
                   <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
-                    Diary {demoReadiness.counts.diaryEntries} · Memory chunks {demoReadiness.counts.memoryChunks} · Summaries {demoReadiness.counts.summaries} · Calendar links {demoReadiness.counts.linkedDiaries}
+                    Diary {demoReadiness.counts.diaryEntries} · Memory chunks {demoReadiness.counts.memoryChunks} · Queue {demoReadiness.counts.pendingOutbox} pending · Embeddings {demoReadiness.counts.currentEmbeddingModelChunks ?? 0}/{demoReadiness.counts.memoryChunks} current
                   </p>
                 </div>
                 <span className={`self-start status-badge ${
@@ -1115,6 +1180,39 @@ export default function SettingsPage() {
               ))}
             </div>
 
+            <div className="mb-4 grid gap-2 md:grid-cols-3">
+              {[
+                {
+                  label: "Worker process",
+                  value: workerStatus?.ok ? "Heartbeat fresh" : workerStatus ? "Not healthy" : "Unknown",
+                  detail: workerStatus?.detail ?? "Start API and worker together before importing memory.",
+                  tone: workerTone,
+                },
+                {
+                  label: "Due jobs",
+                  value: `${systemHealth?.indexingOutbox.dueJobCount ?? userPendingJobs}`,
+                  detail: systemHealth?.indexingOutbox.oldestPendingAgeMs
+                    ? `Oldest queued job has waited ${formatDuration(systemHealth.indexingOutbox.oldestPendingAgeMs)}.`
+                    : "No overdue indexing jobs detected.",
+                  tone: (systemHealth?.indexingOutbox.dueJobCount ?? 0) > 0 && workerTone === "attention" ? "attention" as HealthTone : userPendingJobs ? "working" as HealthTone : "ready" as HealthTone,
+                },
+                {
+                  label: "Embedding model",
+                  value: activeEmbeddingIndex?.embeddingModel ?? "Unknown",
+                  detail: activeEmbeddingIndex
+                    ? `${activeEmbeddingIndex.missingEmbeddingChunks} missing · ${activeEmbeddingIndex.staleEmbeddingModelChunks} stale · ${activeEmbeddingIndex.currentEmbeddingModelChunks} current.`
+                    : "No embedding health data loaded yet.",
+                  tone: embeddingOverallTone,
+                },
+              ].map((item) => (
+                <div key={item.label} className={`rounded-lg border px-3 py-2 ${healthPanelClass(item.tone)}`}>
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{item.label}</p>
+                  <p className="mt-1 truncate text-sm font-bold text-slate-900 dark:text-slate-100">{item.value}</p>
+                  <p className="mt-0.5 line-clamp-2 text-xs leading-5 text-slate-600 dark:text-slate-400">{item.detail}</p>
+                </div>
+              ))}
+            </div>
+
             {!isAuthenticated ? (
               <div className="rounded-xl border border-dashed border-slate-200 px-4 py-6 text-center dark:border-slate-700">
                 <p className="text-sm font-medium text-slate-600 dark:text-slate-300">Sign in to inspect your indexing jobs.</p>
@@ -1158,7 +1256,7 @@ export default function SettingsPage() {
                         {job.processingAgeMs ? ` · processing for ${formatDuration(job.processingAgeMs)}` : ""}
                         {job.lastErrorAt ? ` · last error ${new Date(job.lastErrorAt).toLocaleString()}` : ""}
                       </p>
-                      {["dead_letter", "failed", "retry", "processing"].includes(job.status) ? (
+                      {isAdmin && ["dead_letter", "failed", "retry", "processing"].includes(job.status) ? (
                         <button
                           type="button"
                           onClick={() => void handleRequeueJob(job.id)}
@@ -1181,6 +1279,11 @@ export default function SettingsPage() {
             {indexingStatus?.staleProcessingCount ? (
               <p className="mt-3 text-sm font-medium text-amber-600 dark:text-amber-400">
                 {indexingStatus.staleProcessingCount} processing jobs have been locked for more than 10 minutes.
+              </p>
+            ) : null}
+            {!isAdmin && isAuthenticated ? (
+              <p className="mt-3 text-xs leading-5 text-slate-500 dark:text-slate-400">
+                Signed in as {role}. Admin role is required to requeue indexing jobs.
               </p>
             ) : null}
           </div>

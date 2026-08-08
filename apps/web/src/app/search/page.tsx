@@ -43,6 +43,17 @@ type QueryAnalytics = {
   chunksRetrieved: number;
   status: "success" | "no_memory" | "error";
   answerMode?: AnswerMode;
+  cacheVersion?: string;
+};
+
+type MemoryIndexDiagnostics = {
+  embeddingModel: string;
+  totalChunks: number;
+  embeddedChunks: number;
+  currentEmbeddingModelChunks: number;
+  staleEmbeddingModelChunks: number;
+  latestOccurredAt?: string | null;
+  issue: "none" | "empty_index" | "missing_embeddings" | "stale_embeddings" | "mixed_embeddings";
 };
 
 type MemoryDebugTrace = {
@@ -52,6 +63,7 @@ type MemoryDebugTrace = {
   status: "success" | "no_memory" | "error";
   reason: string;
   chunksRetrieved: number;
+  diagnostics?: MemoryIndexDiagnostics;
   topChunks: Array<{
     id: string;
     sourceType: string;
@@ -77,7 +89,7 @@ type SearchResponse = {
   analytics?: QueryAnalytics | null;
   modelError?: {
     status?: number;
-    kind: "quota" | "service_unavailable" | "validation" | "transient" | "unknown";
+    kind: "auth" | "quota" | "billing" | "model_config" | "service_unavailable" | "validation" | "transient" | "unknown";
     message: string;
   } | null;
   debugTrace?: MemoryDebugTrace | null;
@@ -87,7 +99,7 @@ type SearchResponse = {
   cacheStorage?: "redis" | "database";
 };
 
-type ResponseLanguage = "auto" | "en" | "vi";
+type ResponseLanguage = "en" | "vi";
 
 
 const suggestedQuestions = [
@@ -101,13 +113,6 @@ const answerStrategies: Array<{ value: AnswerStrategy; label: string }> = [
   { value: "fast", label: "Fast" },
   { value: "deep", label: "Deep" },
 ];
-
-function inferResponseLanguage(question: string): Exclude<ResponseLanguage, "auto"> {
-  const normalized = question.toLowerCase();
-  const hasVietnameseDiacritics = /[ăâđêôơưáàảãạấầẩẫậắằẳẵặéèẻẽẹếềểễệíìỉĩịóòỏõọốồổỗộớờởỡợúùủũụứừửữựýỳỷỹỵ]/iu.test(question);
-  const hasVietnameseWords = /\b(làm gì|hôm nay|hôm qua|ngày|tháng|tuần|tôi|mình|nhật ký|tâm trạng|cảm xúc|dựa trên|phân tích)\b/iu.test(normalized);
-  return hasVietnameseDiacritics || hasVietnameseWords ? "vi" : "en";
-}
 
 const confidenceStyles = {
   high: "status-badge-success",
@@ -166,7 +171,7 @@ function formatAnswerMode(value?: AnswerMode) {
     case "fast_path":
       return "Fast path";
     case "gemini":
-      return "Gemini";
+      return "Tuturuuu AI";
     case "extractive_fallback":
       return "Extractive fallback";
     case "no_memory":
@@ -202,6 +207,9 @@ function isJsonFormatModelError(error: NonNullable<SearchResponse["modelError"]>
 }
 
 function formatModelErrorTitle(error: NonNullable<SearchResponse["modelError"]>) {
+  if (error.kind === "auth") return "AI key needs attention";
+  if (error.kind === "billing") return "AI billing needs attention";
+  if (error.kind === "model_config") return "AI model needs attention";
   if (error.kind === "quota") return "Using retrieved evidence";
   if (error.kind === "service_unavailable") return "Using retrieved evidence";
   if (error.kind === "validation") {
@@ -211,8 +219,28 @@ function formatModelErrorTitle(error: NonNullable<SearchResponse["modelError"]>)
 }
 
 function formatModelErrorMessage(error: NonNullable<SearchResponse["modelError"]>) {
+  if (error.kind === "auth") {
+    return "Tuturuuu rejected the API key. Create or rotate a valid metered key, set TUTURUUU_AI_API_KEY, then restart the API and worker.";
+  }
+
+  if (error.kind === "model_config") {
+    return "Tuturuuu rejected the selected model. Use google/gemini-3.5-flash-lite for answers and google/gemini-embedding-2 for embeddings.";
+  }
+
+  if (error.kind === "billing") {
+    return "Tuturuuu could not settle AI usage for this workspace. Check Tuturuuu billing/credits, or use google/gemini-3.5-flash-lite.";
+  }
+
   if (error.kind === "quota") {
-    return "Model generation was unavailable, so the answer is assembled from the strongest retrieved memories.";
+    return "Tuturuuu AI generation hit quota/rate limits, so the answer is assembled from the strongest retrieved memories.";
+  }
+
+  if (error.kind === "service_unavailable") {
+    const message = error.message.toLowerCase();
+    if (message.includes("tls") || message.includes("certificate")) {
+      return "Tuturuuu AI generation could not connect because the gateway TLS/certificate is not trusted. The answer below is assembled from retrieved evidence.";
+    }
+    return "Tuturuuu AI generation was unavailable, so the answer is assembled from the strongest retrieved memories.";
   }
 
   if (error.kind === "validation") {
@@ -225,7 +253,7 @@ function formatModelErrorMessage(error: NonNullable<SearchResponse["modelError"]
       : "The generated response did not pass citation validation, so the answer uses direct evidence.";
   }
 
-  return "Model generation was unavailable, so the answer is assembled from retrieved evidence.";
+  return "Tuturuuu AI generation was unavailable, so the answer is assembled from retrieved evidence.";
 }
 
 function highlightQuote(quote: string, claim?: string) {
@@ -316,6 +344,42 @@ function analyticsStatusState(status?: QueryAnalytics["status"]): DebugPipelineS
   return "unknown";
 }
 
+function indexDiagnosticsState(issue?: MemoryIndexDiagnostics["issue"]): DebugPipelineState {
+  if (!issue || issue === "none") return "ok";
+  if (issue === "mixed_embeddings") return "warning";
+  return "error";
+}
+
+function formatIndexIssue(issue: MemoryIndexDiagnostics["issue"]) {
+  switch (issue) {
+    case "empty_index":
+      return "No indexed memories";
+    case "missing_embeddings":
+      return "Missing embeddings";
+    case "stale_embeddings":
+      return "Stale embeddings";
+    case "mixed_embeddings":
+      return "Mixed embeddings";
+    default:
+      return "Healthy";
+  }
+}
+
+function formatIndexAction(issue: MemoryIndexDiagnostics["issue"], model: string) {
+  switch (issue) {
+    case "empty_index":
+      return "Add diary, attachment, calendar, summary, or Gmail data, then drain indexing jobs.";
+    case "missing_embeddings":
+      return `Drain indexing jobs or re-embed chunks with ${model}.`;
+    case "stale_embeddings":
+      return `Re-embed existing memory chunks with ${model}.`;
+    case "mixed_embeddings":
+      return `Some chunks still need re-embedding with ${model}.`;
+    default:
+      return "Index and embedding model look aligned for these filters.";
+  }
+}
+
 function traceMissingMessage(result: SearchResponse) {
   if (result.cached) {
     return "This response came from cache, so the backend may skip a fresh retrieval trace.";
@@ -327,6 +391,7 @@ function traceMissingMessage(result: SearchResponse) {
 function AiDebugPanel({ result }: { result: SearchResponse }) {
   const analytics = result.analytics ?? null;
   const trace = result.debugTrace ?? null;
+  const diagnostics = trace?.diagnostics ?? null;
   const answerMode = result.answerMode ?? analytics?.answerMode;
   const traceState: DebugPipelineState = trace
     ? analyticsStatusState(trace.status)
@@ -358,12 +423,12 @@ function AiDebugPanel({ result }: { result: SearchResponse }) {
       state: generateState,
       detail:
         answerMode === "fast_path"
-          ? "Fast path used retrieved evidence without Gemini generation."
+          ? "Fast path used retrieved evidence without model generation."
           : answerMode === "extractive_fallback"
             ? "Fallback answer assembled from retrieved evidence."
             : result.modelError
-              ? "Gemini generation failed, but retrieved evidence is still shown."
-              : "Gemini or grounded composer produced the final answer.",
+              ? "Tuturuuu AI generation failed, but retrieved evidence is still shown."
+              : "Tuturuuu AI or grounded composer produced the final answer.",
     },
   ] satisfies Array<{
     label: string;
@@ -459,6 +524,41 @@ function AiDebugPanel({ result }: { result: SearchResponse }) {
           <p className="mt-1 text-sm leading-6 text-slate-700 dark:text-slate-300">{trace.reason}</p>
         </div>
       )}
+
+      {diagnostics ? (
+        <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Index health</p>
+              <p className="mt-1 text-sm font-semibold text-slate-950 dark:text-slate-100">
+                {diagnostics.totalChunks} chunks · {diagnostics.currentEmbeddingModelChunks} current · {diagnostics.staleEmbeddingModelChunks} stale
+              </p>
+            </div>
+            <span className={`status-badge ${debugStateClass(indexDiagnosticsState(diagnostics.issue))}`}>
+              {formatIndexIssue(diagnostics.issue)}
+            </span>
+          </div>
+          <div className="mt-3 grid gap-2 md:grid-cols-3">
+            <div className="rounded-lg bg-slate-50 px-3 py-2 dark:bg-slate-900">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Current model</p>
+              <p className="mt-1 truncate font-mono text-xs font-semibold text-slate-800 dark:text-slate-200">{diagnostics.embeddingModel}</p>
+            </div>
+            <div className="rounded-lg bg-slate-50 px-3 py-2 dark:bg-slate-900">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Embedded</p>
+              <p className="mt-1 text-xs font-semibold text-slate-800 dark:text-slate-200">{diagnostics.embeddedChunks}/{diagnostics.totalChunks}</p>
+            </div>
+            <div className="rounded-lg bg-slate-50 px-3 py-2 dark:bg-slate-900">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Latest memory</p>
+              <p className="mt-1 text-xs font-semibold text-slate-800 dark:text-slate-200">
+                {diagnostics.latestOccurredAt ? formatSourceDate(diagnostics.latestOccurredAt) : "n/a"}
+              </p>
+            </div>
+          </div>
+          <p className="mt-2 text-xs leading-5 text-slate-500 dark:text-slate-400">
+            {formatIndexAction(diagnostics.issue, diagnostics.embeddingModel)}
+          </p>
+        </div>
+      ) : null}
 
       {result.modelError ? (
         <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2.5 dark:border-rose-900/60 dark:bg-rose-950/20">
@@ -588,7 +688,7 @@ export default function SearchPage() {
   const [result, setResult] = useState<SearchResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSearching, setIsSearching] = useState(false);
-  const [responseLanguage, setResponseLanguage] = useState<ResponseLanguage>("auto");
+  const [responseLanguage, setResponseLanguage] = useState<ResponseLanguage>("en");
   const [answerStrategy, setAnswerStrategy] = useState<AnswerStrategy>("auto");
   const [showAuthPrompt, setShowAuthPrompt] = useState(false);
   const [searchHistory, setSearchHistory] = useState<SearchHistoryEntry[]>([]);
@@ -598,7 +698,12 @@ export default function SearchPage() {
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
       const saved = localStorage.getItem("dd-response-lang") as ResponseLanguage | null;
-      if (saved === "auto" || saved === "en" || saved === "vi") setResponseLanguage(saved);
+      if (saved === "en" || saved === "vi") {
+        setResponseLanguage(saved);
+      } else if (localStorage.getItem("dd-response-lang") === "auto") {
+        localStorage.setItem("dd-response-lang", "en");
+        setResponseLanguage("en");
+      }
 
       const savedStrategy = localStorage.getItem("dd-answer-strategy") as AnswerStrategy | null;
       if (savedStrategy === "auto" || savedStrategy === "fast" || savedStrategy === "deep") {
@@ -690,10 +795,6 @@ export default function SearchPage() {
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
       const timeZone = getBrowserTimeZone();
-      const effectiveResponseLanguage =
-        responseLanguage === "auto"
-          ? inferResponseLanguage(normalizedQuestion)
-          : responseLanguage;
       const response = await fetch(`${apiUrl}/api/search`, {
         method: "POST",
         headers: {
@@ -703,13 +804,17 @@ export default function SearchPage() {
         body: JSON.stringify({
           question: normalizedQuestion,
           limit: 8,
-          responseLanguage: effectiveResponseLanguage,
+          responseLanguage,
           ...(timeZone ? { timeZone } : {}),
           ...(answerStrategy === "auto" ? {} : { answerStrategy }),
         }),
       });
 
       if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error("Session expired or invalid. Please sign in again.");
+        }
+
         const requestId = response.headers.get("x-request-id");
         const errorBody = await response.json().catch(() => null) as { message?: string; requestId?: string } | null;
         const detail = errorBody?.message || `Search failed with status ${response.status}`;
@@ -747,8 +852,7 @@ export default function SearchPage() {
     await runSearch(question.trim());
   }
 
-  const displayLanguage =
-    responseLanguage === "auto" ? inferResponseLanguage(question) : responseLanguage;
+  const displayLanguage = responseLanguage;
 
   return (
     <DashboardShell
@@ -804,7 +908,7 @@ export default function SearchPage() {
                 <div className="flex items-center gap-2">
                   <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Language</span>
                   <div className="segment-control">
-                    {(["auto", "en", "vi"] as const).map((language) => {
+                    {(["en", "vi"] as const).map((language) => {
                       const active = responseLanguage === language;
                       return (
                         <button

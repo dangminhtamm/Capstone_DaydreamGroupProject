@@ -104,12 +104,12 @@ describe('CalendarService', () => {
       expect.objectContaining({
         access_type: 'offline',
         prompt: 'consent',
-        scope: [
+        scope: expect.arrayContaining([
           'https://www.googleapis.com/auth/calendar.readonly',
           'https://www.googleapis.com/auth/contacts.readonly',
           'https://www.googleapis.com/auth/drive.readonly',
           'https://www.googleapis.com/auth/gmail.readonly',
-        ],
+        ]),
       }),
     );
     expect(url).toContain('state=');
@@ -137,6 +137,7 @@ describe('CalendarService', () => {
         google_access_token: expect.stringMatching(/^enc:v1:/),
         google_refresh_token: expect.stringMatching(/^enc:v1:/),
       },
+      select: { id: true },
     });
     expect(prisma.user.update.mock.calls[0][0].data.google_access_token).not.toBe('google-access-token');
     expect(prisma.user.update.mock.calls[0][0].data.google_refresh_token).not.toBe('google-refresh-token');
@@ -160,11 +161,19 @@ describe('CalendarService', () => {
       email: 'user@example.com',
     });
 
-    expect(status).toEqual({
-      connected: true,
-      eventCount: 3,
-      lastSyncedAt: new Date('2026-05-18T12:00:00.000Z'),
-    });
+    expect(status).toEqual(
+      expect.objectContaining({
+        source: 'calendar',
+        oauthMode: 'all_google_sources',
+        connected: true,
+        scopes: ['https://www.googleapis.com/auth/calendar.readonly'],
+        requestedScopes: ['https://www.googleapis.com/auth/calendar.readonly'],
+        eventCount: 3,
+        lastSyncedAt: new Date('2026-05-18T12:00:00.000Z'),
+        lastError: null,
+        lastErrorAt: null,
+      }),
+    );
     expect(prisma.user.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { supabaseId: 'supabase-user-1' },

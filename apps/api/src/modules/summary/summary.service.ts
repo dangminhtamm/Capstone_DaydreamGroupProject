@@ -4,8 +4,10 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
-import { GoogleGenerativeAI } from '@google/generative-ai';
-import { getGeminiSummaryModel } from '@second-brain/ai';
+import {
+  generateAiText,
+  getGeminiSummaryModel,
+} from '@second-brain/ai';
 import { PrismaService } from '../../prisma/prisma.service';
 import { invalidateUserSearchCache } from '../../common/cache/search-answer-cache';
 import type { CreateSummaryDto } from './dto/create-summary.dto';
@@ -33,8 +35,6 @@ type AuthenticatedUserInput = {
 
 @Injectable()
 export class SummaryService {
-  private _geminiClient: GoogleGenerativeAI | null = null;
-
   constructor(private prisma: PrismaService) {}
 
   async findAll(
@@ -363,32 +363,17 @@ export class SummaryService {
     period: { start: Date; end: Date },
     context: string,
   ) {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      throw new InternalServerErrorException('GEMINI_API_KEY is not configured.');
-    }
-
-    const model = this.getGeminiClient(apiKey).getGenerativeModel({
-      model: getGeminiSummaryModel(),
-    });
-
     const prompt = buildSummaryPrompt(type, period, context);
-    const result = await model.generateContent(prompt);
-    const text = result.response.text().trim();
+    const text = await generateAiText({
+      model: getGeminiSummaryModel(),
+      prompt,
+    });
 
     if (!text) {
       throw new InternalServerErrorException('AI returned an empty summary.');
     }
 
     return sanitizeSummaryContent(text);
-  }
-
-  private getGeminiClient(apiKey: string) {
-    if (!this._geminiClient) {
-      this._geminiClient = new GoogleGenerativeAI(apiKey);
-    }
-
-    return this._geminiClient;
   }
 
   private getSummaryContextItemLimit() {

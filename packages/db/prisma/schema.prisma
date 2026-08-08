@@ -86,6 +86,28 @@ model GoogleDriveFile {
   @@map("google_drive_files")
 }
 
+model GoogleConnection {
+  id            String    @id @default(uuid())
+  user_id       String
+  source        String
+  connected     Boolean   @default(false)
+  scopes        String[]  @default([])
+  last_sync_at  DateTime?
+  last_error    String?   @db.Text
+  last_error_at DateTime?
+  sync_cursor   Json?
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  // Relations
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, source], map: "google_connections_user_source_key")
+  @@index([user_id, connected], map: "google_connections_user_connected_idx")
+  @@map("google_connections")
+}
+
 model Summary {
   id           String   @id @default(uuid())
   user_id      String
@@ -150,6 +172,7 @@ model User {
   supabaseId       String  @unique @db.Uuid // Links to auth.users in Supabase
   email            String  @unique
   display_name     String?
+  role             String  @default("user")
   google_connected Boolean @default(false) // Tracks OAuth status
 
   // OAuth Tokens (Needed for your calendar/gmail sync jobs)
@@ -166,10 +189,12 @@ model User {
   calendar_events CalendarEvent[]
   google_contacts GoogleContact[]
   google_drive_files GoogleDriveFile[]
+  google_connections GoogleConnection[]
   gmail_messages  GmailMessage[]
   search_history  SearchHistory[]
   indexing_outbox IndexingOutbox[]
 
+  @@index([role], map: "users_role_idx")
   @@map("users")
 }
 
@@ -255,6 +280,19 @@ model IndexingOutbox {
   @@index([status, run_after, created_at], map: "indexing_outbox_status_run_after_idx")
   @@index([user_id, status, created_at], map: "indexing_outbox_user_status_created_idx")
   @@map("indexing_outbox")
+}
+
+model WorkerHeartbeat {
+  id          String   @id
+  status      String   @default("running")
+  detail      String?  @db.Text
+  startedAt   DateTime @default(now()) @map("started_at")
+  heartbeatAt DateTime @default(now()) @map("heartbeat_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@index([heartbeatAt], map: "worker_heartbeats_heartbeat_at_idx")
+  @@map("worker_heartbeats")
 }
 
 model MemoryChunk {

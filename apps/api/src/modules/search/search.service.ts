@@ -15,6 +15,9 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { SearchQueryDto } from './dto/search-query.dto';
 
 const DEFAULT_SEARCH_LIMIT = 8;
+const SEARCH_CACHE_PIPELINE_VERSION = 'ai-recall-v5';
+const DEFAULT_TUTURUUU_ANSWER_MODEL = 'google/gemini-3.5-flash-lite';
+const DEFAULT_TUTURUUU_EMBEDDING_MODEL = 'google/gemini-embedding-2';
 
 @Injectable()
 export class SearchService {
@@ -33,6 +36,7 @@ export class SearchService {
     const normalizedQuestion = queryDto.question.trim();
     const lang = queryDto.responseLanguage ?? this.inferResponseLanguage(normalizedQuestion);
     const timeZone = queryDto.timeZone?.trim() || undefined;
+    const cacheVersion = this.getSearchCacheVersion();
 
     // ── Live search ──
     try {
@@ -44,6 +48,7 @@ export class SearchService {
           question: normalizedQuestion,
           responseLanguage: lang,
           timeZone,
+          cacheVersion,
         });
 
         if (redisCached && this.isCacheableCachedAnswer(redisCached)) {
@@ -109,13 +114,14 @@ export class SearchService {
       });
 
       const answerMode = result.answerMode ?? result.analytics?.answerMode ?? 'gemini';
+      const responseAnalytics = this.withCacheVersion(result.analytics ?? null, cacheVersion);
       const response = {
         answer: result.answer,
         confidence: result.confidence,
         sources: result.citations,
         noMemory: result.noMemory ?? false,
         suggestions: result.suggestions ?? [],
-        analytics: result.analytics ?? null,
+        analytics: responseAnalytics,
         modelError: result.modelError ?? null,
         answerMode,
         debugTrace: includeDebugTrace ? (result.debugTrace ?? null) : null,
@@ -134,6 +140,7 @@ export class SearchService {
             question: normalizedQuestion,
             responseLanguage: lang,
             timeZone,
+            cacheVersion,
           },
           {
             answer: result.answer,
@@ -141,7 +148,7 @@ export class SearchService {
             sources: result.citations ?? [],
             noMemory: result.noMemory ?? false,
             suggestions: result.suggestions ?? [],
-            analytics: result.analytics ?? null,
+            analytics: responseAnalytics,
             answerMode,
             modelError: result.modelError ?? null,
           },
@@ -156,9 +163,9 @@ export class SearchService {
         answer: result.answer,
         confidence: result.confidence,
         sourcesJson: result.citations?.length ? JSON.stringify(result.citations) : null,
-        analyticsJson: result.analytics ? JSON.stringify(result.analytics) : null,
+        analyticsJson: responseAnalytics ? JSON.stringify(responseAnalytics) : null,
         responseLanguage: lang,
-        tokenCount: result.analytics?.tokenUsage?.totalTokens ?? 0,
+        tokenCount: responseAnalytics?.tokenUsage?.totalTokens ?? 0,
       }).catch((err) => {
         console.warn('Failed to save search history (non-fatal):', err);
       });
@@ -268,6 +275,8 @@ export class SearchService {
     if (this.isLikelyIncompleteAnswer(value.answer)) return false;
     if (value.modelError || value.noMemory === true) return false;
 
+    if (!this.hasCurrentCacheVersion(value.analytics)) return false;
+
     const analyticsAnswerMode = this.getAnalyticsAnswerMode(value.analytics);
     const answerMode = value.answerMode === 'cache' ? analyticsAnswerMode : value.answerMode;
     return ['gemini', 'fast_path'].includes(answerMode ?? '');
@@ -276,6 +285,7 @@ export class SearchService {
   private isCacheableStoredAnswer(analytics: Record<string, unknown> | null, answer?: string) {
     if (this.isLikelyIncompleteAnswer(answer)) return false;
     if (!analytics) return false;
+    if (!this.hasCurrentCacheVersion(analytics)) return false;
 
     const status = typeof analytics.status === 'string' ? analytics.status : undefined;
     const answerMode = this.getAnalyticsAnswerMode(analytics);
@@ -287,6 +297,47 @@ export class SearchService {
 
     const answerMode = (analytics as { answerMode?: unknown }).answerMode;
     return typeof answerMode === 'string' ? answerMode : undefined;
+  }
+
+  private getSearchCacheVersion() {
+    const answerModel = normalizeTuturuuuModelForCache(
+      process.env.TUTURUUU_RESPONSE_MODEL ?? process.env.GEMINI_ANSWER_MODEL,
+      DEFAULT_TUTURUUU_ANSWER_MODEL,
+    );
+    const embeddingModel = normalizeTuturuuuModelForCache(
+      process.env.TUTURUUU_EMBEDDING_MODEL ?? process.env.GEMINI_EMBEDDING_MODEL,
+      DEFAULT_TUTURUUU_EMBEDDING_MODEL,
+    );
+
+    return [
+      SEARCH_CACHE_PIPELINE_VERSION,
+      `answer:${answerModel}`,
+      `embedding:${embeddingModel}`,
+      `limit:${DEFAULT_SEARCH_LIMIT}`,
+    ].join('|');
+  }
+
+  private withCacheVersion<T extends Record<string, any> | null>(
+    analytics: T,
+    cacheVersion: string,
+  ): T & { cacheVersion: string } | null {
+    if (!analytics || typeof analytics !== 'object' || Array.isArray(analytics)) {
+      return null;
+    }
+
+    return {
+      ...analytics,
+      cacheVersion,
+    };
+  }
+
+  private hasCurrentCacheVersion(analytics: unknown) {
+    if (!analytics || typeof analytics !== 'object' || Array.isArray(analytics)) {
+      return false;
+    }
+
+    const version = (analytics as { cacheVersion?: unknown }).cacheVersion;
+    return version === this.getSearchCacheVersion();
   }
 
   private isLikelyIncompleteAnswer(answer: unknown) {
@@ -342,4 +393,15 @@ export class SearchService {
       return null;
     }
   }
+}
+
+function normalizeTuturuuuModelForCache(value: string | undefined, fallback: string) {
+  const trimmed = value?.trim();
+  if (!trimmed) return fallback;
+  if (trimmed === 'gemini-embedding-001') return DEFAULT_TUTURUUU_EMBEDDING_MODEL;
+  if (trimmed === 'gemini-2.5-flash' || trimmed === 'gemini-2.5-flash-lite') {
+    return DEFAULT_TUTURUUU_ANSWER_MODEL;
+  }
+  if (trimmed.startsWith('gemini-')) return `google/${trimmed}`;
+  return trimmed;
 }

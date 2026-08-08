@@ -17,6 +17,7 @@ export interface RetrievalFilters {
   maxDistance?: number;
   lexicalWeight?: number;
   vectorWeight?: number;
+  allowTemporalFallback?: boolean;
 }
 
 export interface MemorySearchHit {
@@ -334,6 +335,7 @@ async function retrieveTemporalFallback(
 
 function shouldUseTemporalFallback(filters: RetrievalFilters): boolean {
   if (!filters.startDate || !filters.endDate) return false;
+  if (filters.allowTemporalFallback) return true;
 
   const start = filters.startDate.getTime();
   const end = filters.endDate.getTime();

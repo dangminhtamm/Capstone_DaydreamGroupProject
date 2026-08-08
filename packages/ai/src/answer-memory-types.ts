@@ -41,6 +41,17 @@ export interface QueryAnalytics {
   chunksRetrieved: number;
   status: "success" | "no_memory" | "error";
   answerMode: AnswerMode;
+  cacheVersion?: string;
+}
+
+export interface MemoryIndexDiagnostics {
+  embeddingModel: string;
+  totalChunks: number;
+  embeddedChunks: number;
+  currentEmbeddingModelChunks: number;
+  staleEmbeddingModelChunks: number;
+  latestOccurredAt?: string | null;
+  issue: "none" | "empty_index" | "missing_embeddings" | "stale_embeddings" | "mixed_embeddings";
 }
 
 export interface MemoryDebugTrace {
@@ -50,6 +61,7 @@ export interface MemoryDebugTrace {
   status: "success" | "no_memory" | "error";
   reason: string;
   chunksRetrieved: number;
+  diagnostics?: MemoryIndexDiagnostics;
   topChunks: Array<{
     id: string;
     sourceType: string;
@@ -78,7 +90,7 @@ export interface AnswerMemoryResult {
   debugTrace?: MemoryDebugTrace;
   modelError?: {
     status?: number;
-    kind: "quota" | "service_unavailable" | "validation" | "transient" | "unknown";
+    kind: "auth" | "quota" | "billing" | "model_config" | "service_unavailable" | "validation" | "transient" | "unknown";
     message: string;
   };
 }

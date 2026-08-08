@@ -104,7 +104,10 @@ export function answerPassesEvidenceChecks(
   const answerNames = extractNamedEntityTokens(answer);
   const unsupportedNames = answerNames.filter((name) => {
     const normalizedName = normalizeForIntent(name);
-    return normalizedName.length >= 3 && !normalizedEvidence.includes(normalizedName);
+    return (
+      normalizedName.length >= 3 &&
+      !namedEntitySupportedByEvidence(normalizedName, normalizedEvidence)
+    );
   });
 
   return unsupportedNames.length === 0;
@@ -211,8 +214,15 @@ function extractNamedEntityTokens(value: string): string[] {
     "Mình",
     "Bạn",
     "Dựa",
+    "Dựa Trên",
     "Vào",
     "Trong",
+    "Nhóm",
+    "Theo",
+    "Quyết",
+    "Quyết Định",
+    "Kế Hoạch",
+    "Tóm Tắt",
   ]);
 
   const matches = value.match(/\b[\p{Lu}][\p{L}\p{M}\p{N}_-]*(?:\s+[\p{Lu}][\p{L}\p{M}\p{N}_-]*){0,3}\b/gu) ?? [];
@@ -222,6 +232,33 @@ function extractNamedEntityTokens(value: string): string[] {
       .map((match) => match.trim())
       .filter((match) => match.length >= 3 && !ignored.has(match)),
   )];
+}
+
+function namedEntitySupportedByEvidence(
+  normalizedName: string,
+  normalizedEvidence: string,
+): boolean {
+  if (normalizedEvidence.includes(normalizedName)) return true;
+
+  const aliases = namedEntityAliases(normalizedName);
+  return aliases.some((alias) => normalizedEvidence.includes(alias));
+}
+
+function namedEntityAliases(normalizedName: string): string[] {
+  const aliasesByName: Record<string, string[]> = {
+    "ai": ["artificial intelligence"],
+    "ai memory": ["memory", "grounded search", "second brain"],
+    "ask your second brain": ["second brain", "grounded search", "ai memory"],
+    "attachment": ["attachments", "file dinh kem", "tep dinh kem", "uploaded file", "upload"],
+    "attachments": ["attachment", "file dinh kem", "tep dinh kem", "uploaded file", "upload"],
+    "calendar": ["google calendar", "lich", "su kien", "events"],
+    "diary": ["diary entries", "nhat ky", "journal"],
+    "google calendar": ["calendar", "lich", "su kien"],
+    "google contacts": ["contacts", "danh ba", "people api"],
+    "search": ["grounded search", "ai memory", "semantic search"],
+  };
+
+  return aliasesByName[normalizedName] ?? [];
 }
 
 function quoteContainsMeaningfulPhrase(value: string, quote: string): boolean {

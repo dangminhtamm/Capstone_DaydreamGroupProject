@@ -22,7 +22,7 @@ The indexing drain also needs:
 
 ```bash
 DATABASE_URL="postgresql://..."
-GEMINI_API_KEY="..."
+TUTURUUU_AI_API_KEY="..."
 SUPABASE_URL="..."
 SUPABASE_SERVICE_ROLE_KEY="..."
 REDIS_URL="redis://localhost:6379"

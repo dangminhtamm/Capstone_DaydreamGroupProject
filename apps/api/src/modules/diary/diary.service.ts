@@ -4,8 +4,10 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
-import { GoogleGenerativeAI } from '@google/generative-ai';
-import { getGeminiAnswerModel } from '@second-brain/ai';
+import {
+  generateAiText,
+  getGeminiAnswerModel,
+} from '@second-brain/ai';
 import {
   deleteMemoryChunksForSource,
 } from '@second-brain/db';
@@ -439,26 +441,8 @@ export class DiaryService {
   // ---------------------------------------------------------------------------
   // AI Writing Copilot
   // ---------------------------------------------------------------------------
-  private _geminiClient: GoogleGenerativeAI | null = null;
-
-  private getGeminiClient(): GoogleGenerativeAI {
-    if (!this._geminiClient) {
-      const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey) {
-        throw new InternalServerErrorException('GEMINI_API_KEY is not configured');
-      }
-      this._geminiClient = new GoogleGenerativeAI(apiKey);
-    }
-    return this._geminiClient;
-  }
-
   async copilot(userId: string, text: string, action: string) {
     const modelName = getGeminiAnswerModel();
-    const model = this.getGeminiClient().getGenerativeModel({
-      model: modelName,
-      generationConfig: { temperature: 0.7 },
-    });
-
     const systemContext = [
       'You are the AI Writing Copilot for a Smart Personal Diary app called "Second Brain".',
       'The user writes daily diary entries to record their thoughts, emotions, and activities.',
@@ -511,8 +495,11 @@ export class DiaryService {
     const prompt = `${systemContext}\n\n### Task\n${taskInstruction}\n\n### Diary Entry\n${text}`;
 
     try {
-      const result = await model.generateContent(prompt);
-      const generatedText = result.response.text().trim();
+      const generatedText = await generateAiText({
+        model: modelName,
+        prompt,
+        temperature: 0.7,
+      });
       return { result: generatedText };
     } catch (error) {
       console.error(`Copilot AI Error [action=${action}, model=${modelName}]:`, error);

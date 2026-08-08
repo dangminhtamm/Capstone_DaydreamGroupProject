@@ -300,6 +300,9 @@ export function buildQuestionAwareFallbackAnswer(
     if (fallbackTopic === "latency") {
       return [`${lead} Lý do liên quan đến việc tách retrieval latency và answer generation là:`, bullets].join("\n");
     }
+    if (fallbackTopic === "progress") {
+      return [`${lead} Các việc nổi bật mình tìm thấy trong khoảng thời gian này là:`, bullets].join("\n");
+    }
     if (fallbackTopic === "mood" && isStressIntent(normalizedQuestion)) {
       return [`${lead} Nguyên nhân stress được ghi lại là:`, bullets].join("\n");
     }
@@ -323,6 +326,9 @@ export function buildQuestionAwareFallbackAnswer(
   }
   if (fallbackTopic === "latency") {
     return [`${lead} The reason for separating retrieval latency from answer generation was:`, bullets].join("\n");
+  }
+  if (fallbackTopic === "progress") {
+    return [`${lead} The main things I found across that time range were:`, bullets].join("\n");
   }
   if (fallbackTopic === "mood" && isStressIntent(normalizedQuestion)) {
     return [`${lead} The recorded source of stress was:`, bullets].join("\n");

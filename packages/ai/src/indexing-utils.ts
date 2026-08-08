@@ -1,4 +1,7 @@
-import type { AdvancedEmbeddingProvider } from "./embedding.ts";
+import {
+  TUTURUUU_EMBEDDING_MODEL,
+  type AdvancedEmbeddingProvider,
+} from "./embedding.ts";
 import type { MemoryChunkMetadata } from "./types.ts";
 
 export interface ExtractedEntityMention {
@@ -49,7 +52,7 @@ export function normalizeOptionalDateToIso(value: Date | string | null | undefin
   return date.toISOString();
 }
 
-export async function withEmbeddings<T extends { text: string }>(
+export async function withEmbeddings<T extends { text: string; metadata?: unknown }>(
   chunks: T[],
   embeddingProvider: Pick<AdvancedEmbeddingProvider, "embedDocument">,
 ): Promise<Array<T & { embedding: number[] }>> {
@@ -64,9 +67,11 @@ export async function withEmbeddings<T extends { text: string }>(
       const index = nextIndex;
       nextIndex++;
       const chunk = chunks[index];
+      const embedding = await embeddingProvider.embedDocument(chunk.text);
       results[index] = {
         ...chunk,
-        embedding: await embeddingProvider.embedDocument(chunk.text),
+        metadata: annotateEmbeddingMetadata(chunk.metadata, embedding.length) as T["metadata"],
+        embedding,
       };
     }
   }
@@ -75,6 +80,20 @@ export async function withEmbeddings<T extends { text: string }>(
     Array.from({ length: Math.min(concurrency, chunks.length) }, () => worker()),
   );
   return results;
+}
+
+function annotateEmbeddingMetadata(metadata: unknown, dimension: number): unknown {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return metadata;
+  }
+
+  return {
+    ...metadata,
+    embeddingProvider: "tuturuuu",
+    embeddingModel: TUTURUUU_EMBEDDING_MODEL,
+    embeddingDimension: dimension,
+    embeddingUpdatedAt: new Date().toISOString(),
+  };
 }
 
 export function extractEntityMentionsFromMetadata(

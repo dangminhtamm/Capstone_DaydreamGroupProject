@@ -22,10 +22,12 @@
     "eval:report": "node --experimental-strip-types scripts/eval-report.ts",
     "eval:report:ci": "MEMORY_REPORT_FAIL_ON_THRESHOLD=1 node --experimental-strip-types scripts/eval-report.ts",
     "eval:prepare-report": "pnpm run seed:memory-eval && pnpm run eval:report",
+    "eval:smoke:ci": "node --experimental-strip-types scripts/eval-smoke.ts",
     "eval:retrieval:ci": "MEMORY_EVAL_FAIL_ON_ERROR=1 MEMORY_RETRIEVAL_EVAL_LIMIT=all node --experimental-strip-types scripts/eval-retrieval.ts",
     "eval:answer:ci": "MEMORY_EVAL_FAIL_ON_ERROR=1 MEMORY_EVAL_LIMIT=all node --experimental-strip-types scripts/eval-memory.ts",
     "seed:memory-eval": "node --experimental-strip-types scripts/seed-memory-evaluation.ts",
     "index:memory": "node --experimental-strip-types scripts/insert-memory-chunks.ts",
+    "reembed:memory": "node --experimental-strip-types scripts/reembed-memory-chunks.ts",
     "test:chunker": "node --experimental-strip-types scripts/test-chunker.ts",
     "test": "node --experimental-strip-types --test src/*.test.ts",
     "test:embedding": "node --experimental-strip-types scripts/test-embedding.ts"

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadLocalEnv } from "./env.ts";
+import { aiGatewayEnvHint, hasAiGatewayKey, loadLocalEnv } from "./env.ts";
 import { resolveEvaluationUserId } from "./eval-user.ts";
 
 loadLocalEnv();
@@ -51,8 +51,8 @@ const seedDelayMs = Number(process.env.MEMORY_SEED_DELAY_MS ?? 13_000);
 
 if (process.argv.includes("--help") || process.argv.includes("-h")) {
   printHelp();
-} else if (!process.env.GEMINI_API_KEY) {
-  console.error("Set GEMINI_API_KEY before seeding memory evaluation data.");
+} else if (!hasAiGatewayKey()) {
+  console.error(aiGatewayEnvHint("seeding memory evaluation data"));
   process.exitCode = 1;
 } else if (!process.env.DATABASE_URL) {
   console.error("Set DATABASE_URL before seeding memory evaluation data.");
@@ -270,7 +270,7 @@ function printHelp(): void {
 Second Brain memory evaluation seed
 
 Required env:
-  GEMINI_API_KEY
+  TUTURUUU_AI_API_KEY
   DATABASE_URL
   SAMPLE_USER_ID or SAMPLE_USER_EMAIL
 

@@ -1,7 +1,15 @@
 export type ContactConnectionStatus = {
+  source?: 'contact';
+  oauthMode?: 'all_google_sources';
   connected: boolean;
+  scopes?: string[];
+  requestedScopes?: string[];
+  workspaceScopes?: string[];
   contactCount: number;
   lastSyncedAt: string | null;
+  lastError?: string | null;
+  lastErrorAt?: string | null;
+  syncCursor?: unknown | null;
 };
 
 export type GoogleContact = {

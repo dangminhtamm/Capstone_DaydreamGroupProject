@@ -42,5 +42,8 @@ jobs:
       - name: Test
         run: pnpm test
 
+      - name: AI memory smoke evaluation
+        run: pnpm run ci:memory-eval
+
       - name: Audit runtime dependencies
         run: pnpm run audit

@@ -52,7 +52,7 @@ _Transform unstructured thoughts into structured, retrievable memory with AI-pow
                                      │
                                      ▼
                            ┌──────────────────┐
-                           │  Gemini API      │
+                           │  AI Gateway      │
                            │  (Embeddings +   │
                            │   Answer Gen)    │
                            └──────────────────┘
@@ -162,7 +162,7 @@ Capstone_DaydreamGroupProject/
 - **PostgreSQL** with the [`pgvector`](https://github.com/pgvector/pgvector) extension enabled
 - A [Supabase](https://supabase.com/) project (for Auth & hosted Postgres)
 - A [Google Cloud](https://console.cloud.google.com/) project with Calendar API enabled
-- A [Gemini API key](https://aistudio.google.com/apikey) for embeddings & answer generation
+- A Tuturuuu AI key for embeddings & answer generation
 
 ### 1. Clone & Install
 
@@ -185,18 +185,24 @@ DIRECT_URL="postgresql://user:pass@host:5432/postgres"
 SUPABASE_URL="https://YOUR_PROJECT.supabase.co"
 SUPABASE_JWT_SECRET="your-jwt-secret"
 SUPABASE_SERVICE_KEY="your-service-role-key"
+ADMIN_EMAILS="owner@example.com,teammate@example.com" # optional bootstrap admins
 
 # ── Google OAuth (Calendar, Contacts, Drive, Gmail Sync) ──
 GOOGLE_CLIENT_ID="your-google-client-id"
 GOOGLE_CLIENT_SECRET="your-google-client-secret"
 GOOGLE_REDIRECT_URI="http://localhost:3001/api/calendar/oauth/callback"
 
-# ── AI / Gemini ───────────────────────────────────────────
-GEMINI_API_KEY="your-gemini-api-key"
-GEMINI_EMBEDDING_MODEL="gemini-embedding-001"       # optional, defaults to gemini-embedding-001
-GEMINI_ANSWER_MODEL="gemini-2.5-flash"               # optional, defaults to gemini-2.5-flash
-INDEXING_JOB_DELAY_MS="15000"                        # optional, avoids Gemini Flash free-tier rate limits during local drain
+# ── AI / Tuturuuu metered API ──────────────────────────────
+TUTURUUU_AI_API_KEY="ttr_ai_your-one-time-secret"
+TUTURUUU_AI_BASE_URL="https://ai.tuturuuu.com/v1"      # optional, defaults to Tuturuuu production
+TUTURUUU_EMBEDDING_MODEL="google/gemini-embedding-2"   # optional; confirm allowed models with GET /v1/models
+TUTURUUU_ANSWER_MODEL="google/gemini-3.5-flash-lite"  # optional; google/gemini-3.6-flash may require workspace metering support
+INDEXING_JOB_DELAY_MS="15000"                          # optional, avoids rate limits during local drain
 ```
+
+Core AI memory uses Tuturuuu's metered `/v1/responses` and `/v1/embeddings`
+endpoints with `Authorization: Bearer $TUTURUUU_AI_API_KEY`. Keep the `ttr_ai_`
+secret server-side only.
 
 Create **`apps/web/.env.local`**:
 

@@ -87,6 +87,7 @@ describe('SearchService', () => {
   it('returns cached answers for unfiltered repeat questions', async () => {
     process.env.MEMORY_DEBUG_TRACE = 'false';
     prisma.user.findUnique.mockResolvedValue({ id: 'user-1' });
+    const cacheVersion = (service as any).getSearchCacheVersion();
     (findCachedAnswer as jest.Mock).mockResolvedValue({
       answer: 'Cached answer',
       confidence: 'medium',
@@ -95,6 +96,7 @@ describe('SearchService', () => {
         tokenUsage: { totalTokens: 99 },
         status: 'success',
         answerMode: 'gemini',
+        cacheVersion,
       }),
     });
 
@@ -118,6 +120,45 @@ describe('SearchService', () => {
       cached: true,
     });
     expect(result.sources).toHaveLength(1);
+  });
+
+  it('skips cached answers from an older recall pipeline version', async () => {
+    process.env.MEMORY_DEBUG_TRACE = 'false';
+    prisma.user.findUnique.mockResolvedValue({ id: 'user-1' });
+    (findCachedAnswer as jest.Mock).mockResolvedValue({
+      answer: 'Old model answer',
+      confidence: 'high',
+      sources_json: JSON.stringify([{ marker: 'S1', quote: 'old source' }]),
+      analytics_json: JSON.stringify({
+        tokenUsage: { totalTokens: 41 },
+        status: 'success',
+        answerMode: 'gemini',
+        cacheVersion: 'ai-recall-v0',
+      }),
+    });
+    (answerMemory as jest.Mock).mockResolvedValue({
+      answer: 'Fresh current-pipeline answer',
+      confidence: 'high',
+      citations: [{ marker: 'S1', quote: 'fresh source' }],
+      analytics: {
+        tokenUsage: { totalTokens: 33 },
+        status: 'success',
+        answerMode: 'gemini',
+      },
+      answerMode: 'gemini',
+    });
+
+    const result = await service.answerQuestion('supabase-user-1', {
+      question: 'What did I work on?',
+      responseLanguage: 'en',
+      limit: 8,
+    });
+
+    expect(answerMemory).toHaveBeenCalled();
+    expect(result).toMatchObject({
+      answer: 'Fresh current-pipeline answer',
+      cached: false,
+    });
   });
 
   it('skips cached fallback answers and generates a fresh answer', async () => {

@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { performance } from "node:perf_hooks";
-import { loadLocalEnv } from "./env.ts";
+import { aiGatewayEnvHint, hasAiGatewayKey, loadLocalEnv } from "./env.ts";
 import { resolveEvaluationUserId } from "./eval-user.ts";
 
 loadLocalEnv();
@@ -65,8 +65,8 @@ const noDataSimilarityThreshold = Number(
   process.env.MEMORY_RETRIEVAL_NO_DATA_MAX_SIMILARITY ?? 0.55,
 );
 
-if (!process.env.GEMINI_API_KEY) {
-  console.error("Set GEMINI_API_KEY before running retrieval evaluation.");
+if (!hasAiGatewayKey()) {
+  console.error(aiGatewayEnvHint("running retrieval evaluation"));
   process.exitCode = 1;
 } else if (!process.env.DATABASE_URL) {
   console.error("Set DATABASE_URL before running retrieval evaluation.");

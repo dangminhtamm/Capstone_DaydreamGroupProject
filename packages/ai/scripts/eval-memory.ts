@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadLocalEnv } from "./env.ts";
+import { aiGatewayEnvHint, hasAiGatewayKey, loadLocalEnv } from "./env.ts";
 import { resolveEvaluationUserId } from "./eval-user.ts";
 
 loadLocalEnv();
@@ -52,8 +52,8 @@ const evalLimit = process.env.MEMORY_EVAL_LIMIT
   : undefined;
 const evalDelayMs = Number(process.env.MEMORY_EVAL_DELAY_MS ?? 13_000);
 
-if (!process.env.GEMINI_API_KEY) {
-  console.error("Set GEMINI_API_KEY before running answer evaluation.");
+if (!hasAiGatewayKey()) {
+  console.error(aiGatewayEnvHint("running answer evaluation"));
   process.exitCode = 1;
 } else if (!process.env.DATABASE_URL) {
   console.error("Set DATABASE_URL before running answer evaluation.");

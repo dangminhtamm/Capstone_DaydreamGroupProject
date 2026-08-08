@@ -1,4 +1,4 @@
-import { loadLocalEnv } from "./env.ts";
+import { aiGatewayEnvHint, hasAiGatewayKey, loadLocalEnv } from "./env.ts";
 import { generateSemanticChunks } from "../src/chunker.ts";
 
 loadLocalEnv();
@@ -6,8 +6,8 @@ loadLocalEnv();
 const sampleDiaryText = `Tối qua đi nhậu với team, chốt lại là sang tuần phải đẩy nhanh tiến độ làm UI. Lâu rồi mới thấy thoải mái nhẹ đầu như vậy.`.trim();
 
 async function runTest() {
-  if (!process.env.GEMINI_API_KEY) {
-    console.error("❌ ERROR: Please configure the GEMINI_API_KEY environment variable before running the test.");
+  if (!hasAiGatewayKey()) {
+    console.error(`❌ ERROR: ${aiGatewayEnvHint("running the chunker test")}`);
     process.exitCode = 1;
     return;
   }

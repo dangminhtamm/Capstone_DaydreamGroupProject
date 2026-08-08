@@ -12,6 +12,7 @@ import { SummaryService } from './modules/summary/summary.service';
 import { DiaryController } from './modules/diary/diary.controller';
 import { DiaryService } from './modules/diary/diary.service';
 import { JwtAuthGuard } from './modules/auth/jwt-auth.guard';
+import { AdminGuard } from './modules/auth/admin.guard';
 import { PrismaService } from './prisma/prisma.service';
 import { SearchController } from './modules/search/search.controller';
 import { SearchService } from './modules/search/search.service';
@@ -22,6 +23,7 @@ import { IndexingService } from './modules/indexing/indexing.service';
 import { ContactsModule } from './modules/contacts/contacts.module';
 import { DriveModule } from './modules/drive/drive.module';
 import { GmailModule } from './modules/gmail/gmail.module';
+import { GoogleConnectionsModule } from './modules/google-connections/google-connections.module';
 
 @Module({
   imports: [
@@ -34,6 +36,7 @@ import { GmailModule } from './modules/gmail/gmail.module';
     ContactsModule,
     DriveModule,
     GmailModule,
+    GoogleConnectionsModule,
   ],
   controllers: [
     AppController,
@@ -49,6 +52,7 @@ import { GmailModule } from './modules/gmail/gmail.module';
     DiaryService,
     PrismaService,
     JwtAuthGuard,
+    AdminGuard,
     StorageService,
     SummaryService,
     SearchService,

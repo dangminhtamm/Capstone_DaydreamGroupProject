@@ -50,7 +50,7 @@ describe('UploadController', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    process.env.GEMINI_API_KEY = 'test-gemini-key';
+    process.env.TUTURUUU_AI_API_KEY = 'test-tuturuuu-key';
     controller = new UploadController(storageService as any, prisma as any);
     mockGenerateContent.mockResolvedValue({
       response: {

@@ -9,7 +9,7 @@
  *   1. Run insert-memory-chunks.ts first to populate the DB
  *   2. Set the following in packages/db/.env:
  *        DATABASE_URL=postgresql://...
- *        GEMINI_API_KEY=AIza...
+ *        TUTURUUU_AI_API_KEY=...
  *        SAMPLE_USER_ID=<existing users.id>
  *
  * Run with:
@@ -25,8 +25,8 @@ async function main(): Promise<void> {
   const userId = process.env.SAMPLE_USER_ID;
   if (!userId) throw new Error("Set SAMPLE_USER_ID in your .env file.");
 
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error("Set GEMINI_API_KEY in your .env file.");
+  const apiKey = process.env.TUTURUUU_AI_API_KEY;
+  if (!apiKey) throw new Error("Set TUTURUUU_AI_API_KEY in your .env file.");
 
   const prisma = createPrismaClient();
   const questions = [

@@ -33,6 +33,10 @@ export interface MemoryChunkMetadata {
   calendarEventId?: string;
   diaryEntryId?: string;
   fileType?: string;
+  embeddingProvider?: string;
+  embeddingModel?: string;
+  embeddingDimension?: number;
+  embeddingUpdatedAt?: string;
 }
 
 export interface MemoryChunk {

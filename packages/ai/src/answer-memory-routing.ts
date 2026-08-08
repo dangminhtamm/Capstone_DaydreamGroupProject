@@ -104,7 +104,9 @@ export function requiresGenerativeReasoning(question: string): boolean {
 }
 
 export function selectPromptSourceLimit(question: string, intent: MemoryIntent): number {
-  const configured = Math.min(Math.max(DEFAULT_PROMPT_SOURCE_LIMIT, 2), 6);
+  const configured = Math.min(Math.max(DEFAULT_PROMPT_SOURCE_LIMIT, 2), 8);
+  if (isBroadTemporalSynthesisQuestion(question, intent)) return Math.max(configured, 8);
+  if (intent === "progress") return Math.max(configured, 8);
   if (["feedback", "blocker", "latency"].includes(intent)) return Math.max(configured, 6);
   if (!requiresGenerativeReasoning(question)) return configured;
   return Math.max(configured, 6);
@@ -112,6 +114,12 @@ export function selectPromptSourceLimit(question: string, intent: MemoryIntent):
 
 export function selectMaxAnswerTokens(question: string): number {
   const configured = Math.min(Math.max(DEFAULT_MAX_ANSWER_TOKENS, 256), 2048);
+  if (isBroadTemporalSynthesisQuestion(question)) {
+    return Math.min(
+      Math.max(DEFAULT_REASONING_MAX_ANSWER_TOKENS, configured),
+      4096,
+    );
+  }
   if (!requiresGenerativeReasoning(question)) return configured;
   return Math.min(
     Math.max(DEFAULT_REASONING_MAX_ANSWER_TOKENS, configured),
@@ -131,6 +139,88 @@ export function shouldUseIntentEvidenceFastPath(
   // Auto should stay cheap for direct lookup questions, but use Gemini when the
   // user explicitly asks for synthesis, causality, comparison, or analysis.
   return !hasAutoDeepReasoningCue(question);
+}
+
+export function shouldUseAutoFastPath(
+  question: string,
+  intent: MemoryIntent,
+  filters: RetrievalFilters = {},
+): boolean {
+  if (hasAutoDeepReasoningCue(question)) return false;
+  if (hasExplicitTemporalFilter(filters)) {
+    return !requiresGenerativeReasoning(question) &&
+      !isBroadTemporalSynthesisQuestion(question, intent, filters);
+  }
+  if (isBroadTemporalSynthesisQuestion(question, intent, filters)) return false;
+  if (isEvidenceFirstIntent(intent)) return true;
+  if (["calendar", "attachment", "task"].includes(intent)) {
+    return hasDirectLookupCue(question);
+  }
+
+  return hasDirectLookupCue(question) || hasExplicitDateCue(question);
+}
+
+export function isBroadTemporalSynthesisQuestion(
+  question: string,
+  intent: MemoryIntent = "generic",
+  filters: RetrievalFilters = {},
+): boolean {
+  const normalized = normalizeForIntent(question);
+  const broadTemporalCue = includesAny(normalized, [
+    "recently",
+    "recent",
+    "lately",
+    "latest",
+    "newest",
+    "this week",
+    "last week",
+    "this month",
+    "last month",
+    "gần đây",
+    "gan day",
+    "gần nhất",
+    "gan nhat",
+    "mới nhất",
+    "moi nhat",
+    "tuần này",
+    "tuan nay",
+    "tuần trước",
+    "tuan truoc",
+    "tháng này",
+    "thang nay",
+    "tháng trước",
+    "thang truoc",
+  ]);
+  const workOrSynthesisCue = intent === "progress" || includesAny(normalized, [
+    "work on",
+    "worked on",
+    "working on",
+    "what did i work",
+    "what have i worked",
+    "what did i do",
+    "what have i done",
+    "summarize",
+    "summary",
+    "progress",
+    "accomplish",
+    "accomplished",
+    "làm gì",
+    "lam gi",
+    "làm được gì",
+    "lam duoc gi",
+    "đã làm gì",
+    "da lam gi",
+    "tóm tắt",
+    "tom tat",
+    "tiến độ",
+    "tien do",
+  ]);
+  const temporalSpanMs = filters.startDate && filters.endDate
+    ? filters.endDate.getTime() - filters.startDate.getTime()
+    : 0;
+  const broadFilter = temporalSpanMs > 2 * 24 * 60 * 60 * 1000;
+
+  return workOrSynthesisCue && (broadTemporalCue || broadFilter);
 }
 
 export function buildIntentInstruction(intent: MemoryIntent, lang: "en" | "vi"): string {
@@ -203,4 +293,58 @@ function hasAutoDeepReasoningCue(question: string): boolean {
     "xu hướng",
     "xu huong",
   ]);
+}
+
+function hasExplicitTemporalFilter(filters: RetrievalFilters): boolean {
+  return Boolean(filters.startDate && filters.endDate);
+}
+
+function hasDirectLookupCue(question: string): boolean {
+  const normalized = normalizeForIntent(question).replace(/[^\p{Letter}\p{Number}\s\/.-]/gu, " ");
+  const compact = normalized.replace(/\s+/g, " ").trim();
+
+  if (!compact) return false;
+
+  return (
+    /^(what|when|who|where|which)\b/u.test(compact) ||
+    /\b(what happened|what did|what was|what were|when was|when did|who was|who did|where was|which)\b/u.test(compact) ||
+    /\b(did i|did we|was i|were we)\b/u.test(compact) ||
+    /\b(khi nao|luc nao|ai la|ai da|o dau|lam gi|da lam gi|hom nay|hom qua|hom truoc|ngay nao|su kien nao|lich nao)\b/u.test(compact)
+  );
+}
+
+function hasExplicitDateCue(question: string): boolean {
+  const normalized = normalizeForIntent(question);
+  return (
+    /\b20\d{2}-\d{1,2}-\d{1,2}\b/u.test(normalized) ||
+    /\b\d{1,2}[\/.-]\d{1,2}(?:[\/.-](?:20)?\d{2})?\b/u.test(normalized) ||
+    includesAny(normalized, [
+      "today",
+      "yesterday",
+      "tomorrow",
+      "this week",
+      "last week",
+      "this month",
+      "last month",
+      "january",
+      "february",
+      "march",
+      "april",
+      "may",
+      "june",
+      "july",
+      "august",
+      "september",
+      "october",
+      "november",
+      "december",
+      "hom nay",
+      "hom qua",
+      "hom truoc",
+      "ngay",
+      "tuan nay",
+      "tuan truoc",
+      "thang",
+    ])
+  );
 }

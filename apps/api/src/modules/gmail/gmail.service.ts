@@ -13,6 +13,13 @@ import { gmail_v1, google } from 'googleapis';
 import { invalidateUserSearchCache } from '../../common/cache/search-answer-cache';
 import { PrismaService } from '../../prisma/prisma.service';
 import { decryptOAuthToken, encryptOAuthToken } from '../calendar/oauth-token-crypto';
+import {
+  GOOGLE_SOURCE_SCOPES,
+  getAllGoogleWorkspaceScopes,
+  getGoogleConnectionStatus,
+  recordGoogleSyncFailure,
+  recordGoogleSyncSuccess,
+} from '../google-connections/google-connections';
 
 type GmailMessageRow = {
   external_id: string;
@@ -97,10 +104,21 @@ export class GmailService {
       this.throwGmailDatabaseException(error, 'Could not load Gmail status from database.');
     }
 
+    const fallbackConnected = user.google_connected && Boolean(user.google_refresh_token || user.google_access_token);
+    const connection = await getGoogleConnectionStatus(this.prisma, user.id, 'gmail', fallbackConnected);
+
     return {
-      connected: user.google_connected && Boolean(user.google_refresh_token || user.google_access_token),
+      source: 'gmail',
+      oauthMode: 'all_google_sources',
+      connected: connection.connected && fallbackConnected,
+      scopes: connection.scopes,
+      requestedScopes: GOOGLE_SOURCE_SCOPES.gmail,
+      workspaceScopes: getAllGoogleWorkspaceScopes(),
       messageCount,
-      lastSyncedAt: latestMessage?.updated_at ?? latestMessage?.received_at ?? null,
+      lastSyncedAt: connection.lastSyncAt ?? latestMessage?.updated_at ?? latestMessage?.received_at ?? null,
+      lastError: connection.lastError,
+      lastErrorAt: connection.lastErrorAt,
+      syncCursor: connection.syncCursor,
     };
   }
 
@@ -209,6 +227,8 @@ export class GmailService {
         return queuedCount;
       });
 
+      await recordGoogleSyncSuccess(this.prisma, { userId: user.id, source: 'gmail' });
+
       return {
         message: 'Gmail messages synced successfully; Gmail memory indexing queued.',
         syncedCount: normalizedMessages.length,
@@ -216,6 +236,7 @@ export class GmailService {
         memoryIndexingStatus: 'queued',
       };
     } catch (error) {
+      await recordGoogleSyncFailure(this.prisma, { userId: user.id, source: 'gmail', error });
       this.throwGoogleApiException(error);
       this.throwGmailDatabaseException(error, 'Could not sync Gmail messages to database.');
       console.error('Failed to sync Gmail messages:', this.getSafeErrorContext(error));

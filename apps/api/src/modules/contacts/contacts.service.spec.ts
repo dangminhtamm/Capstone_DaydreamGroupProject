@@ -66,11 +66,19 @@ describe('ContactsService', () => {
 
     const status = await service.getConnectionStatus('supabase-user-1');
 
-    expect(status).toEqual({
-      connected: true,
-      contactCount: 2,
-      lastSyncedAt: new Date('2026-07-22T10:00:00.000Z'),
-    });
+    expect(status).toEqual(
+      expect.objectContaining({
+        source: 'contact',
+        oauthMode: 'all_google_sources',
+        connected: true,
+        scopes: ['https://www.googleapis.com/auth/contacts.readonly'],
+        requestedScopes: ['https://www.googleapis.com/auth/contacts.readonly'],
+        contactCount: 2,
+        lastSyncedAt: new Date('2026-07-22T10:00:00.000Z'),
+        lastError: null,
+        lastErrorAt: null,
+      }),
+    );
     expect(status).not.toHaveProperty('google_access_token');
   });
 

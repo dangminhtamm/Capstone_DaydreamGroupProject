@@ -1,5 +1,5 @@
 // packages/ai/scripts/insert-memory-chunks.ts
-import { loadLocalEnv } from "./env.ts";
+import { aiGatewayEnvHint, getAiGatewayKey, loadLocalEnv } from "./env.ts";
 
 loadLocalEnv();
 
@@ -9,9 +9,9 @@ async function main(): Promise<void> {
     throw new Error("Set SAMPLE_USER_ID to an existing users.id value before running this script.");
   }
 
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = getAiGatewayKey();
   if (!apiKey) {
-    throw new Error("GEMINI_API_KEY is required to generate embeddings.");
+    throw new Error(aiGatewayEnvHint("generating embeddings"));
   }
 
   const [

@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { PrismaService } from '../../prisma/prisma.service';
+import { isAdminEmail, normalizeUserRole, type AuthenticatedRequestUser } from './user-role';
 
 @Controller('auth')
 export class AuthController {
@@ -17,7 +18,7 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @Post('sync')
   async syncSupabaseUser(
-    @Req() req: { user: { userId: string; email: string } },
+    @Req() req: { user: AuthenticatedRequestUser },
     @Body()
     body: {
       display_name?: string;
@@ -34,6 +35,7 @@ export class AuthController {
     const supabaseId = req.user.userId;
     const email = req.user.email;
     const { display_name } = body;
+    const bootstrapAdmin = isAdminEmail(email);
 
     const user = await this.prisma.user.upsert({
       where: {
@@ -42,17 +44,23 @@ export class AuthController {
       update: {
         email,
         display_name,
+        ...(bootstrapAdmin ? { role: 'admin' } : {}),
       },
       create: {
         email,
         supabaseId,
         display_name,
+        role: bootstrapAdmin ? 'admin' : 'user',
       },
     });
+    const role = normalizeUserRole(user.role);
+    req.user.role = role;
 
     return {
       message: 'User synced successfully.',
       userId: user.id,
+      role,
+      isAdmin: role === 'admin',
       googleConnected: user.google_connected,
     };
   }

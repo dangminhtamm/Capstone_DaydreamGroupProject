@@ -1,4 +1,5 @@
 import { Controller, Get, Param, Post, Request, UseGuards } from '@nestjs/common';
+import { AdminGuard } from '../auth/admin.guard';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { IndexingService } from './indexing.service';
 
@@ -23,6 +24,7 @@ export class IndexingController {
     });
   }
 
+  @UseGuards(JwtAuthGuard, AdminGuard)
   @Post('jobs/:id/requeue')
   requeueJob(@Request() req, @Param('id') jobId: string) {
     return this.indexingService.requeueJob({
@@ -31,6 +33,7 @@ export class IndexingController {
     }, jobId);
   }
 
+  @UseGuards(JwtAuthGuard, AdminGuard)
   @Post('jobs/requeue-dead-letter')
   requeueDeadLetterJobs(@Request() req) {
     return this.indexingService.requeueDeadLetterJobs({

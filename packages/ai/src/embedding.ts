@@ -1,4 +1,9 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import {
+  DEFAULT_TUTURUUU_EMBEDDING_MODEL,
+  embedTuturuuu,
+  normalizeTuturuuuModelName,
+  requireTuturuuuApiKey,
+} from "./tuturuuu-client.ts";
 import type { EmbeddingProvider } from "./types.ts";
 
 export type EmbeddingProviderName = "gemini";
@@ -16,7 +21,7 @@ async function retry<T>(fn: () => Promise<T>, retries = 3): Promise<T> {
       "status" in err &&
       err.status === 503
     ) {
-      console.warn("Retrying Gemini embedding request...");
+      console.warn("Retrying Tuturuuu embedding request...");
       await new Promise((resolve) => setTimeout(resolve, 1000));
       return retry(fn, retries - 1);
     }
@@ -34,8 +39,11 @@ function normalize(values: number[]): number[] {
 export const DEFAULT_EMBEDDING_DIMENSION = 768;
 export const DEFAULT_EMBEDDING_PROVIDER: EmbeddingProviderName = "gemini";
 
-export const GEMINI_EMBEDDING_MODEL =
-  process.env.GEMINI_EMBEDDING_MODEL ?? "gemini-embedding-001";
+export const TUTURUUU_EMBEDDING_MODEL = normalizeTuturuuuModelName(
+  process.env.TUTURUUU_EMBEDDING_MODEL ?? process.env.GEMINI_EMBEDDING_MODEL,
+  DEFAULT_TUTURUUU_EMBEDDING_MODEL,
+);
+export const GEMINI_EMBEDDING_MODEL = TUTURUUU_EMBEDDING_MODEL;
 
 export interface AdvancedEmbeddingProvider extends EmbeddingProvider {
   embedDocument(text: string): Promise<number[]>;
@@ -43,8 +51,6 @@ export interface AdvancedEmbeddingProvider extends EmbeddingProvider {
 }
 
 export class GeminiEmbeddingProvider implements AdvancedEmbeddingProvider {
-  private ai: GoogleGenerativeAI;
-  private model: ReturnType<GoogleGenerativeAI["getGenerativeModel"]>;
   readonly dimension = DEFAULT_EMBEDDING_DIMENSION;
 
   // In-memory LRU cache for query embeddings — avoids re-embedding identical questions
@@ -53,18 +59,8 @@ export class GeminiEmbeddingProvider implements AdvancedEmbeddingProvider {
   private readonly queryCacheMaxSize = Number(process.env.EMBEDDING_CACHE_SIZE ?? 150);
 
   constructor(apiKey?: string) {
-    const key = apiKey ?? process.env.GEMINI_API_KEY;
-
-    if (!key) {
-      throw new Error(
-        "GEMINI_API_KEY is required. Embeddings cannot run without a real provider."
-      );
-    }
-
-    this.ai = new GoogleGenerativeAI(key);
-    this.model = this.ai.getGenerativeModel({
-      model: GEMINI_EMBEDDING_MODEL,
-    });
+    if (apiKey) process.env.TUTURUUU_AI_API_KEY ??= apiKey;
+    requireTuturuuuApiKey();
   }
 
   async embedDocument(text: string): Promise<number[]> {
@@ -111,28 +107,26 @@ export class GeminiEmbeddingProvider implements AdvancedEmbeddingProvider {
       throw new Error("Cannot embed empty text.");
     }
 
-    const result = await retry(async () =>
-      this.model.embedContent({
-        content: {
-          role: "user",
-          parts: [{ text }],
-        },
-        taskType,
-        outputDimensionality: DEFAULT_EMBEDDING_DIMENSION,
-      } as never),
-    );
+    const result = await retry(async () => {
+      void taskType;
+      return embedTuturuuu({
+        input: text,
+        model: GEMINI_EMBEDDING_MODEL,
+        dimensions: DEFAULT_EMBEDDING_DIMENSION,
+      });
+    });
 
-    const values = result.embedding?.values;
+    const values = result.embeddings[0];
 
     if (!values?.length) {
       throw new Error(
-        `Gemini embedding request succeeded but returned no values for model "${GEMINI_EMBEDDING_MODEL}".`
+        `Tuturuuu embedding request succeeded but returned no values for model "${GEMINI_EMBEDDING_MODEL}".`
       );
     }
 
     if (values.length !== DEFAULT_EMBEDDING_DIMENSION) {
       throw new Error(
-        `Gemini embedding dimension mismatch: expected ${DEFAULT_EMBEDDING_DIMENSION}, got ${values.length}.`
+        `Tuturuuu embedding dimension mismatch: expected ${DEFAULT_EMBEDDING_DIMENSION}, got ${values.length}.`
       );
     }
 

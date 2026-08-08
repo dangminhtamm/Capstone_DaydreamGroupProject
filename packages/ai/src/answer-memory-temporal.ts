@@ -213,66 +213,87 @@ function inferTemporalFilters(
 ): RetrievalFilters {
   const explicitDate = detectExplicitDate(normalizedQuestion, now, timeZone);
   if (explicitDate) {
-    return zonedDayRange(explicitDate, timeZone);
+    return withTemporalFallback(zonedDayRange(explicitDate, timeZone));
   }
 
   const localToday = getZonedDateParts(now, timeZone);
 
   if (includesAny(normalizedQuestion, ["today", "hôm nay", "hom nay"])) {
-    return zonedDayRange(localToday, timeZone);
+    return withTemporalFallback(zonedDayRange(localToday, timeZone));
   }
 
   if (includesAny(normalizedQuestion, ["tomorrow", "ngày mai", "ngay mai"])) {
-    return zonedDayRange(addLocalDays(localToday, 1), timeZone);
+    return withTemporalFallback(zonedDayRange(addLocalDays(localToday, 1), timeZone));
   }
 
   if (includesAny(normalizedQuestion, ["yesterday", "hôm qua", "hom qua", "hôm trước", "hom truoc"])) {
-    return zonedDayRange(addLocalDays(localToday, -1), timeZone);
+    return withTemporalFallback(zonedDayRange(addLocalDays(localToday, -1), timeZone));
   }
 
   if (includesAny(normalizedQuestion, ["this week", "tuần này", "tuan nay"])) {
     const start = startOfZonedWeek(localToday);
-    return zonedRangeFromStartAndLocalDayCount(start, 7, timeZone);
+    return withTemporalFallback(zonedRangeFromStartAndLocalDayCount(start, 7, timeZone));
   }
 
   if (includesAny(normalizedQuestion, ["last week", "tuần trước", "tuan truoc"])) {
     const currentWeekStart = startOfZonedWeek(localToday);
     const start = addLocalDays(currentWeekStart, -7);
-    return zonedRangeFromStartAndLocalDayCount(start, 7, timeZone);
+    return withTemporalFallback(zonedRangeFromStartAndLocalDayCount(start, 7, timeZone));
   }
 
   if (includesAny(normalizedQuestion, ["next week", "tuần sau", "tuan sau"])) {
     const currentWeekStart = startOfZonedWeek(localToday);
     const start = addLocalDays(currentWeekStart, 7);
-    return zonedRangeFromStartAndLocalDayCount(start, 7, timeZone);
+    return withTemporalFallback(zonedRangeFromStartAndLocalDayCount(start, 7, timeZone));
   }
 
   if (includesAny(normalizedQuestion, ["last month", "tháng trước", "thang truoc"])) {
-    return zonedMonthRange(localToday.year, localToday.month - 2, timeZone);
+    return withTemporalFallback(zonedMonthRange(localToday.year, localToday.month - 2, timeZone));
   }
 
   if (includesAny(normalizedQuestion, ["this month", "tháng này", "thang nay"])) {
-    return zonedMonthRange(localToday.year, localToday.month - 1, timeZone);
+    return withTemporalFallback(zonedMonthRange(localToday.year, localToday.month - 1, timeZone));
   }
 
   if (includesAny(normalizedQuestion, ["next month", "tháng sau", "thang sau"])) {
-    return zonedMonthRange(localToday.year, localToday.month, timeZone);
+    return withTemporalFallback(zonedMonthRange(localToday.year, localToday.month, timeZone));
   }
 
   const month = detectMonth(normalizedQuestion);
   if (month !== null) {
     const year = mostRecentPastMonthYear(month, now, timeZone);
-    return zonedMonthRange(year, month, timeZone);
+    return withTemporalFallback(zonedMonthRange(year, month, timeZone));
   }
 
-  if (includesAny(normalizedQuestion, ["recently", "recent", "gần đây", "gan day"])) {
-    return {
-      startDate: zonedDateTimeToUtc(addLocalDays(localToday, -30), timeZone),
+  if (
+    includesAny(normalizedQuestion, [
+      "recently",
+      "recent",
+      "lately",
+      "latest",
+      "newest",
+      "gần đây",
+      "gan day",
+      "gần nhất",
+      "gan nhat",
+      "mới nhất",
+      "moi nhat",
+    ])
+  ) {
+    return withTemporalFallback({
+      startDate: zonedDateTimeToUtc(addLocalDays(localToday, -60), timeZone),
       endDate: new Date(zonedDateTimeToUtc(addLocalDays(localToday, 1), timeZone).getTime() - 1),
-    };
+    });
   }
 
   return {};
+}
+
+function withTemporalFallback(filters: RetrievalFilters): RetrievalFilters {
+  return {
+    ...filters,
+    allowTemporalFallback: true,
+  };
 }
 
 function startOfZonedWeek(date: LocalDateParts): LocalDateParts {

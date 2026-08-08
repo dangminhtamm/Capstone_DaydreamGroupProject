@@ -1,4 +1,3 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import { createClient } from '@supabase/supabase-js';
 import { Client as PgClient } from 'pg';
 import * as cron from 'node-cron';
@@ -13,6 +12,9 @@ import {
   resolveMemoryChunkIds,
 } from '@second-brain/db';
 import {
+  createGeminiCompatibleClient,
+  getGeminiCompatibleApiKey,
+  getGeminiRequestOptions,
   getGeminiVisionModel,
   indexMemoryFromAttachment,
   indexMemoryFromCalendar,
@@ -96,13 +98,14 @@ export class DataIngestionJob {
   }
 
   private static async extractTextFromBlob(base64Data: string, mimeType: string): Promise<string> {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) throw new Error('GEMINI_API_KEY is missing in environment variables.');
+    const apiKey = getGeminiCompatibleApiKey();
+    if (!apiKey) throw new Error('TUTURUUU_AI_API_KEY is missing in environment variables.');
 
-    const ai = new GoogleGenerativeAI(apiKey);
-    const model = ai.getGenerativeModel({
-      model: getGeminiVisionModel(),
-    });
+    const ai = createGeminiCompatibleClient(apiKey);
+    const model = ai.getGenerativeModel(
+      { model: getGeminiVisionModel() },
+      getGeminiRequestOptions(apiKey)
+    );
 
     const prompt = `
 You are an extraction engine for a personal Second Brain app.
@@ -822,10 +825,10 @@ Return only the extracted text or factual description.
 
   private static usesLowFreeTierGeminiModel() {
     const configuredModels = [
-      process.env.GEMINI_CHUNK_MODEL,
-      process.env.GEMINI_VISION_MODEL,
-      process.env.GEMINI_SUMMARY_MODEL,
-      process.env.GEMINI_ANSWER_MODEL,
+      process.env.TUTURUUU_CHUNK_MODEL,
+      process.env.TUTURUUU_VISION_MODEL,
+      process.env.TUTURUUU_SUMMARY_MODEL,
+      process.env.TUTURUUU_ANSWER_MODEL,
     ]
       .filter(Boolean)
       .join(' ');

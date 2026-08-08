@@ -19,7 +19,8 @@
     "eval:report": "pnpm --filter @second-brain/ai eval:report",
     "eval:memory-report": "pnpm --filter @second-brain/ai eval:prepare-report",
     "eval:memory-report:ci": "pnpm --filter @second-brain/ai eval:report:ci",
-    "ci:memory-eval": "pnpm --filter @second-brain/ai eval:retrieval:ci && pnpm --filter @second-brain/ai eval:answer:ci"
+    "ci:memory-eval": "pnpm --filter @second-brain/ai eval:smoke:ci",
+    "ci:memory-eval:full": "pnpm --filter @second-brain/ai eval:retrieval:ci && pnpm --filter @second-brain/ai eval:answer:ci"
   },
   "packageManager": "pnpm@10.33.0",
   "devDependencies": {
@@ -34,10 +35,11 @@
   "pnpm": {
     "overrides": {
       "@hono/node-server": "2.0.10",
+      "hono": "4.12.34",
       "@babel/core": "7.29.6",
-      "fast-uri": "3.1.4",
+      "fast-uri": "3.1.5",
       "form-data": "4.0.6",
-      "postcss": "8.5.18",
+      "postcss": "8.5.23",
       "qs": "6.15.3",
       "sharp": "0.35.0",
       "valibot": "1.4.2",

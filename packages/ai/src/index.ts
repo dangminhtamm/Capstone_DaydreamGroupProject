@@ -75,6 +75,7 @@ export {
   DEFAULT_EMBEDDING_PROVIDER,
   GEMINI_EMBEDDING_MODEL,
   GeminiEmbeddingProvider,
+  TUTURUUU_EMBEDDING_MODEL,
   createEmbeddingProvider,
   createDefaultEmbeddingProvider,
   getEmbeddingProviderName,
@@ -89,6 +90,34 @@ export {
   type GeminiTokenUsage,
   type GeminiJsonResultWithMeta,
 } from "./gemini-json.ts";
+export {
+  DEFAULT_TUTURUUU_GEMINI_BASE_URL,
+  createGeminiCompatibleClient,
+  getGeminiCompatibleApiKey,
+  getGeminiCompatibleBaseUrl,
+  getGeminiRequestOptions,
+  requireGeminiCompatibleApiKey,
+} from "./gemini-client.ts";
+export {
+  DEFAULT_TUTURUUU_API_BASE_URL,
+  DEFAULT_TUTURUUU_EMBEDDING_MODEL,
+  DEFAULT_TUTURUUU_RESPONSE_MODEL,
+  canUseTuturuuuApi,
+  embedTuturuuu,
+  generateTuturuuuText,
+  getTuturuuuApiBaseUrl,
+  getTuturuuuApiKey,
+  requireTuturuuuApiKey,
+  type TuturuuuGenerateTextOptions,
+  type TuturuuuGenerateTextResult,
+  type TuturuuuEmbeddingOptions,
+  type TuturuuuEmbeddingResult,
+  type TuturuuuTokenUsage,
+} from "./tuturuuu-client.ts";
+export {
+  generateAiText,
+  type GenerateAiTextOptions,
+} from "./ai-text.ts";
 export {
   DEFAULT_GEMINI_ANSWER_MODEL,
   DEFAULT_GEMINI_CHUNK_MODEL,

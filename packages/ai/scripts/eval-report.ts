@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { performance } from "node:perf_hooks";
-import { loadLocalEnv } from "./env.ts";
+import { aiGatewayEnvHint, hasAiGatewayKey, loadLocalEnv } from "./env.ts";
 import type { AnswerStrategy } from "../src/answer-memory-types.ts";
 
 loadLocalEnv();
@@ -127,8 +127,8 @@ let retrieveMemoryWithEmbedding: AiModule["retrieveMemoryWithEmbedding"];
 
 if (process.argv.includes("--help") || process.argv.includes("-h")) {
   printHelp();
-} else if (!process.env.GEMINI_API_KEY) {
-  console.error("Set GEMINI_API_KEY before running the evaluation report.");
+} else if (!hasAiGatewayKey()) {
+  console.error(aiGatewayEnvHint("running the evaluation report"));
   process.exitCode = 1;
 } else if (!process.env.DATABASE_URL) {
   console.error("Set DATABASE_URL before running the evaluation report.");
@@ -215,7 +215,7 @@ async function assertEvaluationRuntime(
     throw new Error(
       [
         "Evaluation report aborted before writing artifacts because Gemini embeddings are unavailable.",
-        "Fix GEMINI_API_KEY/GEMINI_EMBEDDING_MODEL or billing/quota, then rerun `pnpm --filter @second-brain/ai eval:report`.",
+        "Fix TUTURUUU_AI_API_KEY, TUTURUUU_EMBEDDING_MODEL, or Tuturuuu quota, then rerun `pnpm --filter @second-brain/ai eval:report`.",
         `Preflight error: ${toShortError(error)}`,
       ].join(" "),
     );
@@ -803,7 +803,7 @@ function printHelp(): void {
 Second Brain memory evaluation report
 
 Required env:
-  GEMINI_API_KEY
+  TUTURUUU_AI_API_KEY
   DATABASE_URL
   SAMPLE_USER_ID or SAMPLE_USER_EMAIL
 

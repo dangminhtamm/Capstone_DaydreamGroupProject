@@ -506,6 +506,16 @@ export type SystemHealth = {
       temporalConfigured: boolean;
     };
   };
+  worker?: {
+    available: boolean;
+    ok: boolean;
+    status: 'healthy' | 'missing' | 'stale' | 'stopping' | 'unavailable';
+    id?: string;
+    detail: string;
+    lastHeartbeatAt: string | null;
+    heartbeatAgeMs: number | null;
+    staleAfterMs: number;
+  };
   schema: {
     tables: Record<string, { ok: boolean; required: boolean; detail?: string }>;
     indexes: Record<string, { ok: boolean; required: boolean; detail?: string }>;
@@ -513,6 +523,24 @@ export type SystemHealth = {
   indexingOutbox: {
     available: boolean;
     counts: Record<string, number>;
+    pendingJobCount?: number;
+    dueJobCount?: number;
+    staleProcessingCount?: number;
+    failedJobCount?: number;
+    deadLetterJobCount?: number;
+    oldestPendingAgeMs?: number | null;
+    detail?: string;
+  };
+  embeddingIndex?: {
+    available: boolean;
+    healthy: boolean;
+    embeddingModel: string;
+    totalChunks: number;
+    embeddedChunks: number;
+    currentEmbeddingModelChunks: number;
+    staleEmbeddingModelChunks: number;
+    missingEmbeddingChunks: number;
+    latestChunkUpdatedAt: string | null;
     detail?: string;
   };
   warnings: string[];
@@ -543,6 +571,16 @@ export type IndexingStatus = {
   reason?: string;
   counts: Record<string, number>;
   staleProcessingCount: number;
+  embeddingIndex?: {
+    embeddingModel: string;
+    totalChunks: number;
+    embeddedChunks: number;
+    currentEmbeddingModelChunks: number;
+    staleEmbeddingModelChunks: number;
+    missingEmbeddingChunks: number;
+    latestChunkUpdatedAt: string | null;
+    healthy: boolean;
+  };
   recent: IndexingJobStatus[];
 };
 
@@ -570,10 +608,24 @@ export type DemoReadiness = {
     extractedAttachments: number;
     pendingOutbox: number;
     failedOutbox: number;
+    staleProcessingOutbox?: number;
+    currentEmbeddingModelChunks?: number;
+    staleEmbeddingModelChunks?: number;
+    missingEmbeddingChunks?: number;
   };
   outbox: {
     available: boolean;
     counts: Record<string, number>;
+  };
+  embeddingIndex?: {
+    embeddingModel: string;
+    totalChunks: number;
+    embeddedChunks: number;
+    currentEmbeddingModelChunks: number;
+    staleEmbeddingModelChunks: number;
+    missingEmbeddingChunks: number;
+    latestChunkUpdatedAt: string | null;
+    healthy: boolean;
   };
   checks: Array<{
     id: string;

@@ -40,6 +40,10 @@ import {
   noMemoryResult,
 } from "./answer-memory-result.ts";
 import {
+  getMemoryIndexDiagnostics,
+  shouldAttachMemoryIndexDiagnostics,
+} from "./answer-memory-diagnostics.ts";
+import {
   answerFastExtractiveFromChunks,
   answerSingleDayFastPath,
   answerTemporalRangeFastPath,
@@ -47,9 +51,11 @@ import {
 import {
   buildExpandedTemporalFilters,
   buildIntentInstruction,
+  isBroadTemporalSynthesisQuestion,
   selectMaxAnswerTokens,
   selectPromptSourceLimit,
   shouldExpandTemporalEvidenceSearch,
+  shouldUseAutoFastPath,
   shouldUseIntentEvidenceFastPath,
 } from "./answer-memory-routing.ts";
 import {
@@ -106,11 +112,19 @@ export async function answerMemory(
   }
 
   const inferredFilters = inferRetrievalFilters(normalizedQuestion, new Date(), timeZone);
+  const broadTemporalSynthesis = isBroadTemporalSynthesisQuestion(
+    normalizedQuestion,
+    intent,
+    inferredFilters,
+  );
   const appliedFilters = {
     ...inferredFilters,
     ...options.filters,
     limit: Math.min(
-      Math.max(options.limit ?? DEFAULT_RETRIEVAL_CANDIDATE_LIMIT, DEFAULT_RETRIEVAL_CANDIDATE_LIMIT),
+      Math.max(
+        options.limit ?? (broadTemporalSynthesis ? 20 : DEFAULT_RETRIEVAL_CANDIDATE_LIMIT),
+        DEFAULT_RETRIEVAL_CANDIDATE_LIMIT,
+      ),
       20,
     ),
     maxDistance: options.maxDistance ?? DEFAULT_MAX_DISTANCE,
@@ -124,9 +138,12 @@ export async function answerMemory(
   );
   const preRetrieveMs = performance.now() - preRetrieveStart;
 
-  const unindexedFastPathResult = answerStrategy === "deep"
-    ? null
-    : answerSingleDayFastPath(
+  const useAutoFastPath = answerStrategy === "auto" &&
+    shouldUseAutoFastPath(normalizedQuestion, intent, appliedFilters);
+  const canUseFastPath = answerStrategy === "fast" || useAutoFastPath;
+
+  const unindexedFastPathResult = canUseFastPath
+    ? answerSingleDayFastPath(
         normalizedQuestion,
         unindexedDiaryChunks,
         appliedFilters,
@@ -140,7 +157,8 @@ export async function answerMemory(
         lang,
         options.minTopSimilarity ?? MIN_TOP_SIMILARITY,
         timeZone,
-      );
+      )
+    : null;
   if (unindexedFastPathResult) {
     const translatedUnindexedFastPathResult = await translateFastAnswerIfUseful(
       unindexedFastPathResult,
@@ -181,6 +199,13 @@ export async function answerMemory(
     const embedMs = performance.now() - embedStart;
     const modelError = classifyModelError(error);
     const fallbackSources = buildCitations(unindexedDiaryChunks);
+    const unavailableMessage = modelError.kind === "quota"
+      ? lang === "vi"
+        ? "Tuturuuu AI đang bị giới hạn quota/rate limit nên mình chưa thể tìm kiếm AI lúc này."
+        : "Tuturuuu AI is currently quota/rate limited, so AI search is unavailable right now."
+      : lang === "vi"
+        ? "Tuturuuu AI hiện không khả dụng, nên mình chưa thể tìm kiếm AI lúc này."
+        : "Tuturuuu AI is currently unavailable, so AI search is unavailable right now.";
     const result = fallbackSources.length
       ? buildExtractiveFallbackAnswer(
           lang,
@@ -192,9 +217,7 @@ export async function answerMemory(
           timeZone,
         )
       : noMemoryResult(
-          lang === "vi"
-            ? "Gemini đang bị giới hạn quota/rate limit nên mình chưa thể tìm kiếm AI lúc này."
-            : "Gemini is currently quota/rate limited, so AI search is unavailable right now.",
+          unavailableMessage,
           lang,
         );
 
@@ -216,6 +239,13 @@ export async function answerMemory(
       appliedFilters,
       chunks: unindexedDiaryChunks,
       result,
+      diagnostics: await maybeGetMemoryIndexDiagnostics(
+        dbClient,
+        userId,
+        appliedFilters,
+        result,
+        unindexedDiaryChunks.length,
+      ),
     });
 
     return result;
@@ -273,9 +303,8 @@ export async function answerMemory(
   }
   const retrieveMs = performance.now() - retrieveStart;
 
-  const fastPathResult = answerStrategy === "deep"
-    ? null
-    : answerSingleDayFastPath(
+  const fastPathResult = canUseFastPath
+    ? answerSingleDayFastPath(
         normalizedQuestion,
         chunks,
         appliedFilters,
@@ -289,10 +318,11 @@ export async function answerMemory(
         lang,
         options.minTopSimilarity ?? MIN_TOP_SIMILARITY,
         timeZone,
-      );
+      )
+    : null;
 
   let result = fastPathResult ??
-    (answerStrategy === "fast"
+    (canUseFastPath
       ? answerFastExtractiveFromChunks(
           normalizedQuestion,
           chunks,
@@ -324,6 +354,13 @@ export async function answerMemory(
     appliedFilters,
     chunks,
     result,
+    diagnostics: await maybeGetMemoryIndexDiagnostics(
+      dbClient,
+      userId,
+      appliedFilters,
+      result,
+      chunks.length,
+    ),
   });
 
   return result;
@@ -342,6 +379,7 @@ export async function answerFromChunks(
 ): Promise<AnswerMemoryResult> {
   const minTopSimilarity = options.minTopSimilarity ?? MIN_TOP_SIMILARITY;
   const lang = options.responseLanguage ?? "en";
+  const answerStrategy = options.answerStrategy ?? "auto";
   const timeZone = resolveMemoryTimeZone(options.timeZone);
   const intent = detectMemoryIntent(question);
 
@@ -384,7 +422,7 @@ export async function answerFromChunks(
   const shouldTryIntentFastPath = shouldUseIntentEvidenceFastPath(
     question,
     intent,
-    options.answerStrategy,
+    answerStrategy,
   );
   if (shouldTryIntentFastPath) {
     const intentEvidenceAnswer = answerIntentEvidenceFastPath(
@@ -407,7 +445,10 @@ export async function answerFromChunks(
     if (unsupportedIntentAnswer) return unsupportedIntentAnswer;
   }
 
-  if (options.answerStrategy === "fast") {
+  if (
+    answerStrategy === "fast" ||
+    (answerStrategy === "auto" && shouldUseAutoFastPath(question, intent))
+  ) {
     return answerFastExtractiveFromChunks(question, chunks, lang, minTopSimilarity, timeZone);
   }
 
@@ -578,10 +619,14 @@ ${languageInstruction}
         ...source,
         claim: citedMarkerToClaim.get(source.marker),
       }));
+    const augmentedCitations = mergeRecoveredCitations(
+      citations,
+      recoverCitationsForAnswer(output.answer, promptSources, question, intent),
+    );
 
     const retrievalConfidence = classifyRetrievalConfidence(
       topSimilarity,
-      citations.length,
+      augmentedCitations.length,
     );
     if (!answerGrounded) {
       return buildValidationFallbackAnswer(
@@ -598,7 +643,7 @@ ${languageInstruction}
       );
     }
 
-    if (!answerPassesEvidenceChecks(output.answer, citations)) {
+    if (!answerPassesEvidenceChecks(output.answer, augmentedCitations)) {
       return buildValidationFallbackAnswer(
         lang,
         promptSources,
@@ -623,7 +668,7 @@ ${languageInstruction}
     return {
       answer: output.answer,
       confidence: finalConfidence,
-      citations,
+      citations: augmentedCitations,
       answerMode: "gemini",
       analytics: buildQueryAnalytics({
         model: tokenUsage.model,
@@ -674,4 +719,52 @@ function dedupeMemoryHits(chunks: MemorySearchHit[]): MemorySearchHit[] {
   }
 
   return deduped;
+}
+
+function mergeRecoveredCitations<T extends { chunkId: string; similarity: number }>(
+  citations: T[],
+  recoveredCitations: T[],
+): T[] {
+  if (!recoveredCitations.length) return citations;
+
+  const byChunkId = new Map<string, T>();
+  for (const citation of citations) {
+    byChunkId.set(citation.chunkId, citation);
+  }
+
+  for (const citation of recoveredCitations) {
+    if (byChunkId.has(citation.chunkId)) continue;
+    byChunkId.set(citation.chunkId, citation);
+  }
+
+  return [...byChunkId.values()]
+    .sort((a, b) => b.similarity - a.similarity)
+    .slice(0, 4);
+}
+
+async function maybeGetMemoryIndexDiagnostics(
+  dbClient: MemoryDbClient,
+  userId: string,
+  filters: AnswerMemoryOptions["filters"],
+  result: AnswerMemoryResult,
+  chunksRetrieved: number,
+) {
+  if (!filters) return undefined;
+  if (
+    !shouldAttachMemoryIndexDiagnostics({
+      chunksRetrieved,
+      status: result.analytics?.status,
+      noMemory: result.noMemory,
+      hasModelError: Boolean(result.modelError),
+    })
+  ) {
+    return undefined;
+  }
+
+  try {
+    return await getMemoryIndexDiagnostics(dbClient, userId, filters);
+  } catch (error) {
+    console.warn("[AnswerMemory] Failed to load memory index diagnostics:", error);
+    return undefined;
+  }
 }

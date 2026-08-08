@@ -25,6 +25,7 @@ import {
   scoreSourceForIntent,
   type FallbackTopic,
 } from "./answer-memory-scoring.ts";
+import { isBroadTemporalSynthesisQuestion } from "./answer-memory-routing.ts";
 import {
   buildQueryAnalytics,
   noMemoryResult,
@@ -40,7 +41,7 @@ export function canUseExtractiveFallback(
 ): boolean {
   return (
     sources.length > 0 &&
-    ["quota", "service_unavailable", "transient", "validation"].includes(modelError.kind)
+    ["quota", "billing", "model_config", "service_unavailable", "transient", "validation"].includes(modelError.kind)
   );
 }
 
@@ -55,7 +56,7 @@ export function recoverCitationsForAnswer(
   const normalizedQuestion = normalizeForIntent(question);
   const normalizedAnswer = normalizeForIntent(answer);
   const answerTokens = new Set(importantTokens(normalizedAnswer));
-  const scored = dedupeCitationsBySource(sources)
+  const scored = dedupeCitationsByChunk(sources)
     .map((source) => {
       const searchable = normalizeForIntent(
         `${source.sourceTitle ?? ""} ${source.chunkType} ${source.quote}`,
@@ -69,17 +70,35 @@ export function recoverCitationsForAnswer(
       return {
         source,
         score: intentScore + answerOverlap * 0.45,
+        answerOverlap,
       };
     })
     .sort((a, b) => b.score - a.score || b.source.similarity - a.source.similarity);
 
   return scored
-    .filter((item) => item.score >= 0.48)
+    .filter(
+      (item) =>
+        item.score >= 0.48 ||
+        (item.answerOverlap >= 0.25 && item.source.similarity >= 0.55),
+    )
     .slice(0, 3)
     .map(({ source }) => ({
       ...source,
       claim: buildReadableClaim(source),
     }));
+}
+
+function dedupeCitationsByChunk(citations: MemoryCitation[]): MemoryCitation[] {
+  const seen = new Set<string>();
+  const deduped: MemoryCitation[] = [];
+
+  for (const citation of citations) {
+    if (seen.has(citation.chunkId)) continue;
+    seen.add(citation.chunkId);
+    deduped.push(citation);
+  }
+
+  return deduped;
 }
 
 export function buildExtractiveFallbackAnswer(
@@ -214,6 +233,8 @@ function selectFallbackSources(
 ): MemoryCitation[] {
   const normalizedQuestion = normalizeForIntent(question);
   const deduped = dedupeCitationsBySource(sources);
+  const broadSynthesis = isBroadTemporalSynthesisQuestion(question, fallbackTopic);
+  const maxSources = broadSynthesis || fallbackTopic === "progress" ? 8 : 4;
   const scored = deduped
     .map((source) => ({
       source,
@@ -234,7 +255,37 @@ function selectFallbackSources(
       ? nonNoisy
       : scored;
 
-  return pool.slice(0, 4).map((item) => item.source);
+  if (broadSynthesis || fallbackTopic === "progress") {
+    return diversifySourcesByDay(pool, maxSources);
+  }
+
+  return pool.slice(0, maxSources).map((item) => item.source);
+}
+
+function diversifySourcesByDay(
+  scored: Array<{ source: MemoryCitation; score: number }>,
+  maxSources: number,
+): MemoryCitation[] {
+  const selected: MemoryCitation[] = [];
+  const selectedKeys = new Set<string>();
+  const seenDays = new Set<string>();
+
+  for (const item of scored) {
+    const day = item.source.occurredAt.slice(0, 10);
+    if (seenDays.has(day)) continue;
+    selected.push(item.source);
+    selectedKeys.add(item.source.chunkId);
+    seenDays.add(day);
+    if (selected.length >= maxSources) return selected;
+  }
+
+  for (const item of scored) {
+    if (selectedKeys.has(item.source.chunkId)) continue;
+    selected.push(item.source);
+    if (selected.length >= maxSources) break;
+  }
+
+  return selected;
 }
 
 function getFallbackMinimumScore(fallbackTopic: FallbackTopic): number {

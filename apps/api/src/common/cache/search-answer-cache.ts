@@ -18,6 +18,7 @@ export async function getCachedSearchAnswer(input: {
   question: string;
   responseLanguage: string;
   timeZone?: string | null;
+  cacheVersion: string;
 }): Promise<CachedSearchAnswer | null> {
   if (!isSearchRedisCacheEnabled()) return null;
 
@@ -38,6 +39,7 @@ export async function setCachedSearchAnswer(
     question: string;
     responseLanguage: string;
     timeZone?: string | null;
+    cacheVersion: string;
   },
   value: CachedSearchAnswer,
 ) {
@@ -79,6 +81,7 @@ async function buildSearchCacheKey(input: {
   question: string;
   responseLanguage: string;
   timeZone?: string | null;
+  cacheVersion: string;
 }) {
   const version = await getUserSearchCacheVersion(input.userId);
   const digest = hashRedisKey(
@@ -87,6 +90,7 @@ async function buildSearchCacheKey(input: {
       question: input.question.trim(),
       responseLanguage: input.responseLanguage,
       timeZone: input.timeZone?.trim() || null,
+      cacheVersion: input.cacheVersion,
       version,
     }),
   );

@@ -1,8 +1,9 @@
-import {
-  GoogleGenerativeAI,
-  type ResponseSchema,
-} from "@google/generative-ai";
 import { ZodError, type z } from "zod";
+import {
+  generateTuturuuuText,
+} from "./tuturuuu-client.ts";
+
+export type ResponseSchema = unknown;
 
 export interface GenerateGeminiJsonOptions<T> {
   model: string;
@@ -28,17 +29,6 @@ export interface GeminiJsonResultWithMeta<T> {
   tokenUsage: GeminiTokenUsage;
 }
 
-// Singleton Gemini client — avoids re-initialization overhead per request
-let _geminiJsonClient: GoogleGenerativeAI | null = null;
-function getGeminiJsonClient(): GoogleGenerativeAI {
-  if (!_geminiJsonClient) {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) throw new Error("GEMINI_API_KEY is required to call Gemini.");
-    _geminiJsonClient = new GoogleGenerativeAI(apiKey);
-  }
-  return _geminiJsonClient;
-}
-
 /**
  * Original function — returns only the parsed & validated JSON.
  * Preserved for backward compatibility with existing callers.
@@ -52,23 +42,14 @@ export async function generateGeminiJson<T>(
 
 /**
  * Enhanced version — returns parsed JSON **plus** token usage metadata
- * from the Gemini API response. Used by answerMemory for observability.
+ * from the Tuturuuu API response. Used by answerMemory for observability.
  */
 export async function generateGeminiJsonWithMeta<T>(
   options: GenerateGeminiJsonOptions<T>,
 ): Promise<GeminiJsonResultWithMeta<T>> {
-
-  const ai = getGeminiJsonClient();
   const modelName = options.model;
-  const model = ai.getGenerativeModel({
-    model: modelName,
-    generationConfig: {
-      temperature: options.temperature ?? 0.2,
-      responseMimeType: "application/json",
-      responseSchema: options.responseSchema,
-      ...(options.maxOutputTokens ? { maxOutputTokens: options.maxOutputTokens } : {}),
-    },
-  });
+  void options.responseSchema;
+  void options.temperature;
 
   let lastError: Error | null = null;
   const configuredRetries = Number(options.maxRetries ?? process.env.GEMINI_JSON_MAX_RETRIES ?? 2);
@@ -88,19 +69,20 @@ export async function generateGeminiJsonWithMeta<T>(
       const prompt = formatRetries > 0
         ? buildJsonOnlyRetryPrompt(options.prompt, lastError)
         : options.prompt;
-      const result = await model.generateContent(prompt);
-      const response = result.response;
-      const text = response.text();
-      assertGeminiResponseComplete(response, text);
+      const generation = await generateJsonText({
+        modelName,
+        prompt,
+        maxOutputTokens: options.maxOutputTokens,
+      });
+      const text = generation.text;
+      assertGenerationComplete(generation.finishReason, text);
       const parsed = parseJsonResponse(text);
       const validated = options.validator.parse(parsed);
 
-      // Extract token usage metadata from the Gemini response
-      const usage = response.usageMetadata;
       const tokenUsage: GeminiTokenUsage = {
-        promptTokens: usage?.promptTokenCount ?? 0,
-        completionTokens: usage?.candidatesTokenCount ?? 0,
-        totalTokens: usage?.totalTokenCount ?? 0,
+        promptTokens: generation.tokenUsage.promptTokens,
+        completionTokens: generation.tokenUsage.completionTokens,
+        totalTokens: generation.tokenUsage.totalTokens,
         model: modelName,
       };
 
@@ -115,7 +97,7 @@ export async function generateGeminiJsonWithMeta<T>(
       }
 
       // Only retry on transient/network errors after format repair attempts.
-      const isTransient = isTransientGeminiError(lastError);
+      const isTransient = isTransientTuturuuuError(lastError);
       if (isQuotaExhaustedError(lastError)) break;
 
       if (!isTransient || transientRetries >= maxRetries) break;
@@ -123,13 +105,40 @@ export async function generateGeminiJsonWithMeta<T>(
       const delayMs = getRetryDelayMs(lastError, transientRetries, options.maxRetryDelayMs);
       transientRetries++;
       console.warn(
-        `[GeminiJSON] ${summarizeTransientError(lastError)}; retrying in ${delayMs}ms (attempt ${transientRetries}/${maxRetries}).`,
+        `[TuturuuuJSON] ${summarizeTransientError(lastError)}; retrying in ${delayMs}ms (attempt ${transientRetries}/${maxRetries}).`,
       );
       await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
   }
 
   throw lastError!;
+}
+
+async function generateJsonText(input: {
+  modelName: string;
+  prompt: string;
+  maxOutputTokens?: number;
+}): Promise<{
+  text: string;
+  finishReason?: string;
+  tokenUsage: Omit<GeminiTokenUsage, "model">;
+}> {
+  const result = await generateTuturuuuText({
+    model: input.modelName,
+    prompt: input.prompt,
+    maxOutputTokens: input.maxOutputTokens,
+    systemPrompt:
+      "Return only valid JSON matching the user's requested schema. Do not include markdown fences or prose outside the JSON.",
+  });
+  return {
+    text: result.output,
+    finishReason: result.finishReason,
+    tokenUsage: {
+      promptTokens: result.usage?.inputTokens ?? 0,
+      completionTokens: result.usage?.outputTokens ?? 0,
+      totalTokens: result.usage?.totalTokens ?? 0,
+    },
+  };
 }
 
 function buildJsonOnlyRetryPrompt(originalPrompt: string, error: Error | null): string {
@@ -150,6 +159,7 @@ The JSON must match the requested schema exactly.
 function isJsonFormatError(error: Error): boolean {
   return (
     error instanceof ZodError ||
+    error.message.includes("Tuturuuu returned invalid JSON") ||
     error.message.includes("Gemini returned invalid JSON") ||
     error.message.includes("could not be repaired") ||
     error.message.includes("truncated") ||
@@ -159,19 +169,22 @@ function isJsonFormatError(error: Error): boolean {
   );
 }
 
-function assertGeminiResponseComplete(response: unknown, text: string): void {
-  const finishReason = getGeminiFinishReason(response);
+function assertGenerationComplete(finishReason: string | undefined, text: string): void {
   if (!finishReason || finishReason === "STOP") return;
+  if (finishReason.toLowerCase() === "stop") return;
 
   const preview = text.replace(/\s+/g, " ").slice(0, 180);
-  if (finishReason === "MAX_TOKENS") {
+  if (
+    finishReason === "MAX_TOKENS" ||
+    finishReason.toLowerCase() === "max_tokens"
+  ) {
     throw new Error(
-      `Gemini response was truncated before valid JSON could be completed (finishReason=${finishReason}). Partial output: ${preview}`,
+      `Tuturuuu response was truncated before valid JSON could be completed (finishReason=${finishReason}). Partial output: ${preview}`,
     );
   }
 
   throw new Error(
-    `Gemini response did not finish normally (finishReason=${finishReason}). Partial output: ${preview}`,
+    `Tuturuuu response did not finish normally (finishReason=${finishReason}). Partial output: ${preview}`,
   );
 }
 
@@ -197,10 +210,10 @@ function summarizeJsonFormatError(error: Error): string {
 
 function maybeLogInvalidJson(error: Error): void {
   if (process.env.GEMINI_JSON_LOG_INVALID !== "1") return;
-  console.warn(`[GeminiJSON] Retrying because JSON output was invalid: ${summarizeJsonFormatError(error)}`);
+  console.warn(`[TuturuuuJSON] Retrying because JSON output was invalid: ${summarizeJsonFormatError(error)}`);
 }
 
-function isTransientGeminiError(error: Error): boolean {
+function isTransientTuturuuuError(error: Error): boolean {
   const status = getErrorStatus(error);
   return (
     status === 429 ||
@@ -298,7 +311,7 @@ function summarizeTransientError(error: Error): string {
         ? "503 service unavailable"
         : status === 500
           ? "500 server error"
-          : "transient Gemini error";
+          : "transient Tuturuuu error";
 
   return `${label}: ${error.message.replace(/\s+/g, " ").slice(0, 180)}`;
 }
@@ -349,7 +362,7 @@ export function parseJsonResponse(text: string): unknown {
     }
   }
 
-  throw new Error(`Gemini returned invalid JSON that could not be repaired: ${normalized.slice(0, 500)}`);
+  throw new Error(`Tuturuuu returned invalid JSON that could not be repaired: ${normalized.slice(0, 500)}`);
 }
 
 function extractFirstBalancedJsonCandidate(text: string): string | null {

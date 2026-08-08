@@ -13,6 +13,7 @@ import {
   shouldTranslateFastAnswer,
   translateFastAnswerIfUseful,
 } from "./answer-memory-translation.ts";
+import { shouldUseAutoFastPath } from "./answer-memory-routing.ts";
 import type { AnswerMemoryResult } from "./answer-memory.ts";
 import type { MemorySearchHit } from "./retrieval.ts";
 
@@ -30,16 +31,28 @@ test("inferRetrievalFilters prefers action-item chunks for task questions", () =
   assert.ok(filters.preferredChunkTypes?.includes("action_item"));
 });
 
-test("inferRetrievalFilters narrows recent questions to the last 30 days", () => {
+test("inferRetrievalFilters narrows recent questions to the last 60 days", () => {
   const filters = inferRetrievalFilters(
     "What did I work on recently?",
     new Date("2026-07-13T15:30:00.000Z"),
   );
 
   assert.ok(filters.startDate instanceof Date);
-  assert.equal(filters.startDate.toISOString(), "2026-06-13T00:00:00.000Z");
+  assert.equal(filters.startDate.toISOString(), "2026-05-14T00:00:00.000Z");
   assert.ok(filters.endDate instanceof Date);
   assert.equal(filters.endDate.toISOString(), "2026-07-13T23:59:59.999Z");
+  assert.equal(filters.allowTemporalFallback, true);
+});
+
+test("inferRetrievalFilters treats latest memory questions as recent ranges", () => {
+  const filters = inferRetrievalFilters(
+    "Summarize my latest diary memories.",
+    new Date("2026-07-13T15:30:00.000Z"),
+  );
+
+  assert.equal(filters.startDate?.toISOString(), "2026-05-14T00:00:00.000Z");
+  assert.equal(filters.endDate?.toISOString(), "2026-07-13T23:59:59.999Z");
+  assert.equal(filters.allowTemporalFallback, true);
 });
 
 test("inferRetrievalFilters lets explicit dates override recent intent", () => {
@@ -50,6 +63,26 @@ test("inferRetrievalFilters lets explicit dates override recent intent", () => {
 
   assert.equal(filters.startDate?.toISOString(), "2026-07-10T00:00:00.000Z");
   assert.equal(filters.endDate?.toISOString(), "2026-07-10T23:59:59.999Z");
+});
+
+test("auto routing uses Deep for broad recent work synthesis but Fast for exact dates", () => {
+  const recentFilters = inferRetrievalFilters(
+    "What did I work on recently?",
+    new Date("2026-08-06T15:30:00.000Z"),
+  );
+  const exactDateFilters = inferRetrievalFilters(
+    "What did I work on 9/7?",
+    new Date("2026-08-06T15:30:00.000Z"),
+  );
+
+  assert.equal(
+    shouldUseAutoFastPath("What did I work on recently?", "progress", recentFilters),
+    false,
+  );
+  assert.equal(
+    shouldUseAutoFastPath("What did I work on 9/7?", "progress", exactDateFilters),
+    true,
+  );
 });
 
 test("inferRetrievalFilters prefers attachment sources for document questions", () => {
@@ -257,6 +290,7 @@ test("answerFromChunks falls back to retrieved sources when model output validat
       }),
     ],
     {
+      answerStrategy: "deep",
       responseLanguage: "vi",
       generateAnswer: async () => {
         throw new z.ZodError([
@@ -1079,6 +1113,7 @@ test("answerFromChunks uses extractive fallback when model citations are unusabl
       }),
     ],
     {
+      answerStrategy: "deep",
       responseLanguage: "vi",
       generateAnswer: async (options: any) => ({
         data: options.validator.parse({
@@ -1147,6 +1182,62 @@ test("answerFromChunks rejects generated names that are not supported by evidenc
   assert.match(result.answer, /Linh/);
 });
 
+test("answerFromChunks augments citations for supported Vietnamese generated names", async () => {
+  const result = await answerFromChunks(
+    "Gmail trong project nên làm gì?",
+    [
+      makeHit({
+        id: "gmail-scope",
+        sourceType: "diary",
+        chunkType: "decision",
+        text: "We decided to keep Gmail and Google Contacts as future work unless the core demo is stable.",
+        evidence: "keep Gmail and Google Contacts as future work unless the core demo is stable",
+        similarity: 0.87,
+        vectorSimilarity: 0.87,
+        occurredAt: new Date("2026-07-14T00:00:00.000Z"),
+      }),
+      makeHit({
+        id: "linh-scope-feedback",
+        sourceType: "diary",
+        chunkType: "feedback",
+        text: "Linh warned us not to add Gmail until Diary, Calendar, Attachment, and grounded search are stable.",
+        evidence: "Linh warned us not to add Gmail until Diary, Calendar, Attachment, and grounded search are stable",
+        similarity: 0.79,
+        vectorSimilarity: 0.79,
+        occurredAt: new Date("2026-07-14T00:00:00.000Z"),
+      }),
+    ],
+    {
+      answerStrategy: "deep",
+      responseLanguage: "vi",
+      generateAnswer: async (options: any) => ({
+        data: options.validator.parse({
+          answer:
+            "Nhóm quyết định để Gmail và Google Contacts ở future work; theo góp ý của Linh, chưa nên thêm Gmail trước khi Diary, Calendar, Attachment và grounded search ổn định.",
+          confidence: "high",
+          citations: [
+            {
+              marker: "S1",
+              claim: "keep Gmail and Google Contacts as future work unless the core demo is stable",
+            },
+          ],
+        }),
+        tokenUsage: {
+          promptTokens: 60,
+          completionTokens: 35,
+          totalTokens: 95,
+          model: "test-model",
+        },
+      }),
+    },
+  );
+
+  assert.equal(result.answerMode, "gemini");
+  assert.equal(result.modelError, undefined);
+  assert.ok(result.citations.some((citation) => citation.chunkId === "gmail-scope"));
+  assert.ok(result.citations.some((citation) => citation.chunkId === "linh-scope-feedback"));
+});
+
 test("answerFromChunks returns a natural source-based answer when Gemini quota is exhausted", async () => {
   const result = await answerFromChunks(
     "Tháng 6 tôi làm gì?",
@@ -1163,6 +1254,7 @@ test("answerFromChunks returns a natural source-based answer when Gemini quota i
       }),
     ],
     {
+      answerStrategy: "deep",
       responseLanguage: "vi",
       generateAnswer: async () => {
         const error = new Error("429 current quota exceeded");
@@ -1298,7 +1390,7 @@ test("answerFromChunks fast strategy filters noisy sample-question memories", as
   assert.equal(result.answerMode, "fast_path");
   assert.equal(result.citations.length, 1);
   assert.equal(result.citations[0]?.chunkId, "real-search-work");
-  assert.match(result.answer, /The strongest match is from/);
+  assert.match(result.answer, /The strongest progress memory is from/);
   assert.match(result.answer, /improved search source cards/);
   assert.doesNotMatch(result.answer, /best questions are/i);
 });
@@ -1351,6 +1443,131 @@ test("answerFromChunks auto uses Gemini for reasoning-heavy latency questions", 
   assert.equal(result.analytics?.answerMode, "gemini");
   assert.equal(result.analytics?.tokenUsage.totalTokens, 100);
   assert.match(result.answer, /measure embedding time/);
+});
+
+test("answerFromChunks auto uses fast path for direct fact lookup questions", async () => {
+  let generateCalled = false;
+  const result = await answerFromChunks(
+    "When was the Backend API Check scheduled?",
+    [
+      makeHit({
+        id: "api-check-event",
+        sourceType: "calendar",
+        sourceId: "eval-calendar-api-check",
+        chunkType: "event",
+        text: "Calendar event: Backend API Check scheduled on May 12, 2026 at 08:00 UTC. Quan reviews diary CRUD and summary API contract.",
+        evidence: "Backend API Check scheduled on May 12, 2026 at 08:00 UTC",
+        similarity: 0.88,
+        vectorSimilarity: 0.88,
+        occurredAt: new Date("2026-05-12T08:00:00.000Z"),
+      }),
+    ],
+    {
+      responseLanguage: "en",
+      generateAnswer: async () => {
+        generateCalled = true;
+        throw new Error("Auto fact lookup should not call generation");
+      },
+    },
+  );
+
+  assert.equal(generateCalled, false);
+  assert.equal(result.answerMode, "fast_path");
+  assert.equal(result.citations.length, 1);
+  assert.equal(result.citations[0]?.sourceId, "eval-calendar-api-check");
+  assert.match(result.answer, /backend API Check/i);
+});
+
+test("answerFromChunks auto uses Gemini for summarize questions", async () => {
+  let generateCalled = false;
+  const result = await answerFromChunks(
+    "Summarize my latest diary memories.",
+    [
+      makeHit({
+        id: "latest-search-work",
+        sourceType: "diary",
+        sourceId: "latest-diary",
+        chunkType: "general",
+        text: "Latest diary memory: I improved search source cards, citation highlighting, and AI debug visibility for the MVP demo.",
+        evidence: "improved search source cards, citation highlighting, and AI debug visibility",
+        similarity: 0.86,
+        vectorSimilarity: 0.86,
+        occurredAt: new Date("2026-07-18T00:00:00.000Z"),
+      }),
+    ],
+    {
+      responseLanguage: "en",
+      generateAnswer: async (options: any) => {
+        generateCalled = true;
+        return {
+          data: options.validator.parse({
+            answer: "the latest diary memory focused on improving search source cards, citation highlighting, and AI debug visibility.",
+            confidence: "high",
+            citations: [
+              {
+                marker: "S1",
+                claim: "improved search source cards, citation highlighting, and AI debug visibility",
+              },
+            ],
+          }),
+          tokenUsage: {
+            promptTokens: 48,
+            completionTokens: 30,
+            totalTokens: 78,
+            model: "test-gemini",
+          },
+        };
+      },
+    },
+  );
+
+  assert.equal(generateCalled, true);
+  assert.equal(result.answerMode, "gemini");
+  assert.equal(result.citations.length, 1);
+  assert.match(result.answer, /source cards/);
+});
+
+test("answerFromChunks broad recent work fallback keeps diverse diary days", async () => {
+  const chunks = Array.from({ length: 8 }, (_, index) => {
+    const day = String(index + 1).padStart(2, "0");
+    return makeHit({
+      id: `july-work-${day}`,
+      sourceType: "diary",
+      sourceId: `july-diary-${day}`,
+      chunkType: "general",
+      text: `On July ${index + 1}, I worked on MVP task ${index + 1}: diary flow, indexing, citations, Google integration, and demo readiness.`,
+      evidence: `worked on MVP task ${index + 1}`,
+      similarity: 0.88 - index * 0.01,
+      vectorSimilarity: 0.86,
+      occurredAt: new Date(`2026-07-${day}T09:00:00.000Z`),
+    });
+  });
+
+  const result = await answerFromChunks(
+    "What did I work on recently?",
+    chunks,
+    {
+      responseLanguage: "en",
+      generateAnswer: async (options: any) => ({
+        data: options.validator.parse({
+          answer: "In August, Martin worked with Zoe on Terraform billing migration.",
+          confidence: "medium",
+          citations: [],
+        }),
+        tokenUsage: {
+          promptTokens: 120,
+          completionTokens: 18,
+          totalTokens: 138,
+          model: "test-gemini",
+        },
+      }),
+    },
+  );
+
+  assert.equal(result.answerMode, "extractive_fallback");
+  assert.equal(result.citations.length, 8);
+  assert.match(result.answer, /July 1, 2026/);
+  assert.match(result.answer, /July 8, 2026/);
 });
 
 test("answerSingleDayFastPath assembles simple day answers without model generation", () => {

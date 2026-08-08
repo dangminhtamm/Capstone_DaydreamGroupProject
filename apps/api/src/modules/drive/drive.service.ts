@@ -9,6 +9,13 @@ import { drive_v3, google } from 'googleapis';
 import { invalidateUserSearchCache } from '../../common/cache/search-answer-cache';
 import { PrismaService } from '../../prisma/prisma.service';
 import { decryptOAuthToken, encryptOAuthToken } from '../calendar/oauth-token-crypto';
+import {
+  GOOGLE_SOURCE_SCOPES,
+  getAllGoogleWorkspaceScopes,
+  getGoogleConnectionStatus,
+  recordGoogleSyncFailure,
+  recordGoogleSyncSuccess,
+} from '../google-connections/google-connections';
 
 type GoogleDriveFileRow = {
   external_id: string;
@@ -82,10 +89,21 @@ export class DriveService {
       }),
     ]);
 
+    const fallbackConnected = user.google_connected && Boolean(user.google_refresh_token || user.google_access_token);
+    const connection = await getGoogleConnectionStatus(this.prisma, user.id, 'drive', fallbackConnected);
+
     return {
-      connected: user.google_connected && Boolean(user.google_refresh_token || user.google_access_token),
+      source: 'drive',
+      oauthMode: 'all_google_sources',
+      connected: connection.connected && fallbackConnected,
+      scopes: connection.scopes,
+      requestedScopes: GOOGLE_SOURCE_SCOPES.drive,
+      workspaceScopes: getAllGoogleWorkspaceScopes(),
       fileCount,
-      lastSyncedAt: latestFile?.updated_at ?? null,
+      lastSyncedAt: connection.lastSyncAt ?? latestFile?.updated_at ?? null,
+      lastError: connection.lastError,
+      lastErrorAt: connection.lastErrorAt,
+      syncCursor: connection.syncCursor,
     };
   }
 
@@ -186,6 +204,8 @@ export class DriveService {
         return queuedCount;
       });
 
+      await recordGoogleSyncSuccess(this.prisma, { userId: user.id, source: 'drive' });
+
       return {
         message: 'Google Drive files synced successfully; Drive memory indexing queued.',
         syncedCount: normalizedFiles.length,
@@ -193,6 +213,7 @@ export class DriveService {
         memoryIndexingStatus: 'queued',
       };
     } catch (error) {
+      await recordGoogleSyncFailure(this.prisma, { userId: user.id, source: 'drive', error });
       if (this.isInsufficientScopeError(error)) {
         throw new ForbiddenException('Reconnect Google to grant Drive permission.');
       }

@@ -16,6 +16,18 @@ export function loadLocalEnv(): void {
   }
 }
 
+export function hasAiGatewayKey(): boolean {
+  return Boolean(process.env.TUTURUUU_AI_API_KEY?.trim());
+}
+
+export function getAiGatewayKey(): string | undefined {
+  return process.env.TUTURUUU_AI_API_KEY?.trim();
+}
+
+export function aiGatewayEnvHint(action = "running this script"): string {
+  return `Set TUTURUUU_AI_API_KEY before ${action}.`;
+}
+
 function loadEnvFileIfExists(path: string): void {
   if (!existsSync(path)) return;
 

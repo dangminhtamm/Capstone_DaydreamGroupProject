@@ -6,6 +6,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { fetchCalendarConnectUrl } from '@/features/google-calendar/google-calendar-api';
 import { isSafeRedirectUrl } from '@/features/google-calendar/google-calendar-utils';
 import { useGoogleCalendarIntegration } from '@/features/google-calendar/use-google-calendar';
+import { disconnectGoogle } from '@/features/google-connections/google-connections-api';
 import { useGoogleContactsIntegration } from '@/features/google-contacts/use-google-contacts';
 import { useGoogleDriveIntegration } from '@/features/google-drive/use-google-drive';
 import { useGoogleGmailIntegration } from '@/features/google-gmail/use-google-gmail';
@@ -27,10 +28,17 @@ type WorkspaceRow = {
   source: WorkspaceSource;
   label: string;
   description: string;
+  syncedTo: string;
+  aiUsage: string;
   valueLabel: string;
   valueCount: number;
   noun: string;
   lastSyncedAt: string | null;
+  scopes: string[];
+  requestedScopes: string[];
+  workspaceScopes: string[];
+  lastError: string | null;
+  lastErrorAt: string | null;
   connected: boolean;
   isLoading: boolean;
   isSyncing: boolean;
@@ -73,6 +81,9 @@ export function GoogleWorkspaceCard({ indexingStatus }: GoogleWorkspaceCardProps
   const auth = useAuth();
   const { isAuthenticated, getAccessToken } = auth;
   const [isConnecting, setIsConnecting] = useState(false);
+  const [isDisconnecting, setIsDisconnecting] = useState(false);
+  const [deleteSyncedGoogleData, setDeleteSyncedGoogleData] = useState(false);
+  const [workspaceFeedback, setWorkspaceFeedback] = useState<SourceFeedback | null>(null);
   const calendar = useGoogleCalendarIntegration(auth);
   const contacts = useGoogleContactsIntegration(auth);
   const drive = useGoogleDriveIntegration(auth);
@@ -83,10 +94,17 @@ export function GoogleWorkspaceCard({ indexingStatus }: GoogleWorkspaceCardProps
       source: 'calendar',
       label: 'Calendar',
       description: 'Meetings and events that explain what happened around diary entries.',
+      syncedTo: 'calendar_events, diary links, memory_chunks',
+      aiUsage: 'Answers can cite meetings, deadlines, and the events linked to diary days.',
       valueLabel: `${calendar.status?.eventCount ?? 0} events`,
       valueCount: calendar.status?.eventCount ?? 0,
       noun: 'events',
       lastSyncedAt: calendar.status?.lastSyncedAt ?? null,
+      scopes: calendar.status?.scopes ?? [],
+      requestedScopes: calendar.status?.requestedScopes ?? ['https://www.googleapis.com/auth/calendar.readonly'],
+      workspaceScopes: calendar.status?.workspaceScopes ?? [],
+      lastError: calendar.status?.lastError ?? null,
+      lastErrorAt: calendar.status?.lastErrorAt ?? null,
       connected: Boolean(calendar.status?.connected),
       isLoading: calendar.isLoading,
       isSyncing: calendar.isSyncing,
@@ -101,10 +119,17 @@ export function GoogleWorkspaceCard({ indexingStatus }: GoogleWorkspaceCardProps
       source: 'gmail',
       label: 'Gmail',
       description: 'Recent emails that can become cited memory for project decisions and feedback.',
+      syncedTo: 'gmail_messages, indexing_outbox, memory_chunks',
+      aiUsage: 'Answers can cite email feedback, decisions, and project conversations.',
       valueLabel: `${gmail.status?.messageCount ?? 0} messages`,
       valueCount: gmail.status?.messageCount ?? 0,
       noun: 'messages',
       lastSyncedAt: gmail.status?.lastSyncedAt ?? null,
+      scopes: gmail.status?.scopes ?? [],
+      requestedScopes: gmail.status?.requestedScopes ?? ['https://www.googleapis.com/auth/gmail.readonly'],
+      workspaceScopes: gmail.status?.workspaceScopes ?? [],
+      lastError: gmail.status?.lastError ?? null,
+      lastErrorAt: gmail.status?.lastErrorAt ?? null,
       connected: Boolean(gmail.status?.connected),
       isLoading: gmail.isLoading,
       isSyncing: gmail.isSyncing,
@@ -119,10 +144,17 @@ export function GoogleWorkspaceCard({ indexingStatus }: GoogleWorkspaceCardProps
       source: 'drive',
       label: 'Drive',
       description: 'Docs and files that Second Brain can quote when answering questions.',
+      syncedTo: 'google_drive_files, indexing_outbox, memory_chunks',
+      aiUsage: 'Answers can cite imported docs, plans, and file summaries.',
       valueLabel: `${drive.status?.fileCount ?? 0} files`,
       valueCount: drive.status?.fileCount ?? 0,
       noun: 'files',
       lastSyncedAt: drive.status?.lastSyncedAt ?? null,
+      scopes: drive.status?.scopes ?? [],
+      requestedScopes: drive.status?.requestedScopes ?? ['https://www.googleapis.com/auth/drive.readonly'],
+      workspaceScopes: drive.status?.workspaceScopes ?? [],
+      lastError: drive.status?.lastError ?? null,
+      lastErrorAt: drive.status?.lastErrorAt ?? null,
       connected: Boolean(drive.status?.connected),
       isLoading: drive.isLoading,
       isSyncing: drive.isSyncing,
@@ -137,10 +169,17 @@ export function GoogleWorkspaceCard({ indexingStatus }: GoogleWorkspaceCardProps
       source: 'contact',
       label: 'Contacts',
       description: 'People and organizations that help AI understand names in your memories.',
+      syncedTo: 'google_contacts, entity context, memory_chunks',
+      aiUsage: 'Answers can resolve who people are and cite relevant contact context.',
       valueLabel: `${contacts.status?.contactCount ?? 0} contacts`,
       valueCount: contacts.status?.contactCount ?? 0,
       noun: 'contacts',
       lastSyncedAt: contacts.status?.lastSyncedAt ?? null,
+      scopes: contacts.status?.scopes ?? [],
+      requestedScopes: contacts.status?.requestedScopes ?? ['https://www.googleapis.com/auth/contacts.readonly'],
+      workspaceScopes: contacts.status?.workspaceScopes ?? [],
+      lastError: contacts.status?.lastError ?? null,
+      lastErrorAt: contacts.status?.lastErrorAt ?? null,
       connected: Boolean(contacts.status?.connected),
       isLoading: contacts.isLoading,
       isSyncing: contacts.isSyncing,
@@ -167,6 +206,12 @@ export function GoogleWorkspaceCard({ indexingStatus }: GoogleWorkspaceCardProps
   const attentionCount = rows.filter((row) => presentations[row.source].tone === 'attention').length;
   const activeIndexingCount = rows.filter((row) => getIndexingInfo(row.source, indexingStatus).active).length;
   const importedCount = rows.reduce((total, row) => total + (row.valueCount > 0 ? 1 : 0), 0);
+  const workspaceScopes = rows.find((row) => row.workspaceScopes.length > 0)?.workspaceScopes ?? [
+    'https://www.googleapis.com/auth/calendar.readonly',
+    'https://www.googleapis.com/auth/gmail.readonly',
+    'https://www.googleapis.com/auth/drive.readonly',
+    'https://www.googleapis.com/auth/contacts.readonly',
+  ];
   const overallTone: SourceTone = attentionCount > 0 ? 'attention' : readyCount > 0 ? 'ready' : connected ? 'working' : 'idle';
   const overallLabel = !connected
     ? 'Connect Google first'
@@ -190,14 +235,53 @@ export function GoogleWorkspaceCard({ indexingStatus }: GoogleWorkspaceCardProps
     }
   };
 
+  const handleDisconnectGoogle = async () => {
+    if (deleteSyncedGoogleData) {
+      const confirmed = window.confirm(
+        'Disconnect Google and delete synced Calendar, Gmail, Drive, Contacts, and Google memory chunks from this workspace?',
+      );
+      if (!confirmed) return;
+    }
+
+    setIsDisconnecting(true);
+    clearFeedback();
+    try {
+      const result = await disconnectGoogle(getAccessToken(), {
+        deleteSyncedData: deleteSyncedGoogleData,
+      });
+      const deletedTotal = Object.values(result.deletedCounts).reduce((total, count) => total + count, 0);
+      setWorkspaceFeedback({
+        type: 'success',
+        text: result.deleteSyncedData
+          ? `Google disconnected and ${deletedTotal} synced records/chunks were deleted.`
+          : 'Google disconnected. Synced data was kept in this workspace.',
+      });
+      setDeleteSyncedGoogleData(false);
+      await Promise.all([
+        calendar.loadCalendar(),
+        contacts.loadContacts(),
+        drive.loadDrive(),
+        gmail.loadGmail(),
+      ]);
+    } catch (error) {
+      setWorkspaceFeedback({
+        type: 'error',
+        text: error instanceof Error ? error.message : 'Could not disconnect Google.',
+      });
+    } finally {
+      setIsDisconnecting(false);
+    }
+  };
+
   const clearFeedback = () => {
+    setWorkspaceFeedback(null);
     calendar.clearFeedback();
     contacts.clearFeedback();
     drive.clearFeedback();
     gmail.clearFeedback();
   };
 
-  const feedback = calendar.feedback ?? contacts.feedback ?? drive.feedback ?? gmail.feedback;
+  const feedback = workspaceFeedback ?? calendar.feedback ?? contacts.feedback ?? drive.feedback ?? gmail.feedback;
 
   if (!isAuthenticated) {
     return (
@@ -233,11 +317,17 @@ export function GoogleWorkspaceCard({ indexingStatus }: GoogleWorkspaceCardProps
             Memory sources
           </p>
           <h3 className="mt-1.5 text-xl font-semibold tracking-tight text-slate-950 dark:text-slate-100">
-            Google memory setup
+            Connect all Google memory sources
           </h3>
           <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
-            Connect your Google account, import the sources you want, then ask questions with citations from Calendar, Gmail, Drive, and Contacts.
+            One OAuth consent grants readonly access for Calendar, Gmail, Drive, and Contacts. You still choose which source to import, and imported data is indexed into AI memory for cited Search answers.
           </p>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+              Requested scopes
+            </span>
+            <ScopeChips scopes={workspaceScopes} compact />
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <span className={`status-badge ${toneBadgeClass(overallTone)}`}>
@@ -249,34 +339,64 @@ export function GoogleWorkspaceCard({ indexingStatus }: GoogleWorkspaceCardProps
             disabled={isConnecting}
             className="action-secondary disabled:cursor-not-allowed"
           >
-            {isConnecting ? 'Opening Google...' : connected ? 'Fix Google access' : 'Connect Google'}
+            {isConnecting ? 'Opening Google...' : connected ? 'Fix Google access' : 'Connect all Google sources'}
           </button>
+          {connected && (
+            <button
+              type="button"
+              onClick={() => void handleDisconnectGoogle()}
+              disabled={isDisconnecting}
+              className="rounded-lg border border-rose-200 bg-white px-4 py-2 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-rose-900/60 dark:bg-slate-950 dark:text-rose-300 dark:hover:bg-rose-950/30"
+            >
+              {isDisconnecting ? 'Disconnecting...' : 'Disconnect Google'}
+            </button>
+          )}
         </div>
       </div>
+
+      {connected && (
+        <label className="mt-4 flex max-w-3xl items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 p-3 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-300">
+          <input
+            type="checkbox"
+            checked={deleteSyncedGoogleData}
+            onChange={(event) => setDeleteSyncedGoogleData(event.target.checked)}
+            disabled={isDisconnecting}
+            className="mt-1 h-4 w-4 rounded border-slate-300 text-rose-600 focus:ring-rose-500 disabled:cursor-not-allowed"
+          />
+          <span>
+            <span className="font-semibold text-slate-900 dark:text-slate-100">
+              Delete synced Google data
+            </span>
+            <span className="block text-xs leading-5 text-slate-500 dark:text-slate-400">
+              Removes imported Calendar events, Gmail messages, Drive files, Contacts, Google memory chunks, and pending Google indexing jobs.
+            </span>
+          </span>
+        </label>
+      )}
 
       <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <StepItem
           step="1"
           title="Connect account"
-          description={connected ? 'Google OAuth is ready.' : 'Grant read-only access once.'}
+          description={connected ? 'Readonly Google Workspace access is connected.' : 'Approve Calendar, Gmail, Drive, and Contacts scopes once.'}
           done={connected}
         />
         <StepItem
           step="2"
-          title="Import data"
-          description={importedCount > 0 ? `${importedCount}/4 sources have imported data.` : 'Pick one source and import it.'}
+          title="Sync to database"
+          description={importedCount > 0 ? `${importedCount}/4 sources have imported rows.` : 'Pick a source to copy metadata/text into Postgres.'}
           done={importedCount > 0}
         />
         <StepItem
           step="3"
-          title="Prepare memory"
-          description={activeIndexingCount > 0 ? `${activeIndexingCount} source${activeIndexingCount === 1 ? '' : 's'} still indexing.` : readyCount > 0 ? 'Imported data is searchable.' : 'Indexing starts after import.'}
+          title="Index for AI"
+          description={activeIndexingCount > 0 ? `${activeIndexingCount} source${activeIndexingCount === 1 ? '' : 's'} still in IndexingOutbox.` : readyCount > 0 ? 'Synced data has memory chunks.' : 'Indexing starts after sync.'}
           done={readyCount > 0 && activeIndexingCount === 0}
         />
         <StepItem
           step="4"
           title="Ask with citations"
-          description={readyCount > 0 ? 'Search can cite ready sources.' : 'Ready sources will appear in AI answers.'}
+          description={readyCount > 0 ? 'Search can now cite ready Google sources.' : 'Ready chunks will appear as AI sources.'}
           done={readyCount > 0}
         />
       </div>
@@ -387,6 +507,18 @@ function MemorySourceRow({
           <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
             {row.description}
           </p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            <SourceFact label="Synced to" value={row.syncedTo} />
+            <SourceFact label="Used by AI for" value={row.aiUsage} />
+          </div>
+          <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900/60">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                Google scope
+              </p>
+              <ScopeChips scopes={row.scopes.length ? row.scopes : row.requestedScopes} compact />
+            </div>
+          </div>
           <div className="mt-3 flex flex-wrap gap-2">
             {row.examples.map((example) => (
               <Link
@@ -403,6 +535,11 @@ function MemorySourceRow({
               {row.feedback.text}
             </p>
           )}
+          {row.lastError && !row.feedback && (
+            <p className="mt-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-300">
+              Last sync error{row.lastErrorAt ? ` (${formatLastSynced(row.lastErrorAt)})` : ''}: {friendlyError(row.lastError)}
+            </p>
+          )}
           {indexingInfo.detail && (
             <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
               {indexingInfo.detail}
@@ -413,16 +550,16 @@ function MemorySourceRow({
         <div className="rounded-lg border border-slate-100 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/50">
           <div className="mb-3 flex items-center justify-between gap-3">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-              Source flow
+              Data flow
             </p>
             <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">
               {formatLastSynced(row.lastSyncedAt)}
             </span>
           </div>
           <div className="grid gap-2 sm:grid-cols-3 xl:grid-cols-1">
-            <FlowState label="Connected" done={row.connected} active={!row.connected && presentation.buttonKind === 'connect'} />
-            <FlowState label="Imported" done={imported} active={row.isSyncing} />
-            <FlowState label="Searchable" done={memoryReady} active={indexingInfo.active} attention={indexingInfo.failed || presentation.tone === 'attention'} />
+            <FlowState label="Google access" done={row.connected} active={!row.connected && presentation.buttonKind === 'connect'} />
+            <FlowState label="Synced to DB" done={imported} active={row.isSyncing} />
+            <FlowState label="Indexed for AI" done={memoryReady} active={indexingInfo.active} attention={indexingInfo.failed || presentation.tone === 'attention'} />
           </div>
         </div>
 
@@ -442,6 +579,59 @@ function MemorySourceRow({
       </div>
     </div>
   );
+}
+
+function ScopeChips({ scopes, compact = false }: { scopes: string[]; compact?: boolean }) {
+  if (!scopes.length) {
+    return (
+      <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-400">
+        No scope recorded
+      </span>
+    );
+  }
+
+  return (
+    <span className="flex flex-wrap gap-1.5">
+      {scopes.map((scope) => (
+        <span
+          key={scope}
+          title={scope}
+          className={`rounded-full border border-slate-200 bg-white font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 ${
+            compact ? 'px-2 py-0.5 text-[11px]' : 'px-2.5 py-1 text-xs'
+          }`}
+        >
+          {formatScope(scope)}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+function SourceFact({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900/60">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+        {label}
+      </p>
+      <p className="mt-0.5 text-xs leading-5 text-slate-600 dark:text-slate-300">
+        {value}
+      </p>
+    </div>
+  );
+}
+
+function formatScope(scope: string) {
+  if (scope.includes('/auth/calendar')) return 'Calendar readonly';
+  if (scope.includes('/auth/gmail')) return 'Gmail readonly';
+  if (scope.includes('/auth/drive')) return 'Drive readonly';
+  if (scope.includes('/auth/contacts')) return 'Contacts readonly';
+  return scope.replace(/^https:\/\/www\.googleapis\.com\/auth\//, '');
 }
 
 function FlowState({

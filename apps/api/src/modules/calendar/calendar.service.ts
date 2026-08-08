@@ -10,6 +10,14 @@ import { google, calendar_v3 } from 'googleapis';
 import { PrismaService } from '../../prisma/prisma.service';
 import { decryptOAuthToken, encryptOAuthToken } from './oauth-token-crypto';
 import { invalidateUserSearchCache } from '../../common/cache/search-answer-cache';
+import {
+    GOOGLE_SOURCE_SCOPES,
+    getAllGoogleWorkspaceScopes,
+    getGoogleConnectionStatus,
+    markGoogleWorkspaceConnected,
+    recordGoogleSyncFailure,
+    recordGoogleSyncSuccess,
+} from '../google-connections/google-connections';
 
 type GoogleConnectInput = {
     supabaseId: string;
@@ -32,12 +40,7 @@ export class CalendarService {
 
     constructor(private readonly prisma: PrismaService) {}
 
-    private readonly oauthScopes = [
-        'https://www.googleapis.com/auth/calendar.readonly',
-        'https://www.googleapis.com/auth/contacts.readonly',
-        'https://www.googleapis.com/auth/drive.readonly',
-        'https://www.googleapis.com/auth/gmail.readonly',
-    ];
+    private readonly oauthScopes = getAllGoogleWorkspaceScopes();
 
     private getFrontendUrl() {
         const configuredUrl = process.env.FRONTEND_URL || process.env.CORS_ORIGIN;
@@ -196,14 +199,16 @@ export class CalendarService {
                 return this.buildFrontendRedirect('error', 'missing_tokens');
             }
 
-            await this.prisma.user.update({
+            const connectedUser = await this.prisma.user.update({
                 where: { supabaseId: state.supabaseId },
                 data: {
                     google_connected: true,
                     ...(tokens.access_token && { google_access_token: encryptOAuthToken(tokens.access_token) }),
                     ...(tokens.refresh_token && { google_refresh_token: encryptOAuthToken(tokens.refresh_token) }),
                 },
+                select: { id: true },
             });
+            await markGoogleWorkspaceConnected(this.prisma, connectedUser.id);
 
             return this.buildFrontendRedirect('connected');
         } catch (error) {
@@ -243,10 +248,21 @@ export class CalendarService {
             }),
         ]);
 
+        const fallbackConnected = user.google_connected && Boolean(user.google_refresh_token || user.google_access_token);
+        const connection = await getGoogleConnectionStatus(this.prisma, user.id, 'calendar', fallbackConnected);
+
         return {
-            connected: user.google_connected && Boolean(user.google_refresh_token || user.google_access_token),
+            source: 'calendar',
+            oauthMode: 'all_google_sources',
+            connected: connection.connected && fallbackConnected,
+            scopes: connection.scopes,
+            requestedScopes: GOOGLE_SOURCE_SCOPES.calendar,
+            workspaceScopes: this.oauthScopes,
             eventCount,
-            lastSyncedAt: latestEvent?.updated_at ?? null,
+            lastSyncedAt: connection.lastSyncAt ?? latestEvent?.updated_at ?? null,
+            lastError: connection.lastError,
+            lastErrorAt: connection.lastErrorAt,
+            syncCursor: connection.syncCursor,
         };
     }
 
@@ -339,6 +355,7 @@ export class CalendarService {
                 return queuedCount;
             });
             const linking = await this.linkCalendarEventsToDiaries(user.id);
+            await recordGoogleSyncSuccess(this.prisma, { userId: user.id, source: 'calendar' });
 
             return {
                 message: 'Sync completed successfully; calendar memory indexing queued and diary linking checked.',
@@ -350,6 +367,7 @@ export class CalendarService {
             };
 
         } catch (error) {
+            await recordGoogleSyncFailure(this.prisma, { userId: user.id, source: 'calendar', error });
             console.error('Failed to sync events:', error);
             throw new InternalServerErrorException('Could not sync calendar events to database');
         }
