@@ -92,6 +92,27 @@ try {
 installShutdownHandler('SIGINT');
 installShutdownHandler('SIGTERM');
 
-// 3. Keep the Worker process alive
-// For pure Node.js environments without an HTTP server
-setInterval(() => { }, 1000 * 60 * 60);
+// 3. Keep the Worker process alive & expose a health endpoint for Render Free Web Service
+import http from 'http';
+
+const port = Number(process.env.PORT ?? 3002);
+const server = http.createServer((req, res) => {
+  if (req.url === '/health' || req.url === '/') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: 'ok', workerId: WORKER_HEARTBEAT_ID, uptime: process.uptime() }));
+    return;
+  }
+  res.writeHead(404);
+  res.end();
+});
+
+server.listen(port, '0.0.0.0', () => {
+  console.log(`Worker health HTTP server listening on port ${port}`);
+});
+
+function closeHttpServer() {
+  server.close();
+}
+
+process.on('SIGINT', closeHttpServer);
+process.on('SIGTERM', closeHttpServer);
