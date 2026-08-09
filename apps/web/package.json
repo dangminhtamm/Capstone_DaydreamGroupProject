@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "pnpm --filter @second-brain/shared build && next build",
     "start": "next start",
     "lint": "eslint",
     "test": "node --import tsx --test src/lib/api-client.test.ts src/lib/auth-flow.test.ts src/features/google-calendar/google-calendar-api.test.ts src/features/google-calendar/google-calendar-utils.test.ts"
