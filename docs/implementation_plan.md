@@ -75,7 +75,7 @@ To achieve **100% free hosting** for the DayDreamer monorepo without Render memo
      ```
    - **Start Command**:
      ```bash
-     node apps/api/dist/main.js & node apps/worker/dist/index.js
+     node apps/api/dist/main.js & PORT=10001 node apps/worker/dist/index.js
      ```
 
 5. Under **Environment Variables**, add the following keys from your `.env`:
