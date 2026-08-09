@@ -6,7 +6,7 @@ import {
 } from "./tuturuuu-client.ts";
 import type { EmbeddingProvider } from "./types.ts";
 
-export type EmbeddingProviderName = "gemini";
+type EmbeddingProviderName = "gemini";
 export type EmbeddingTask = "RETRIEVAL_DOCUMENT" | "RETRIEVAL_QUERY";
 
 async function retry<T>(fn: () => Promise<T>, retries = 3): Promise<T> {
@@ -39,7 +39,7 @@ function normalize(values: number[]): number[] {
 export const DEFAULT_EMBEDDING_DIMENSION = 768;
 export const DEFAULT_EMBEDDING_PROVIDER: EmbeddingProviderName = "gemini";
 
-export const TUTURUUU_EMBEDDING_MODEL = normalizeTuturuuuModelName(
+const TUTURUUU_EMBEDDING_MODEL = normalizeTuturuuuModelName(
   process.env.TUTURUUU_EMBEDDING_MODEL ?? process.env.GEMINI_EMBEDDING_MODEL,
   DEFAULT_TUTURUUU_EMBEDDING_MODEL,
 );

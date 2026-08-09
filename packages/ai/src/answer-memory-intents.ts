@@ -69,7 +69,7 @@ export function isLatencyIntent(normalizedQuestion: string): boolean {
   ]);
 }
 
-export function isCalendarIntent(normalizedQuestion: string): boolean {
+function isCalendarIntent(normalizedQuestion: string): boolean {
   return includesAny(normalizedQuestion, [
     "calendar",
     "google calendar",
@@ -84,7 +84,7 @@ export function isCalendarIntent(normalizedQuestion: string): boolean {
   ]);
 }
 
-export function isAttachmentIntent(normalizedQuestion: string): boolean {
+function isAttachmentIntent(normalizedQuestion: string): boolean {
   return includesAny(normalizedQuestion, [
     "attachment",
     "attachments",
@@ -104,7 +104,7 @@ export function isAttachmentIntent(normalizedQuestion: string): boolean {
   ]);
 }
 
-export function isProgressIntent(normalizedQuestion: string): boolean {
+function isProgressIntent(normalizedQuestion: string): boolean {
   return includesAny(normalizedQuestion, [
     "progress",
     "work on",
@@ -137,7 +137,7 @@ export function isProgressIntent(normalizedQuestion: string): boolean {
   ]);
 }
 
-export function isTaskIntent(normalizedQuestion: string): boolean {
+function isTaskIntent(normalizedQuestion: string): boolean {
   return includesAny(normalizedQuestion, [
     "task",
     "action item",
@@ -152,7 +152,7 @@ export function isTaskIntent(normalizedQuestion: string): boolean {
   ]);
 }
 
-export function isDecisionIntent(normalizedQuestion: string): boolean {
+function isDecisionIntent(normalizedQuestion: string): boolean {
   return includesAny(normalizedQuestion, [
     "decide",
     "decision",
@@ -377,7 +377,7 @@ export function isStressIntent(normalizedQuestion: string): boolean {
   ]);
 }
 
-export function hasStressEvidence(searchable: string): boolean {
+function hasStressEvidence(searchable: string): boolean {
   return includesAny(searchable, [
     "felt stressed",
     "feel stressed",

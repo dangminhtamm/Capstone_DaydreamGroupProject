@@ -1,7 +1,7 @@
 import type { NextFunction, Request, Response } from 'express';
 import { randomUUID } from 'crypto';
 
-export const REQUEST_ID_HEADER = 'x-request-id';
+const REQUEST_ID_HEADER = 'x-request-id';
 
 export function requestIdMiddleware(
   req: Request,

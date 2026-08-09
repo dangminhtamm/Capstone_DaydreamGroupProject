@@ -2,7 +2,7 @@ import { SchemaType, type ResponseSchema } from "@google/generative-ai";
 import { z } from "zod";
 import { normalizeForIntent } from "./answer-memory-intents.ts";
 
-export const GroundedCitationSchema = z.object({
+const GroundedCitationSchema = z.object({
   marker: z.preprocess(normalizeCitationMarker, z.string().regex(/^S\d+$/)),
   claim: z.preprocess(
     normalizeCitationClaim,

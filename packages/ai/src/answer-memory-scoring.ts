@@ -251,7 +251,7 @@ export function classifyFallbackConfidence(citations: MemoryCitation[]): "high" 
   return "low";
 }
 
-export function isGoogleContactsSource(source: MemoryCitation): boolean {
+function isGoogleContactsSource(source: MemoryCitation): boolean {
   if (source.sourceType === "contact") return true;
   const searchable = normalizeForIntent(
     `${source.sourceTitle ?? ""} ${source.chunkType} ${source.quote}`,

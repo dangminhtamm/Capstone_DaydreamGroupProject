@@ -29,7 +29,7 @@ export class SupabaseStrategy extends PassportStrategy(Strategy) {
     }
 }
 
-export function createSupabaseSecretProvider(projectId: string): SecretProvider {
+function createSupabaseSecretProvider(projectId: string): SecretProvider {
     const jwksSecretProvider = passportJwtSecret({
         cache: true,
         rateLimit: true,

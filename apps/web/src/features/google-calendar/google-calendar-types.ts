@@ -48,7 +48,7 @@ export type CalendarError = {
   message: string;
 };
 
-export type CalendarState = {
+type CalendarState = {
   status: CalendarConnectionStatus | null;
   events: CalendarEvent[];
   isLoading: boolean;

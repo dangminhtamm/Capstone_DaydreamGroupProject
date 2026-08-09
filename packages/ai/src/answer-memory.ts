@@ -93,7 +93,6 @@ type RoutingTrace = NonNullable<NonNullable<AnswerMemoryResult["debugTrace"]>["r
 export type {
   AnswerMemoryOptions,
   AnswerMemoryResult,
-  AnswerMode,
   AnswerStrategy,
   MemoryDebugTrace,
   QueryAnalytics,

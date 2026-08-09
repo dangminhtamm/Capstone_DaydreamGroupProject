@@ -55,7 +55,7 @@ function selectBestEvidence(chunk: MemorySearchHit): string {
   return evidence;
 }
 
-export function safeMetadata(metadata: unknown): { sourceTitle?: string } {
+function safeMetadata(metadata: unknown): { sourceTitle?: string } {
   if (!metadata || typeof metadata !== "object") return {};
   const value = metadata as Record<string, unknown>;
 
@@ -65,7 +65,7 @@ export function safeMetadata(metadata: unknown): { sourceTitle?: string } {
   };
 }
 
-export function trimEvidence(text: string, maxLength = 600): string {
+function trimEvidence(text: string, maxLength = 600): string {
   const normalized = text.replace(/\s+/g, " ").trim();
   if (normalized.length <= maxLength) return normalized;
   return `${normalized.slice(0, maxLength - 1)}…`;

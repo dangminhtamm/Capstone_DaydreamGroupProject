@@ -3,7 +3,7 @@ import {
   generateTuturuuuText,
 } from "./tuturuuu-client.ts";
 
-export type ResponseSchema = unknown;
+type ResponseSchema = unknown;
 
 export interface GenerateGeminiJsonOptions<T> {
   model: string;

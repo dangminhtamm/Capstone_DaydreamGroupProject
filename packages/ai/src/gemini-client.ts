@@ -50,7 +50,7 @@ export function createGeminiCompatibleClient(
   return new GoogleGenerativeAI(apiKey);
 }
 
-export function explainGeminiGatewayError(error: unknown): Error {
+function explainGeminiGatewayError(error: unknown): Error {
   const original = error instanceof Error ? error : new Error(String(error));
   if (!isSelfSignedCertificateError(original) && !isTuturuuuFetchFailure(original)) {
     return original;

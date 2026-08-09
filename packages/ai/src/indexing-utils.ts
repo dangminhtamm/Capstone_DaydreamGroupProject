@@ -9,7 +9,7 @@ export interface ExtractedEntityMention {
   entityValue: string;
 }
 
-export const DEFAULT_TEXT_CHUNK_CHARS = 1200;
+const DEFAULT_TEXT_CHUNK_CHARS = 1200;
 
 export function normalizeWhitespace(text: string): string {
   return text.replace(/\s+/g, " ").trim();

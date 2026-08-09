@@ -127,7 +127,7 @@ export async function syncCalendar(accessToken: string | null, limit?: number): 
   return response.json();
 }
 
-export function isCalendarError(error: unknown): error is CalendarError {
+function isCalendarError(error: unknown): error is CalendarError {
   return (
     typeof error === 'object' &&
     error !== null &&

@@ -12,7 +12,7 @@ type PendingCommand = {
 
 const DEFAULT_COMMAND_TIMEOUT_MS = 500;
 
-export class LightweightRedisClient {
+class LightweightRedisClient {
   private socket: net.Socket | tls.TLSSocket | null = null;
   private buffer = Buffer.alloc(0);
   private pending: PendingCommand[] = [];

@@ -62,7 +62,7 @@ export function selectSingleDayCitations(citations: MemoryCitation[]): MemoryCit
   return selected.length ? selected : citations;
 }
 
-export function formatTemporalRangeAnswer(
+function formatTemporalRangeAnswer(
   citations: MemoryCitation[],
   rangeLabel: string,
   lang: ResponseLanguage,
@@ -138,7 +138,7 @@ export function buildReadableClaim(citation: MemoryCitation): string {
   return trimPromptQuote(formatMemoryBullet(citation), 220);
 }
 
-export function formatMemoryBullet(citation: MemoryCitation, maxLength = 240): string {
+function formatMemoryBullet(citation: MemoryCitation, maxLength = 240): string {
   return sentenceCase(
     trimTrailingPunctuation(
       stripSourceTitlePrefix(cleanMemoryText(citation.quote, maxLength), citation.sourceTitle),
@@ -364,7 +364,7 @@ export function buildQuestionAwareFallbackAnswer(
   return [`${lead} The most relevant memories were:`, bullets].join("\n");
 }
 
-export function formatValidationFallbackLead(message: string, lang: ResponseLanguage): string {
+function formatValidationFallbackLead(message: string, lang: ResponseLanguage): string {
   const normalized = message.toLowerCase();
   const isGroundingIssue =
     normalized.includes("grounded") ||
