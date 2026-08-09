@@ -270,7 +270,7 @@ export async function askSearch(
   }, accessToken);
 
   if (!response.ok) {
-    throw new Error("Failed to fetch answer");
+    throw new Error(await readApiError(response, 'Failed to fetch answer'));
   }
 
   return response.json() as Promise<AskResponse>;

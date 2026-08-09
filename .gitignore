@@ -29,5 +29,17 @@ pnpm-cache/
 **/.DS_Store
 *.zip
 
+# Temp / output artifacts
+output/
+tmp/
+pnpm_tmp/
+
+# npm lockfiles in pnpm workspace
+**/package-lock.json
+
+# IDE
+.idea/
+.vscode/
+
 # Prisma
 prisma/generated/

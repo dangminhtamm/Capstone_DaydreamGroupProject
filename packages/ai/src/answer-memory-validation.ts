@@ -96,11 +96,15 @@ export function answerPassesEvidenceChecks(
     .join(" ");
   const normalizedEvidence = normalizeForIntent(evidenceText);
 
+  // Date check: tolerate 1 unsupported date if the answer has multiple
   const answerDateTokens = extractDateLikeTokens(answer);
-  if (answerDateTokens.some((token) => !dateTokenSupportedByEvidence(token, normalizedEvidence))) {
-    return false;
-  }
+  const unsupportedDates = answerDateTokens.filter(
+    (token) => !dateTokenSupportedByEvidence(token, normalizedEvidence),
+  );
+  if (unsupportedDates.length > 1) return false;
+  if (unsupportedDates.length === 1 && answerDateTokens.length <= 1) return false;
 
+  // Entity check: allow a tolerance based on answer length
   const answerNames = extractNamedEntityTokens(answer);
   const unsupportedNames = answerNames.filter((name) => {
     const normalizedName = normalizeForIntent(name);
@@ -110,7 +114,9 @@ export function answerPassesEvidenceChecks(
     );
   });
 
-  return unsupportedNames.length === 0;
+  // Short answers (few entities) — strict; longer answers — allow some tolerance
+  const maxUnsupported = answerNames.length <= 3 ? 0 : Math.min(2, Math.floor(answerNames.length * 0.3));
+  return unsupportedNames.length <= maxUnsupported;
 }
 
 export function isInsufficientAnswer(answer: string): boolean {
@@ -202,27 +208,33 @@ function extractDateLikeTokens(value: string): string[] {
 }
 
 function extractNamedEntityTokens(value: string): string[] {
+  // Common sentence-starting words, conjunctions, and generic terms
+  // that are often capitalized but are NOT named entities
   const ignored = new Set([
-    "I",
-    "You",
-    "The",
-    "This",
-    "That",
-    "On",
-    "In",
-    "Based",
-    "Mình",
-    "Bạn",
-    "Dựa",
-    "Dựa Trên",
-    "Vào",
-    "Trong",
-    "Nhóm",
-    "Theo",
-    "Quyết",
-    "Quyết Định",
-    "Kế Hoạch",
-    "Tóm Tắt",
+    // English common words
+    "I", "You", "We", "He", "She", "It", "They", "My", "Your", "Our",
+    "The", "This", "That", "These", "Those", "Here", "There",
+    "And", "But", "Or", "So", "Yet", "For", "Nor",
+    "Is", "Are", "Was", "Were", "Has", "Have", "Had", "Do", "Does", "Did",
+    "Will", "Would", "Could", "Should", "May", "Might", "Can", "Must",
+    "Not", "No", "Yes", "All", "Some", "Any", "Each", "Every", "Many", "Much",
+    "On", "In", "At", "To", "From", "By", "With", "About", "Into", "Through",
+    "Of", "As", "If", "When", "While", "After", "Before", "Since", "Until",
+    "Also", "However", "Therefore", "Moreover", "Furthermore", "Nevertheless",
+    "Additionally", "Meanwhile", "Otherwise", "Consequently", "Subsequently",
+    "Based", "According", "Overall", "Specifically", "Generally", "Typically",
+    "Note", "Key", "Main", "Important", "Several", "Various", "Both",
+    "First", "Second", "Third", "Next", "Last", "Finally",
+    "New", "Other", "More", "Most", "Such", "One", "Two", "Three",
+    // Vietnamese common words
+    "Mình", "Bạn", "Tôi", "Chúng",
+    "Dựa", "Dựa Trên", "Vào", "Trong", "Nhóm", "Theo",
+    "Quyết", "Quyết Định", "Kế Hoạch", "Tóm Tắt",
+    "Với", "Của", "Cho", "Từ", "Về", "Như", "Và", "Hoặc",
+    "Đây", "Đó", "Này", "Khi", "Nếu", "Sau", "Trước",
+    "Cũng", "Ngoài", "Tuy", "Nhưng", "Vì", "Nên",
+    "Các", "Những", "Một", "Hai", "Ba",
+    "Rất", "Khá", "Nhiều", "Ít", "Hơn",
   ]);
 
   const matches = value.match(/\b[\p{Lu}][\p{L}\p{M}\p{N}_-]*(?:\s+[\p{Lu}][\p{L}\p{M}\p{N}_-]*){0,3}\b/gu) ?? [];
@@ -238,10 +250,30 @@ function namedEntitySupportedByEvidence(
   normalizedName: string,
   normalizedEvidence: string,
 ): boolean {
+  // Exact match
   if (normalizedEvidence.includes(normalizedName)) return true;
 
+  // Alias match
   const aliases = namedEntityAliases(normalizedName);
-  return aliases.some((alias) => normalizedEvidence.includes(alias));
+  if (aliases.some((alias) => normalizedEvidence.includes(alias))) return true;
+
+  // Partial word match: for multi-word entities like "Ho Chi Minh City",
+  // check if most individual words appear in evidence
+  const words = normalizedName.split(/\s+/).filter((w) => w.length >= 3);
+  if (words.length >= 2) {
+    const hits = words.filter((word) => normalizedEvidence.includes(word)).length;
+    if (hits >= Math.ceil(words.length * 0.6)) return true;
+  }
+
+  // Single-word entity: check if it appears as a substring of a longer word
+  // in the evidence (e.g., "RMIT" in "rmit capabilities")
+  if (words.length === 1 && normalizedName.length >= 3) {
+    // Check the evidence for the entity as part of a compound word or phrase
+    const nameRegex = new RegExp(`\\b${escapeRegex(normalizedName)}`, "u");
+    if (nameRegex.test(normalizedEvidence)) return true;
+  }
+
+  return false;
 }
 
 function namedEntityAliases(normalizedName: string): string[] {
@@ -267,3 +299,8 @@ function quoteContainsMeaningfulPhrase(value: string, quote: string): boolean {
   const compactValue = normalizedValue.replace(/\s+/g, " ").trim();
   return compactValue.length >= 4 && normalizedQuote.includes(compactValue);
 }
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
