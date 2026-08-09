@@ -37,6 +37,10 @@ export function rerankMemoryHits(
   const preferredSourceTypes = new Set(filters.preferredSourceTypes ?? []);
   const preferredChunkTypes = new Set(filters.preferredChunkTypes ?? []);
   const hasTimeFilter = Boolean(filters.startDate && filters.endDate);
+  const temporalSpanDays = filters.startDate && filters.endDate
+    ? (filters.endDate.getTime() - filters.startDate.getTime()) / (24 * 60 * 60 * 1000)
+    : 0;
+  const broadTemporalRange = temporalSpanDays > 2;
 
   return chunks
     .map((chunk) => {
@@ -62,9 +66,16 @@ export function rerankMemoryHits(
       const importanceBoost = getMetadataImportance(chunk.metadata) * 0.012;
       const sourceReliabilityBoost = getSourceReliabilityBoost(chunk.sourceType);
       const timeMatchBoost = hasTimeFilter ? 0.03 : 0;
+      const primaryTemporalBoost = broadTemporalRange && isPrimaryMemorySource(chunk.sourceType)
+        ? 0.055
+        : 0;
       const intentBoost = getIntentSpecificBoost(normalizedQuestion, chunk);
       const noisePenalty = getMemoryNoisePenalty(chunk);
-      const summaryPenalty = hasPrimarySources && chunk.sourceType === "summary" ? 0.06 : 0;
+      const summaryPenalty = hasPrimarySources && chunk.sourceType === "summary"
+        ? broadTemporalRange
+          ? 0.14
+          : 0.06
+        : 0;
 
       const rerankScore =
         chunk.similarity +
@@ -77,6 +88,7 @@ export function rerankMemoryHits(
         importanceBoost +
         sourceReliabilityBoost +
         timeMatchBoost +
+        primaryTemporalBoost +
         intentBoost -
         noisePenalty -
         summaryPenalty;
@@ -135,6 +147,10 @@ function getSourceReliabilityBoost(sourceType: string): number {
     default:
       return 0;
   }
+}
+
+function isPrimaryMemorySource(sourceType: string): boolean {
+  return sourceType !== "summary";
 }
 
 function getIntentSpecificBoost(normalizedQuestion: string, chunk: MemorySearchHit): number {

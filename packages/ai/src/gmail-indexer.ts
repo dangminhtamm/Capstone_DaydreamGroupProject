@@ -9,7 +9,7 @@ import {
   withEmbeddings,
 } from "./indexing-utils.ts";
 import type { PersistedMemoryChunkPayload } from "./memory-indexer.ts";
-import type { MemoryChunkMetadata } from "./types.ts";
+import { withMemoryDate, type MemoryChunkMetadata } from "./types.ts";
 
 export interface GmailMessageInput {
   messageId: string;
@@ -62,7 +62,7 @@ export async function indexMemoryFromGmail(
   const parts = splitTextByBoundary(textForChunking, 1200);
 
   const chunks = parts.map((text, index) => {
-    const metadata: MemoryChunkMetadata = {
+    const metadata: MemoryChunkMetadata = withMemoryDate({
       date: occurredAt.toISOString(),
       sourceType: "gmail",
       sourceId: input.message.messageId,
@@ -73,7 +73,7 @@ export async function indexMemoryFromGmail(
       people: [input.message.sender],
       tags: ["google", "gmail", "email"],
       importance: 3,
-    };
+    });
 
     return {
       userId: input.userId,

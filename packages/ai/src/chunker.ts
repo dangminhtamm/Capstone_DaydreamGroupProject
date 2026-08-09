@@ -2,19 +2,66 @@ import { SchemaType, type ResponseSchema } from "@google/generative-ai";
 import { z } from "zod";
 import { generateGeminiJson } from "./gemini-json.ts";
 import { getGeminiChunkModel } from "./gemini-models.ts";
-import type { MemoryChunkMetadata } from "./types.ts";
+import { withMemoryDate, type MemoryChunkMetadata } from "./types.ts";
+
+const ALLOWED_CHUNK_TYPES = [
+  "feedback",
+  "decision",
+  "action_item",
+  "reflection",
+  "event",
+  "general",
+] as const;
+
+type SemanticChunkType = typeof ALLOWED_CHUNK_TYPES[number];
+
+export function normalizeSemanticChunkType(value: unknown): SemanticChunkType {
+  if (typeof value !== "string") return "general";
+
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+
+  if ((ALLOWED_CHUNK_TYPES as readonly string[]).includes(normalized)) {
+    return normalized as SemanticChunkType;
+  }
+
+  const aliases: Record<string, SemanticChunkType> = {
+    action: "action_item",
+    task: "action_item",
+    todo: "action_item",
+    to_do: "action_item",
+    follow_up: "action_item",
+    followup: "action_item",
+    assignment: "action_item",
+    feedback_received: "feedback",
+    feedback_given: "feedback",
+    choice: "decision",
+    commitment: "decision",
+    agreement: "decision",
+    insight: "reflection",
+    emotion: "reflection",
+    mood: "reflection",
+    activity: "event",
+    meeting: "event",
+    appointment: "event",
+    note: "general",
+    general_note: "general",
+    memory: "general",
+    fact: "general",
+  };
+
+  return aliases[normalized] ?? "general";
+}
 
 const SemanticChunkSchema = z.object({
   chunks: z.array(
     z.object({
-      chunkType: z.enum([
-        "feedback",
-        "decision",
-        "action_item",
-        "reflection",
-        "event",
-        "general",
-      ]),
+      chunkType: z.preprocess(
+        normalizeSemanticChunkType,
+        z.enum(ALLOWED_CHUNK_TYPES),
+      ),
       text: z.string().min(1),
       evidence: z.string().min(1).describe("Exact or near-exact source snippet from the diary"),
       people: z.array(z.string()).default([]),
@@ -136,7 +183,7 @@ ${rawText}
   return output.chunks.map((chunk, index) => ({
     text: chunk.text,
     evidence: chunk.evidence,
-    metadata: {
+    metadata: withMemoryDate({
       ...baseMetadata,
       chunkIndex: index,
       chunkType: chunk.chunkType,
@@ -146,6 +193,6 @@ ${rawText}
       habits: chunk.habits,
       tags: chunk.tags,
       importance: chunk.importance,
-    } satisfies MemoryChunkMetadata,
+    } satisfies MemoryChunkMetadata),
   }));
 }

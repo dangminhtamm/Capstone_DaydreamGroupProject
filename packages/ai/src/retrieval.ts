@@ -273,14 +273,20 @@ export async function retrieveMemoryWithEmbedding(
     return true;
   });
 
-  if (strictResults.length || !shouldUseTemporalFallback(filters)) {
+  if (!shouldMergeTemporalFallback(filters, strictResults.length, limit)) {
     return strictResults;
   }
 
-  return retrieveTemporalFallback(dbClient, whereClause, vectorString, limit, {
+  const temporalResults = await retrieveTemporalFallback(dbClient, whereClause, vectorString, limit, {
     sourceTypeBoost,
     chunkTypeBoost,
   });
+
+  if (!strictResults.length) return temporalResults;
+
+  return dedupeHits([...strictResults, ...temporalResults])
+    .sort(compareHits)
+    .slice(0, limit);
 }
 
 async function retrieveTemporalFallback(
@@ -345,6 +351,46 @@ function shouldUseTemporalFallback(filters: RetrievalFilters): boolean {
 
   const maxRangeMs = 36 * 60 * 60 * 1000;
   return end - start <= maxRangeMs;
+}
+
+function shouldMergeTemporalFallback(
+  filters: RetrievalFilters,
+  strictResultCount: number,
+  limit: number,
+): boolean {
+  if (!shouldUseTemporalFallback(filters)) return false;
+  if (strictResultCount === 0) return true;
+
+  const start = filters.startDate?.getTime() ?? Number.NaN;
+  const end = filters.endDate?.getTime() ?? Number.NaN;
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
+    return false;
+  }
+
+  const spanMs = end - start;
+  const monthOrShorterMs = 32 * 24 * 60 * 60 * 1000;
+  const targetEvidenceCount = spanMs <= monthOrShorterMs
+    ? Math.min(limit, 12)
+    : Math.min(limit, 4);
+
+  return strictResultCount < targetEvidenceCount;
+}
+
+function dedupeHits(hits: MemorySearchHit[]): MemorySearchHit[] {
+  const byId = new Map<string, MemorySearchHit>();
+  for (const hit of hits) {
+    const existing = byId.get(hit.id);
+    if (!existing || hit.similarity > existing.similarity) {
+      byId.set(hit.id, hit);
+    }
+  }
+
+  return [...byId.values()];
+}
+
+function compareHits(a: MemorySearchHit, b: MemorySearchHit): number {
+  return b.similarity - a.similarity ||
+    b.occurredAt.getTime() - a.occurredAt.getTime();
 }
 
 function clampWeight(value: number): number {

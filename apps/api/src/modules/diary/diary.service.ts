@@ -185,7 +185,7 @@ export class DiaryService {
     const { user } = await this.findOwnedEntry(userId, id);
 
     return this.prisma.$transaction(async (tx) => {
-      await deleteMemoryChunksForSource(tx as any, {
+      await deleteMemoryChunksForSource(tx, {
         userId: user.id,
         sourceType: 'diary',
         sourceId: id,

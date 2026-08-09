@@ -104,6 +104,7 @@ export function inferRetrievalFilters(
   if (intent === "blocker") {
     return {
       ...temporalFilters,
+      sourceTypes: ["diary", "calendar", "summary"],
       preferredSourceTypes: ["diary", "summary"],
       preferredChunkTypes: ["reflection", "action_item", "general", "general_note"],
       vectorWeight: 0.62,
@@ -114,6 +115,7 @@ export function inferRetrievalFilters(
   if (intent === "mood") {
     return {
       ...temporalFilters,
+      sourceTypes: ["diary", "summary"],
       preferredSourceTypes: ["diary", "summary"],
       preferredChunkTypes: ["reflection", "general", "general_note"],
       vectorWeight: 0.68,
@@ -124,7 +126,8 @@ export function inferRetrievalFilters(
   if (intent === "progress") {
     return {
       ...temporalFilters,
-      preferredSourceTypes: ["diary", "calendar", "summary"],
+      sourceTypes: ["diary", "calendar", "summary"],
+      preferredSourceTypes: ["diary", "calendar"],
       preferredChunkTypes: ["event", "decision", "action_item", "reflection", "general", "general_note"],
       vectorWeight: 0.64,
       lexicalWeight: 0.36,

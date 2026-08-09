@@ -5,7 +5,7 @@ import {
 } from "./embedding.ts";
 import { withEmbeddings } from "./indexing-utils.ts";
 import type { PersistedMemoryChunkPayload } from "./memory-indexer.ts";
-import type { MemoryChunkMetadata } from "./types.ts";
+import { withMemoryDate, type MemoryChunkMetadata } from "./types.ts";
 
 export interface GoogleContactInput {
   contactId: string;
@@ -91,8 +91,9 @@ function buildContactChunks(
 
   if (!text.trim()) return [];
 
-  const metadata: MemoryChunkMetadata = {
-    date: (contact.updatedAt ?? new Date()).toISOString(),
+  const occurredAt = contact.updatedAt ?? new Date();
+  const metadata: MemoryChunkMetadata = withMemoryDate({
+    date: occurredAt.toISOString(),
     sourceType: "contact",
     sourceId: contact.contactId,
     sourceTitle: contact.displayName,
@@ -103,7 +104,7 @@ function buildContactChunks(
     projects: organizations,
     tags: ["google", "contacts"],
     importance: 3,
-  };
+  });
 
   return [
     {
@@ -115,7 +116,7 @@ function buildContactChunks(
       text,
       evidence: text.slice(0, 400),
       metadata,
-      occurredAt: contact.updatedAt ?? new Date(),
+      occurredAt,
     },
   ];
 }

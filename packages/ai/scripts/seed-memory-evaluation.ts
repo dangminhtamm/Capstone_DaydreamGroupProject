@@ -65,7 +65,7 @@ if (process.argv.includes("--help") || process.argv.includes("-h")) {
     import("@second-brain/db"),
     import("../src/index.ts"),
   ]);
-  const prisma = db.prisma ?? db.createPrismaClient();
+  const prisma = db.createPrismaClient();
   const {
     deleteEntityMentionsForSource,
     deleteMemoryChunksForSource,

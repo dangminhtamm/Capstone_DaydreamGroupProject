@@ -12,7 +12,7 @@ import {
 } from "./embedding.ts";
 import { withEmbeddings } from "./indexing-utils.ts";
 import type { PersistedMemoryChunkPayload } from "./memory-indexer.ts";
-import type { MemoryChunkMetadata } from "./types.ts";
+import { withMemoryDate, type MemoryChunkMetadata } from "./types.ts";
 
 export interface CalendarEventInput {
   /** The calendar_events.id (DB primary key) */
@@ -116,7 +116,7 @@ function buildCalendarChunks(
   // Chunk 0: Event summary sentence — designed for high recall on questions
   // like "What meetings do I have next week?" or "When is the standup?"
   const summaryText = buildSummaryText(event.title, dateStr, timeRange);
-  const baseMetadata: MemoryChunkMetadata = {
+  const baseMetadata: MemoryChunkMetadata = withMemoryDate({
     date: event.startTime.toISOString(),
     sourceType: "calendar",
     sourceId: event.eventId,
@@ -129,7 +129,7 @@ function buildCalendarChunks(
     people: [],
     projects: [],
     importance: 3,
-  };
+  });
 
   chunks.push({
     userId,

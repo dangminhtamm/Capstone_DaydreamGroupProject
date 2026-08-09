@@ -13,18 +13,26 @@ import {
   includesAny,
   normalizeForIntent,
 } from "./answer-memory-intents.ts";
-import { isNoisyFallbackSource } from "./answer-memory-scoring.ts";
+import {
+  isNoisyFallbackSource,
+  scoreSourceForIntent,
+} from "./answer-memory-scoring.ts";
 
 export function prepareFastCitations(
   sources: MemoryCitation[],
   options: {
     intent: MemoryIntent;
+    question?: string;
+    focused?: boolean;
     maxCitations?: number;
   },
 ): MemoryCitation[] {
   const maxCitations = Math.min(Math.max(options.maxCitations ?? 5, 1), 8);
   const nonNoisySources = sources.filter((source) => !isNoisyFallbackSource(source));
-  const candidates = nonNoisySources.length ? nonNoisySources : sources;
+  const candidates = rankFastCitationCandidates(
+    nonNoisySources.length ? nonNoisySources : sources,
+    options,
+  );
   const selected: MemoryCitation[] = [];
   const fingerprints: Array<Set<string>> = [];
   const perSourceCount = new Map<string, number>();
@@ -52,6 +60,36 @@ export function prepareFastCitations(
   }
 
   return renumberCitations(selected.length ? selected : candidates.slice(0, maxCitations));
+}
+
+function rankFastCitationCandidates(
+  sources: MemoryCitation[],
+  options: {
+    intent: MemoryIntent;
+    question?: string;
+    focused?: boolean;
+  },
+): MemoryCitation[] {
+  if (!options.question?.trim()) return sources;
+
+  const normalizedQuestion = normalizeForIntent(options.question);
+  const scored = sources
+    .map((source, index) => ({
+      source,
+      index,
+      score: scoreSourceForIntent(normalizedQuestion, source, options.intent),
+    }))
+    .sort((a, b) => b.score - a.score || a.index - b.index);
+
+  if (options.focused === false || scored.length <= 2) {
+    return scored.map((item) => item.source);
+  }
+
+  const topScore = scored[0]?.score ?? 0;
+  const minimumScore = Math.max(0.5, topScore - 0.12);
+  const focused = scored.filter((item) => item.score >= minimumScore);
+
+  return (focused.length ? focused : scored.slice(0, 2)).map((item) => item.source);
 }
 
 export function formatTemporalFastAnswer(input: {

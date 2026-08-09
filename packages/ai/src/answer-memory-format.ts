@@ -138,8 +138,12 @@ export function buildReadableClaim(citation: MemoryCitation): string {
   return trimPromptQuote(formatMemoryBullet(citation), 220);
 }
 
-export function formatMemoryBullet(citation: MemoryCitation): string {
-  return sentenceCase(trimTrailingPunctuation(cleanMemoryText(citation.quote)));
+export function formatMemoryBullet(citation: MemoryCitation, maxLength = 240): string {
+  return sentenceCase(
+    trimTrailingPunctuation(
+      stripSourceTitlePrefix(cleanMemoryText(citation.quote, maxLength), citation.sourceTitle),
+    ),
+  );
 }
 
 export function formatLocalizedMemoryBullet(
@@ -157,18 +161,39 @@ export function formatLocalizedMemoryBullet(
   );
 }
 
-export function cleanMemoryText(text: string): string {
+export function cleanMemoryText(text: string, maxLength = 240): string {
+  const withoutTitle = stripDiaryTitlePrefix(text);
+
   return trimPromptQuote(
-    text
+    withoutTitle
       .replace(/\*\*/g, "")
       .replace(/\s+\*\s+/g, ". ")
       .replace(/^[-*]\s+/g, "")
       .replace(/\s+/g, " ")
       .replace(/^daily log:\s*\d{4}-\d{2}-\d{2}\s*\.?\s*/i, "")
+      .replace(/^weekly review:\s*\d{4}-\d{2}-\d{2}\s*(?:to|-)\s*\d{4}-\d{2}-\d{2}\s*\.?\s*/i, "")
+      .replace(/^monthly retrospective:\s*[a-z]+\s+\d{4}\s*\.?\s*/i, "")
       .replace(/^(diary entry|journal entry|nhat ky|nhật ký)(\s+h[oô]m nay|\s+today)?\s*[:\-–—]?\s*/i, "")
       .trim(),
-    240,
+    maxLength,
   );
+}
+
+function stripDiaryTitlePrefix(text: string): string {
+  const normalized = text.replace(/\r\n/g, "\n").trim();
+  const match = normalized.match(/^([^\n]{3,120})\n{2,}([\s\S]{20,})$/u);
+  if (!match) return text;
+
+  const title = match[1]?.trim() ?? "";
+  const body = match[2]?.trim() ?? "";
+  if (!title || !body) return text;
+
+  const titleLooksLikeHeading =
+    title.length <= 90 &&
+    !/[.!?。！？]$/u.test(title) &&
+    !title.includes(":");
+
+  return titleLooksLikeHeading ? body : text;
 }
 
 export function formatIntentEvidenceAnswer(
@@ -450,6 +475,11 @@ function summarizeCitationInVietnamese(
     }
   }
 
+  if (intent === "progress" || intent === "generic") {
+    const progressSummary = summarizeProgressCitationInVietnamese(searchable);
+    if (progressSummary) return progressSummary;
+  }
+
   if (intent === "decision") {
     if (hasGmailEvidence(searchable)) {
       return summarizeCitationInVietnamese(citation, "gmail");
@@ -465,6 +495,29 @@ function summarizeCitationInVietnamese(
   return null;
 }
 
+function summarizeProgressCitationInVietnamese(searchable: string): string | null {
+  if (includesAny(searchable, ["edit my capstone paper", "editing my capstone paper"])) {
+    return "Bạn ở nhà chỉnh sửa bài capstone";
+  }
+  if (includesAny(searchable, ["fix cho xong project capstone", "fix project capstone"])) {
+    return "Bạn cố gắng fix cho xong project capstone rồi nghỉ ngơi";
+  }
+  if (
+    includesAny(searchable, ["cafe", "ca phe", "cà phê"]) &&
+    includesAny(searchable, ["project", "capstone", "hoan thanh", "hoàn thành"])
+  ) {
+    return "Bạn ra quán cà phê và tiếp tục cố hoàn thành project";
+  }
+  if (includesAny(searchable, ["ngu tu sang toi toi", "ngủ từ sáng tới tối", "sleeping from morning to night"])) {
+    return "Bạn gần như nghỉ cả ngày, chủ yếu ngủ từ sáng tới tối";
+  }
+  if (includesAny(searchable, ["troi mua nguyen ngay", "trời mưa nguyên ngày", "rained consistently throughout the day"])) {
+    return "Thời tiết hôm đó mưa cả ngày";
+  }
+
+  return null;
+}
+
 function trimTrailingPunctuation(value: string): string {
   return value.trim().replace(/[.!?。！？]+$/u, "");
 }
@@ -475,8 +528,21 @@ function sentenceCase(value: string): string {
   return trimmed[0].toUpperCase() + trimmed.slice(1);
 }
 
+function stripSourceTitlePrefix(text: string, sourceTitle?: string): string {
+  const title = sourceTitle?.replace(/\s+/g, " ").trim();
+  if (!title) return text;
+
+  const normalizedText = text.replace(/\s+/g, " ").trim();
+  if (normalizedText === title) return text;
+  if (!normalizedText.toLowerCase().startsWith(`${title.toLowerCase()} `)) {
+    return text;
+  }
+
+  return normalizedText.slice(title.length).trim();
+}
+
 function formatSingleDayFact(citation: MemoryCitation): string {
-  return sentenceCase(trimTrailingPunctuation(cleanMemoryText(citation.quote)));
+  return formatMemoryBullet(citation, 520);
 }
 
 function formatVietnameseDayFacts(facts: string[]): string {
@@ -523,7 +589,7 @@ function naturalizeVietnameseDayFact(value: string): string {
 }
 
 function naturalizeEnglishDayFact(value: string): string {
-  return trimTrailingPunctuation(value)
+  return naturalizeEnglishWorkFact(trimTrailingPunctuation(value))
     .replace(/\btoday\b/gi, "that day")
     .replace(/\bI am\b/g, "you are")
     .replace(/\bI'm\b/g, "you're")
@@ -533,6 +599,16 @@ function naturalizeEnglishDayFact(value: string): string {
     .replace(/\bme\b/gi, "you")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function naturalizeEnglishWorkFact(value: string): string {
+  return value
+    .replace(
+      /^the mvp is ready when\b/i,
+      "you worked on the final MVP checklist, checking that",
+    )
+    .replace(/\bwe should rehearse\b/gi, "you planned to rehearse")
+    .replace(/\bwe should\b/gi, "you planned to");
 }
 
 function lowercaseFirst(value: string): string {

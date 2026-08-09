@@ -17,7 +17,10 @@ import type {
   ResponseLanguage,
 } from "./answer-memory-types.ts";
 import { detectMemoryIntent } from "./answer-memory-intents.ts";
-import { trimPromptQuote } from "./answer-memory-format.ts";
+import {
+  formatDateForAnswer,
+  trimPromptQuote,
+} from "./answer-memory-format.ts";
 import {
   inferRetrievalFilters,
   resolveMemoryTimeZone,
@@ -79,7 +82,13 @@ import {
   isInsufficientAnswer,
   reconcileConfidence,
 } from "./answer-memory-validation.ts";
-import { retrieveUnindexedDiaryFallbackHits } from "./answer-memory-unindexed.ts";
+import {
+  findDiariesCreatedInRangeWithDifferentEntryDate,
+  retrieveUnindexedDiaryFallbackHits,
+  type CreatedDiaryDateMismatch,
+} from "./answer-memory-unindexed.ts";
+
+type RoutingTrace = NonNullable<NonNullable<AnswerMemoryResult["debugTrace"]>["routingTrace"]>;
 
 export type {
   AnswerMemoryOptions,
@@ -111,7 +120,11 @@ export async function answerMemory(
     return noMemoryResult(lang === "vi" ? "Bạn chưa nhập câu hỏi." : "Please enter a question.", lang);
   }
 
-  const inferredFilters = inferRetrievalFilters(normalizedQuestion, new Date(), timeZone);
+  const inferredFilters = inferRetrievalFilters(
+    normalizedQuestion,
+    options.now ?? new Date(),
+    timeZone,
+  );
   const broadTemporalSynthesis = isBroadTemporalSynthesisQuestion(
     normalizedQuestion,
     intent,
@@ -141,6 +154,15 @@ export async function answerMemory(
   const useAutoFastPath = answerStrategy === "auto" &&
     shouldUseAutoFastPath(normalizedQuestion, intent, appliedFilters);
   const canUseFastPath = answerStrategy === "fast" || useAutoFastPath;
+  const baseRoutingTrace = {
+    intent,
+    requestedStrategy: answerStrategy,
+    autoFastEligible: useAutoFastPath,
+    fastPathEligible: canUseFastPath,
+  } satisfies Pick<
+    RoutingTrace,
+    "intent" | "requestedStrategy" | "autoFastEligible" | "fastPathEligible"
+  >;
 
   const unindexedFastPathResult = canUseFastPath
     ? answerSingleDayFastPath(
@@ -186,6 +208,13 @@ export async function answerMemory(
       appliedFilters,
       chunks: unindexedDiaryChunks,
       result: translatedUnindexedFastPathResult,
+      routingTrace: {
+        ...baseRoutingTrace,
+        selectedPath: "unindexed_fast_path",
+        reason: "A direct date/range question matched diary rows that were saved but not indexed yet.",
+        usedUnindexedDiary: true,
+        translationRan: didTranslationRun(unindexedFastPathResult, translatedUnindexedFastPathResult),
+      },
     });
 
     return translatedUnindexedFastPathResult;
@@ -239,6 +268,13 @@ export async function answerMemory(
       appliedFilters,
       chunks: unindexedDiaryChunks,
       result,
+      routingTrace: {
+        ...baseRoutingTrace,
+        selectedPath: "embedding_error_fallback",
+        reason: "Embedding failed before indexed memory retrieval, so only available unindexed diary fallback evidence could be used.",
+        usedUnindexedDiary: unindexedDiaryChunks.length > 0,
+        translationRan: false,
+      },
       diagnostics: await maybeGetMemoryIndexDiagnostics(
         dbClient,
         userId,
@@ -303,6 +339,46 @@ export async function answerMemory(
   }
   const retrieveMs = performance.now() - retrieveStart;
 
+  if (!chunks.length) {
+    const createdDateMismatchResult = await maybeBuildCreatedDateMismatchResult(
+      dbClient,
+      userId,
+      appliedFilters,
+      lang,
+      timeZone,
+      {
+        embedMs,
+        retrieveMs,
+        totalMs: performance.now() - totalStart,
+      },
+    );
+
+    if (createdDateMismatchResult) {
+      createdDateMismatchResult.debugTrace = buildDebugTrace({
+        question: normalizedQuestion,
+        inferredFilters,
+        appliedFilters,
+        chunks,
+        result: createdDateMismatchResult,
+        routingTrace: {
+          ...baseRoutingTrace,
+          selectedPath: "created_date_mismatch",
+          reason: "No memory matched the requested memory date, but diary rows created on that date had a different entry date.",
+          usedUnindexedDiary: false,
+          translationRan: false,
+        },
+        diagnostics: await maybeGetMemoryIndexDiagnostics(
+          dbClient,
+          userId,
+          appliedFilters,
+          createdDateMismatchResult,
+          chunks.length,
+        ),
+      });
+      return createdDateMismatchResult;
+    }
+  }
+
   const fastPathResult = canUseFastPath
     ? answerSingleDayFastPath(
         normalizedQuestion,
@@ -321,6 +397,8 @@ export async function answerMemory(
       )
     : null;
 
+  let selectedPath: RoutingTrace["selectedPath"] =
+    fastPathResult || canUseFastPath ? "indexed_fast_path" : "deep_generation";
   let result = fastPathResult ??
     (canUseFastPath
       ? answerFastExtractiveFromChunks(
@@ -336,7 +414,19 @@ export async function answerMemory(
           answerStrategy,
           timeZone,
         }));
+  if (result.answerMode === "extractive_fallback") {
+    selectedPath = result.modelError?.kind === "validation"
+      ? "deep_validation_fallback"
+      : "deep_model_error_fallback";
+  } else if (result.answerMode === "no_memory") {
+    selectedPath = "no_memory";
+  } else if (result.answerMode === "gemini") {
+    selectedPath = "deep_generation";
+  } else if (result.answerMode === "fast_path") {
+    selectedPath = "indexed_fast_path";
+  }
 
+  const beforeTranslation = result;
   result = await translateFastAnswerIfUseful(result, {
     question: normalizedQuestion,
     responseLanguage: lang,
@@ -354,6 +444,13 @@ export async function answerMemory(
     appliedFilters,
     chunks,
     result,
+    routingTrace: {
+      ...baseRoutingTrace,
+      selectedPath,
+      reason: describeSelectedPath(selectedPath, canUseFastPath, answerStrategy),
+      usedUnindexedDiary: unindexedDiaryChunks.length > 0,
+      translationRan: didTranslationRun(beforeTranslation, result),
+    },
     diagnostics: await maybeGetMemoryIndexDiagnostics(
       dbClient,
       userId,
@@ -721,6 +818,111 @@ function dedupeMemoryHits(chunks: MemorySearchHit[]): MemorySearchHit[] {
   return deduped;
 }
 
+async function maybeBuildCreatedDateMismatchResult(
+  dbClient: MemoryDbClient,
+  userId: string,
+  filters: AnswerMemoryOptions["filters"],
+  lang: ResponseLanguage,
+  timeZone: string,
+  timing: {
+    embedMs: number;
+    retrieveMs: number;
+    totalMs: number;
+  },
+): Promise<AnswerMemoryResult | null> {
+  if (!filters?.startDate || !filters.endDate) return null;
+
+  const rows = await findDiariesCreatedInRangeWithDifferentEntryDate(
+    dbClient,
+    userId,
+    filters,
+  );
+  if (!rows.length) return null;
+
+  const labels = rows
+    .map((row) => formatDateForAnswer(row.entryDate, lang, timeZone))
+    .filter(Boolean);
+  const uniqueLabels = [...new Set(labels)];
+  const primaryLabel = uniqueLabels[0];
+  const createdLabel = formatDateForAnswer(rows[0]!.createdAt, lang, timeZone);
+  const message = buildCreatedDateMismatchMessage(
+    rows,
+    primaryLabel,
+    createdLabel,
+    lang,
+    timeZone,
+  );
+  const result = noMemoryResult(message, lang);
+
+  result.suggestions = primaryLabel
+    ? lang === "vi"
+      ? [
+          `Hỏi: ngày ${primaryLabel} tôi làm gì?`,
+          "Kiểm tra Memory date trên diary card",
+          "Sửa entry date nếu diary đang sai ngày",
+        ]
+      : [
+          `Ask: what did I do on ${primaryLabel}?`,
+          "Check the Memory date on the diary card",
+          "Edit the entry date if the diary is dated incorrectly",
+        ]
+    : result.suggestions;
+  result.analytics = buildQueryAnalytics({
+    model: "n/a",
+    chunksRetrieved: 0,
+    status: "no_memory",
+    answerMode: "no_memory",
+    timing: {
+      embedMs: Math.round(timing.embedMs),
+      retrieveMs: Math.round(timing.retrieveMs),
+      generateMs: 0,
+      totalMs: Math.round(timing.totalMs),
+    },
+  });
+
+  return result;
+}
+
+function buildCreatedDateMismatchMessage(
+  rows: CreatedDiaryDateMismatch[],
+  primaryLabel: string | undefined,
+  createdLabel: string,
+  lang: ResponseLanguage,
+  timeZone: string,
+): string {
+  const titles = rows
+    .map((row) => extractDiaryTitle(row.rawText))
+    .filter(Boolean)
+    .slice(0, 2);
+  const titleSuffix = titles.length ? ` (${titles.join(", ")})` : "";
+  const dateList = rows
+    .map((row) => formatDateForAnswer(row.entryDate, lang, timeZone))
+    .filter(Boolean);
+  const uniqueDateList = [...new Set(dateList)].join(", ");
+
+  if (lang === "vi") {
+    return [
+      `Mình không tìm thấy ký ức có memory date là ${createdLabel}.`,
+      `Có diary được tạo ngày đó${titleSuffix}, nhưng diary này đang được lưu với memory date ${uniqueDateList || primaryLabel}.`,
+      primaryLabel
+        ? `Hãy hỏi "ngày ${primaryLabel} tôi làm gì?" hoặc sửa entry date nếu bạn muốn nó thuộc ngày ${createdLabel}.`
+        : "Hãy kiểm tra lại entry date của diary này.",
+    ].join(" ");
+  }
+
+  return [
+    `I couldn't find memories whose memory date is ${createdLabel}.`,
+    `I did find diary entries created on that date${titleSuffix}, but they are stored with memory date ${uniqueDateList || primaryLabel}.`,
+    primaryLabel
+      ? `Try asking "what did I do on ${primaryLabel}?" or edit the entry date if it should belong to ${createdLabel}.`
+      : "Check the diary entry date for that entry.",
+  ].join(" ");
+}
+
+function extractDiaryTitle(rawText: string): string {
+  return trimPromptQuote(rawText.split(/\r?\n/, 1)[0]?.trim() ?? "", 80);
+}
+
 function mergeRecoveredCitations<T extends { chunkId: string; similarity: number }>(
   citations: T[],
   recoveredCitations: T[],
@@ -740,6 +942,48 @@ function mergeRecoveredCitations<T extends { chunkId: string; similarity: number
   return [...byChunkId.values()]
     .sort((a, b) => b.similarity - a.similarity)
     .slice(0, 4);
+}
+
+function didTranslationRun(
+  before: AnswerMemoryResult,
+  after: AnswerMemoryResult,
+): boolean {
+  if (before.answerMode !== "fast_path" || after.answerMode !== "fast_path") return false;
+  return (
+    before.answer !== after.answer ||
+    (after.analytics?.tokenUsage.totalTokens ?? 0) > (before.analytics?.tokenUsage.totalTokens ?? 0)
+  );
+}
+
+function describeSelectedPath(
+  selectedPath: RoutingTrace["selectedPath"],
+  canUseFastPath: boolean,
+  answerStrategy: AnswerStrategy,
+): string {
+  switch (selectedPath) {
+    case "indexed_fast_path":
+      return canUseFastPath
+        ? "The requested strategy allowed Fast path, so the answer was assembled from retrieved evidence without full generation."
+        : "The result used an indexed Fast path.";
+    case "deep_generation":
+      return answerStrategy === "deep"
+        ? "Deep was requested explicitly, so the answer used grounded model generation."
+        : "Auto routing required synthesis/reasoning, so the answer used grounded model generation.";
+    case "deep_validation_fallback":
+      return "Grounded model generation ran, but validation rejected unsupported or incomplete output, so evidence fallback replaced the answer.";
+    case "deep_model_error_fallback":
+      return "Grounded model generation failed, so evidence fallback replaced the answer.";
+    case "no_memory":
+      return "Retrieval did not provide enough supported evidence to answer.";
+    case "unindexed_fast_path":
+      return "A direct date/range question matched unindexed diary evidence.";
+    case "embedding_error_fallback":
+      return "Embedding failed before indexed retrieval, so fallback evidence was used.";
+    case "created_date_mismatch":
+      return "The requested created date did not match stored memory dates.";
+    default:
+      return "Answer routing completed.";
+  }
 }
 
 async function maybeGetMemoryIndexDiagnostics(

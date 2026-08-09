@@ -1,6 +1,7 @@
 {
   "name": "Second Brain MVP Evaluation Dataset",
   "description": "Seven days of diary entries plus realistic calendar events for latency and retrieval quality evaluation.",
+  "referenceNow": "2026-05-17T18:00:00.000Z",
   "summaryCoverage": [
     {
       "id": "weekly-2026-05-11",

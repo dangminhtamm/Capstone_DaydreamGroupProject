@@ -214,12 +214,12 @@ export function GoogleWorkspaceCard({ indexingStatus }: GoogleWorkspaceCardProps
   ];
   const overallTone: SourceTone = attentionCount > 0 ? 'attention' : readyCount > 0 ? 'ready' : connected ? 'working' : 'idle';
   const overallLabel = !connected
-    ? 'Connect Google first'
+    ? 'Connect Google'
     : attentionCount > 0
       ? `${attentionCount} source${attentionCount === 1 ? '' : 's'} need attention`
       : readyCount > 0
-        ? `${readyCount} source${readyCount === 1 ? '' : 's'} ready for AI`
-        : 'Import Google data';
+        ? `${readyCount}/4 indexed`
+        : 'Import sources';
 
   const reconnectGoogle = async () => {
     setIsConnecting(true);
@@ -317,14 +317,14 @@ export function GoogleWorkspaceCard({ indexingStatus }: GoogleWorkspaceCardProps
             Memory sources
           </p>
           <h3 className="mt-1.5 text-xl font-semibold tracking-tight text-slate-950 dark:text-slate-100">
-            Connect all Google memory sources
+            Google sources for AI Recall
           </h3>
           <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
-            One OAuth consent grants readonly access for Calendar, Gmail, Drive, and Contacts. You still choose which source to import, and imported data is indexed into AI memory for cited Search answers.
+            Connect Google once, import the sources you need, wait for indexing, then ask Search questions with cited Google evidence.
           </p>
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-              Requested scopes
+              Google access
             </span>
             <ScopeChips scopes={workspaceScopes} compact />
           </div>
@@ -339,7 +339,7 @@ export function GoogleWorkspaceCard({ indexingStatus }: GoogleWorkspaceCardProps
             disabled={isConnecting}
             className="action-secondary disabled:cursor-not-allowed"
           >
-            {isConnecting ? 'Opening Google...' : connected ? 'Fix Google access' : 'Connect all Google sources'}
+            {isConnecting ? 'Opening Google...' : connected ? 'Reconnect Google' : 'Connect Google'}
           </button>
           {connected && (
             <button
@@ -377,26 +377,26 @@ export function GoogleWorkspaceCard({ indexingStatus }: GoogleWorkspaceCardProps
       <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <StepItem
           step="1"
-          title="Connect account"
-          description={connected ? 'Readonly Google Workspace access is connected.' : 'Approve Calendar, Gmail, Drive, and Contacts scopes once.'}
+          title="Connect"
+          description={connected ? 'Google readonly access is connected.' : 'Approve Calendar, Gmail, Drive, and Contacts once.'}
           done={connected}
         />
         <StepItem
           step="2"
-          title="Sync to database"
-          description={importedCount > 0 ? `${importedCount}/4 sources have imported rows.` : 'Pick a source to copy metadata/text into Postgres.'}
+          title="Import"
+          description={importedCount > 0 ? `${importedCount}/4 sources have imported rows.` : 'Pick a source and copy metadata/text into the app.'}
           done={importedCount > 0}
         />
         <StepItem
           step="3"
-          title="Index for AI"
-          description={activeIndexingCount > 0 ? `${activeIndexingCount} source${activeIndexingCount === 1 ? '' : 's'} still in IndexingOutbox.` : readyCount > 0 ? 'Synced data has memory chunks.' : 'Indexing starts after sync.'}
+          title="Indexed"
+          description={activeIndexingCount > 0 ? `${activeIndexingCount} source${activeIndexingCount === 1 ? '' : 's'} still indexing.` : readyCount > 0 ? 'Imported data has memory chunks.' : 'Indexing starts after import.'}
           done={readyCount > 0 && activeIndexingCount === 0}
         />
         <StepItem
           step="4"
-          title="Ask with citations"
-          description={readyCount > 0 ? 'Search can now cite ready Google sources.' : 'Ready chunks will appear as AI sources.'}
+          title="Ask"
+          description={readyCount > 0 ? 'Search can cite ready Google sources.' : 'Ready sources appear as cited evidence.'}
           done={readyCount > 0}
         />
       </div>
@@ -508,8 +508,8 @@ function MemorySourceRow({
             {row.description}
           </p>
           <div className="mt-3 grid gap-2 sm:grid-cols-2">
-            <SourceFact label="Synced to" value={row.syncedTo} />
-            <SourceFact label="Used by AI for" value={row.aiUsage} />
+            <SourceFact label="Imported into" value={row.syncedTo} />
+            <SourceFact label="AI uses it for" value={row.aiUsage} />
           </div>
           <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900/60">
             <div className="flex flex-wrap items-center gap-2">
@@ -550,16 +550,17 @@ function MemorySourceRow({
         <div className="rounded-lg border border-slate-100 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/50">
           <div className="mb-3 flex items-center justify-between gap-3">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-              Data flow
+              {"Connect -> Import -> Indexed -> Ask"}
             </p>
             <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">
               {formatLastSynced(row.lastSyncedAt)}
             </span>
           </div>
-          <div className="grid gap-2 sm:grid-cols-3 xl:grid-cols-1">
-            <FlowState label="Google access" done={row.connected} active={!row.connected && presentation.buttonKind === 'connect'} />
-            <FlowState label="Synced to DB" done={imported} active={row.isSyncing} />
-            <FlowState label="Indexed for AI" done={memoryReady} active={indexingInfo.active} attention={indexingInfo.failed || presentation.tone === 'attention'} />
+          <div className="grid gap-2 sm:grid-cols-4 xl:grid-cols-1">
+            <FlowState label="Connect" done={row.connected} active={!row.connected && presentation.buttonKind === 'connect'} />
+            <FlowState label="Import" done={imported} active={row.isSyncing} />
+            <FlowState label="Indexed" done={memoryReady} active={indexingInfo.active} attention={indexingInfo.failed || presentation.tone === 'attention'} />
+            <FlowState label="Ask" done={memoryReady} active={false} attention={indexingInfo.failed || presentation.tone === 'attention'} />
           </div>
         </div>
 
@@ -667,7 +668,7 @@ function FlowState({
 function getSourcePresentation(row: WorkspaceRow, indexingInfo: IndexingInfo): SourcePresentation {
   if (row.isLoading) {
     return {
-      statusLabel: 'Checking access',
+      statusLabel: 'Checking',
       statusDetail: 'Loading Google source status.',
       tone: 'working',
       buttonLabel: 'Checking...',
@@ -685,10 +686,20 @@ function getSourcePresentation(row: WorkspaceRow, indexingInfo: IndexingInfo): S
     };
   }
 
+  if (row.lastError && isReconnectError(row.lastError)) {
+    return {
+      statusLabel: 'Needs reconnect',
+      statusDetail: friendlyError(row.lastError),
+      tone: 'attention',
+      buttonLabel: 'Reconnect Google',
+      buttonKind: 'connect',
+    };
+  }
+
   if (!row.connected) {
     return {
-      statusLabel: 'Not connected',
-      statusDetail: 'Connect Google before importing this source.',
+      statusLabel: 'Connect first',
+      statusDetail: 'Connect Google, then import this source.',
       tone: 'idle',
       buttonLabel: 'Connect Google',
       buttonKind: 'connect',
@@ -707,8 +718,8 @@ function getSourcePresentation(row: WorkspaceRow, indexingInfo: IndexingInfo): S
 
   if (indexingInfo.active) {
     return {
-      statusLabel: indexingInfo.tone === 'attention' ? 'Retrying memory' : 'Preparing memory',
-      statusDetail: 'Second Brain is still turning this source into searchable memory.',
+      statusLabel: indexingInfo.tone === 'attention' ? 'Retrying index' : 'Indexing',
+      statusDetail: 'Imported data is still becoming searchable memory.',
       tone: indexingInfo.tone,
       buttonLabel: 'Refresh import',
       buttonKind: 'import',
@@ -717,8 +728,8 @@ function getSourcePresentation(row: WorkspaceRow, indexingInfo: IndexingInfo): S
 
   if (row.valueCount > 0) {
     return {
-      statusLabel: 'Ready for AI',
-      statusDetail: `Ask your Second Brain with ${row.noun} as citations.`,
+      statusLabel: 'Indexed',
+      statusDetail: `Ready to ask with ${row.noun} as citations.`,
       tone: 'ready',
       buttonLabel: 'Refresh import',
       buttonKind: 'import',
@@ -727,7 +738,7 @@ function getSourcePresentation(row: WorkspaceRow, indexingInfo: IndexingInfo): S
 
   if (row.lastSyncedAt) {
     return {
-      statusLabel: 'No data found',
+      statusLabel: 'Imported, no rows',
       statusDetail: 'Google returned no items for the current import window.',
       tone: 'idle',
       buttonLabel: `Import ${row.noun}`,
@@ -736,8 +747,8 @@ function getSourcePresentation(row: WorkspaceRow, indexingInfo: IndexingInfo): S
   }
 
   return {
-    statusLabel: 'Import needed',
-    statusDetail: 'Import this source when you want it included in AI answers.',
+    statusLabel: 'Import next',
+    statusDetail: 'Import this source to include it in AI answers.',
     tone: 'idle',
     buttonLabel: `Import ${row.noun}`,
     buttonKind: 'import',

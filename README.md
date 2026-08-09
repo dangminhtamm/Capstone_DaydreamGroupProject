@@ -198,6 +198,11 @@ TUTURUUU_AI_BASE_URL="https://ai.tuturuuu.com/v1"      # optional, defaults to T
 TUTURUUU_EMBEDDING_MODEL="google/gemini-embedding-2"   # optional; confirm allowed models with GET /v1/models
 TUTURUUU_ANSWER_MODEL="google/gemini-3.5-flash-lite"  # optional; google/gemini-3.6-flash may require workspace metering support
 INDEXING_JOB_DELAY_MS="15000"                          # optional, avoids rate limits during local drain
+
+# ── Observability / Production Error Reporting ───────────
+SENTRY_DSN=""                                           # optional; set from Sentry Project Settings > Client Keys
+SENTRY_ENVIRONMENT="local"                              # optional: local, demo, staging, production
+SENTRY_TRACES_SAMPLE_RATE="0.1"                         # optional: 0 to 1
 ```
 
 Core AI memory uses Tuturuuu's metered `/v1/responses` and `/v1/embeddings`
@@ -231,8 +236,11 @@ npx prisma db push --schema=packages/db/prisma/schema.prisma
 Start all applications in parallel (web on `:3000`, API on `:3001`, worker, search):
 
 ```bash
-pnpm dev
+pnpm dev:runtime
 ```
+
+Use `pnpm dev:runtime` for demo work so the worker heartbeat stays fresh and
+`indexing_outbox` jobs are drained continuously while you use the app.
 
 ### Run Individual Services
 
@@ -246,8 +254,6 @@ pnpm --filter @second-brain/api dev
 # Worker only
 pnpm --filter @second-brain/worker dev
 
-# Search service only
-pnpm --filter @second-brain/search dev
 ```
 
 ### Run With Docker

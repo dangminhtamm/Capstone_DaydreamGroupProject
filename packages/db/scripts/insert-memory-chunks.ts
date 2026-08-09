@@ -43,8 +43,8 @@ I felt calmer today because the plan is finally getting more concrete.
     embeddingProvider,
     insertChunks: (chunks) =>
       prisma.$transaction(async (tx) => {
-        await insertMemoryChunks(tx as any, chunks);
-        await pruneMemoryChunksForSource(tx as any, {
+        await insertMemoryChunks(tx, chunks);
+        await pruneMemoryChunksForSource(tx, {
           userId: sampleUserId,
           sourceType: "diary",
           sourceId: "sample-diary-entry",
@@ -53,7 +53,7 @@ I felt calmer today because the plan is finally getting more concrete.
       }),
     insertEntityMentions: (mentions) =>
       prisma.$transaction(async (tx) => {
-        await deleteEntityMentionsForSource(tx as any, {
+        await deleteEntityMentionsForSource(tx, {
           userId: sampleUserId,
           sourceType: "diary",
           sourceId: "sample-diary-entry",
@@ -61,7 +61,7 @@ I felt calmer today because the plan is finally getting more concrete.
 
         if (!mentions.length) return;
 
-        const chunkIdMap = await resolveMemoryChunkIds(tx as any, {
+        const chunkIdMap = await resolveMemoryChunkIds(tx, {
           userId: sampleUserId,
           sourceType: "diary",
           sourceId: "sample-diary-entry",
@@ -78,7 +78,7 @@ I felt calmer today because the plan is finally getting more concrete.
           })
           .filter((mention): mention is NonNullable<typeof mention> => mention !== null);
 
-        await insertEntityMentions(tx as any, mentionRows);
+        await insertEntityMentions(tx, mentionRows);
       }),
   });
 

@@ -33,6 +33,7 @@ type SummaryCoverageTarget = {
 type EvaluationDataset = {
   name?: string;
   description?: string;
+  referenceNow?: string;
   questions: EvaluationQuestion[];
   summaryCoverage?: SummaryCoverageTarget[];
 };
@@ -142,9 +143,10 @@ if (process.argv.includes("--help") || process.argv.includes("-h")) {
   inferRetrievalFilters = ai.inferRetrievalFilters;
   retrieveMemoryWithEmbedding = ai.retrieveMemoryWithEmbedding;
 
-  const prisma = db.prisma ?? db.createPrismaClient();
+  const prisma = db.createPrismaClient();
   const userId = await resolveReportUserId(prisma as any);
   const dataset = JSON.parse(readFileSync(datasetPath, "utf8")) as EvaluationDataset;
+  const referenceNow = resolveReferenceNow(dataset);
   const questions = Number.isFinite(questionLimit)
     ? dataset.questions.slice(0, Math.max(0, questionLimit ?? 0))
     : dataset.questions;
@@ -159,10 +161,10 @@ if (process.argv.includes("--help") || process.argv.includes("-h")) {
 
       for (const question of questions) {
         retrievalRows.push(
-          await evaluateRetrieval(question, userId, prisma as any, embedder),
+          await evaluateRetrieval(question, userId, prisma as any, embedder, referenceNow),
         );
         citationRows.push(
-          await evaluateAnswerCitations(question, userId, prisma as any),
+          await evaluateAnswerCitations(question, userId, prisma as any, referenceNow),
         );
 
         if (reportDelayMs > 0 && question !== questions.at(-1)) {
@@ -227,6 +229,7 @@ async function evaluateRetrieval(
   userId: string,
   prisma: any,
   embedder: { embedQuery: (text: string) => Promise<number[]> },
+  referenceNow = new Date(),
 ): Promise<RetrievalReportRow> {
   try {
     const embeddingStart = performance.now();
@@ -240,7 +243,7 @@ async function evaluateRetrieval(
       prisma,
       embedding,
       {
-        ...inferRetrievalFilters(item.question),
+        ...inferRetrievalFilters(item.question, referenceNow),
         limit: retrievalLimit,
         maxDistance: process.env.MEMORY_MAX_DISTANCE
           ? Number(process.env.MEMORY_MAX_DISTANCE)
@@ -297,12 +300,14 @@ async function evaluateAnswerCitations(
   item: EvaluationQuestion,
   userId: string,
   prisma: any,
+  referenceNow = new Date(),
 ): Promise<CitationReportRow> {
   const started = performance.now();
   try {
     const result = await answerMemory(item.question, userId, prisma, {
       limit: retrievalLimit,
       answerStrategy,
+      now: referenceNow,
     });
     const citations = result.citations ?? [];
     const relevantCitationCount = item.expectedNoSources
@@ -813,6 +818,7 @@ Optional env:
   MEMORY_REPORT_ANSWER_STRATEGY        fast | deep | auto (default: fast)
   MEMORY_REPORT_RETRIEVAL_LIMIT        Retrieved chunks per question (default: 8)
   MEMORY_REPORT_QUESTION_LIMIT         Limit question count for smoke runs
+  MEMORY_EVAL_NOW                      Fixed ISO date for relative questions (defaults to dataset referenceNow)
   MEMORY_REPORT_DELAY_MS               Delay between questions to reduce quota pressure
   MEMORY_REPORT_FAIL_ON_THRESHOLD=1    Exit non-zero if thresholds fail
   MEMORY_REPORT_WRITE_INVALID=1        Archive invalid diagnostic reports under reports/invalid
@@ -824,6 +830,16 @@ Output:
   Timestamped valid report plus memory-evaluation-latest-valid.md/json.
   Runtime-invalid reports are not written by default.
 `.trim());
+}
+
+function resolveReferenceNow(dataset: EvaluationDataset): Date {
+  const configured = process.env.MEMORY_EVAL_NOW ?? dataset.referenceNow;
+  if (configured) {
+    const parsed = new Date(configured);
+    if (Number.isFinite(parsed.getTime())) return parsed;
+  }
+
+  return new Date();
 }
 
 function sleep(ms: number): Promise<void> {

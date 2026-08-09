@@ -1,5 +1,5 @@
 import { trimPromptQuote } from "./answer-memory-format.ts";
-import type { MemoryDbClient } from "./types.ts";
+import { withMemoryDate, type MemoryDbClient } from "./types.ts";
 import type { MemorySearchHit, RetrievalFilters } from "./retrieval.ts";
 
 type UnindexedDiaryRow = {
@@ -8,6 +8,13 @@ type UnindexedDiaryRow = {
   entry_date: Date | string | null;
   created_at: Date | string;
   job_status: string | null;
+};
+
+export type CreatedDiaryDateMismatch = {
+  id: string;
+  rawText: string;
+  entryDate: Date;
+  createdAt: Date;
 };
 
 export async function retrieveUnindexedDiaryFallbackHits(
@@ -67,6 +74,58 @@ export async function retrieveUnindexedDiaryFallbackHits(
     .filter((hit): hit is MemorySearchHit => hit !== null);
 }
 
+export async function findDiariesCreatedInRangeWithDifferentEntryDate(
+  dbClient: MemoryDbClient,
+  userId: string,
+  filters: RetrievalFilters,
+): Promise<CreatedDiaryDateMismatch[]> {
+  if (!filters.startDate || !filters.endDate) return [];
+
+  const queryRawUnsafe = (dbClient as {
+    $queryRawUnsafe?: <T = unknown>(query: string, ...values: unknown[]) => Promise<T>;
+  }).$queryRawUnsafe?.bind(dbClient);
+  if (!queryRawUnsafe) return [];
+
+  let rows: Array<{
+    id: string;
+    raw_text: string;
+    entry_date: Date | string;
+    created_at: Date | string;
+  }> = [];
+
+  try {
+    rows = await queryRawUnsafe(
+      `
+        SELECT
+          d.id,
+          d.raw_text,
+          d.entry_date,
+          d.created_at
+        FROM diary_entries d
+        WHERE d.user_id = $1
+          AND d.created_at BETWEEN $2 AND $3
+          AND d.entry_date IS NOT NULL
+          AND NOT (d.entry_date BETWEEN $2 AND $3)
+        ORDER BY d.created_at DESC
+        LIMIT 3
+      `,
+      userId,
+      filters.startDate,
+      filters.endDate,
+    );
+  } catch (error) {
+    console.warn("[AnswerMemory] Created-date mismatch lookup failed:", error);
+    return [];
+  }
+
+  return rows.map((row) => ({
+    id: row.id,
+    rawText: row.raw_text,
+    entryDate: new Date(row.entry_date),
+    createdAt: new Date(row.created_at),
+  }));
+}
+
 function shouldReadUnindexedDiaries(filters: RetrievalFilters): boolean {
   if (!filters.startDate || !filters.endDate) return false;
   if (filters.sourceType && filters.sourceType !== "diary") return false;
@@ -95,7 +154,7 @@ function buildUnindexedDiaryHit(row: UnindexedDiaryRow, index: number): MemorySe
     chunkType: "general",
     text: trimPromptQuote(rawText, 1200),
     evidence: trimPromptQuote(rawText, 600),
-    metadata: {
+    metadata: withMemoryDate({
       sourceType: "diary",
       sourceId: row.id,
       sourceTitle: title,
@@ -104,7 +163,7 @@ function buildUnindexedDiaryHit(row: UnindexedDiaryRow, index: number): MemorySe
       date: occurredAt.toISOString(),
       indexingStatus: row.job_status ?? "missing",
       fallback: "unindexed_diary",
-    },
+    }),
     occurredAt,
     distance: null,
     vectorSimilarity: 0,

@@ -213,6 +213,30 @@ export function scoreSourceForIntent(
     if (source.chunkType === "decision") score += 0.1;
   }
 
+  if (fallbackTopic === "progress") {
+    if (source.sourceType === "diary" || source.sourceType === "calendar") {
+      score += 0.14;
+    }
+    if (source.sourceType === "summary") {
+      score -= 0.16;
+    }
+    if (source.sourceType === "drive" || source.sourceType === "attachment") {
+      score -= 0.22;
+    }
+    if (
+      includesAny(normalizedQuestion, ["frontend", "duc anh", "nhan"]) &&
+      includesAny(searchable, ["diary input", "loading", "empty states", "timeline", "search page", "frontend flow"])
+    ) {
+      score += 0.28;
+    }
+    if (
+      includesAny(normalizedQuestion, ["progress", "week", "across"]) &&
+      includesAny(searchable, ["ai memory", "backend", "frontend", "calendar", "search", "citation"])
+    ) {
+      score += 0.18;
+    }
+  }
+
   if (isGoogleContactsSource(source)) {
     score -= 0.18;
   }

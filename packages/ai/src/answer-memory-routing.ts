@@ -49,7 +49,6 @@ export function requiresGenerativeReasoning(question: string): boolean {
   const normalized = normalizeForIntent(question);
   return includesAny(normalized, [
     "why",
-    "how",
     "compare",
     "comparison",
     "difference",
@@ -58,48 +57,23 @@ export function requiresGenerativeReasoning(question: string): boolean {
     "trend",
     "analyze",
     "analysis",
+    "summarize",
+    "summary",
+    "tóm tắt",
+    "tom tat",
+    "tổng hợp",
+    "tong hop",
     "insight",
-    "blocker",
-    "blockers",
-    "risk",
-    "risks",
-    "challenge",
-    "challenges",
-    "stuck",
-    "stress",
-    "stressed",
-    "mood",
-    "feel",
-    "felt",
-    "emotion",
-    "trở ngại",
-    "tro ngai",
-    "rủi ro",
-    "rui ro",
-    "khó khăn",
-    "kho khan",
-    "vướng",
-    "vuong",
-    "căng thẳng",
-    "cang thang",
-    "tâm trạng",
-    "tam trang",
     "vì sao",
     "vi sao",
     "tại sao",
     "tai sao",
-    "như thế nào",
-    "nhu the nao",
     "so sánh",
     "so sanh",
     "khác gì",
     "khac gi",
     "phân tích",
     "phan tich",
-    "cảm thấy",
-    "cam thay",
-    "cảm xúc",
-    "cam xuc",
   ]);
 }
 
@@ -191,6 +165,7 @@ export function isBroadTemporalSynthesisQuestion(
     "tháng trước",
     "thang truoc",
   ]);
+  const explicitMonthRangeCue = hasExplicitMonthRangeCue(normalized);
   const workOrSynthesisCue = intent === "progress" || includesAny(normalized, [
     "work on",
     "worked on",
@@ -220,7 +195,14 @@ export function isBroadTemporalSynthesisQuestion(
     : 0;
   const broadFilter = temporalSpanMs > 2 * 24 * 60 * 60 * 1000;
 
-  return workOrSynthesisCue && (broadTemporalCue || broadFilter);
+  return workOrSynthesisCue && (broadTemporalCue || explicitMonthRangeCue || broadFilter);
+}
+
+function hasExplicitMonthRangeCue(normalizedQuestion: string): boolean {
+  return (
+    /\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\b/u.test(normalizedQuestion) ||
+    /\bthang\s+(?:1[0-2]|[1-9])\b/u.test(normalizedQuestion)
+  );
 }
 
 export function buildIntentInstruction(intent: MemoryIntent, lang: "en" | "vi"): string {
@@ -262,7 +244,6 @@ function hasAutoDeepReasoningCue(question: string): boolean {
   const normalized = normalizeForIntent(question);
   return includesAny(normalized, [
     "why",
-    "how",
     "compare",
     "comparison",
     "difference",
@@ -278,8 +259,6 @@ function hasAutoDeepReasoningCue(question: string): boolean {
     "vi sao",
     "tại sao",
     "tai sao",
-    "như thế nào",
-    "nhu the nao",
     "so sánh",
     "so sanh",
     "khác gì",

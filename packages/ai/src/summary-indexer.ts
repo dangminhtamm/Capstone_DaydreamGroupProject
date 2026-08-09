@@ -12,7 +12,7 @@ import {
   withEmbeddings,
 } from "./indexing-utils.ts";
 import type { PersistedMemoryChunkPayload } from "./memory-indexer.ts";
-import type { MemoryChunkMetadata } from "./types.ts";
+import { withMemoryDate, type MemoryChunkMetadata } from "./types.ts";
 
 export interface IndexMemoryFromSummaryInput {
   userId: string;
@@ -50,7 +50,7 @@ export async function indexMemoryFromSummary(
     input.embeddingProvider ?? createDefaultEmbeddingProvider();
 
   const chunkPayloads = splitTextByBoundary(content).map((text, index) => {
-    const metadata: MemoryChunkMetadata = {
+    const metadata: MemoryChunkMetadata = withMemoryDate({
       date: periodStart.toISOString(),
       sourceType: "summary",
       sourceId: input.summaryId,
@@ -63,7 +63,7 @@ export async function indexMemoryFromSummary(
       goals: [],
       habits: [],
       importance: 4,
-    };
+    });
 
     return {
       userId: input.userId,

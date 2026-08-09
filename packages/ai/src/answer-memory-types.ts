@@ -60,6 +60,24 @@ export interface MemoryDebugTrace {
   appliedFilters: Record<string, unknown>;
   status: "success" | "no_memory" | "error";
   reason: string;
+  routingTrace?: {
+    intent: MemoryIntent;
+    requestedStrategy: AnswerStrategy;
+    selectedPath:
+      | "unindexed_fast_path"
+      | "embedding_error_fallback"
+      | "created_date_mismatch"
+      | "indexed_fast_path"
+      | "deep_generation"
+      | "deep_validation_fallback"
+      | "deep_model_error_fallback"
+      | "no_memory";
+    reason: string;
+    autoFastEligible: boolean;
+    fastPathEligible: boolean;
+    usedUnindexedDiary: boolean;
+    translationRan: boolean;
+  };
   chunksRetrieved: number;
   diagnostics?: MemoryIndexDiagnostics;
   topChunks: Array<{
@@ -100,6 +118,7 @@ export interface AnswerMemoryOptions {
   limit?: number;
   maxDistance?: number;
   minTopSimilarity?: number;
+  now?: Date;
   responseLanguage?: ResponseLanguage;
   answerStrategy?: AnswerStrategy;
   timeZone?: string;
