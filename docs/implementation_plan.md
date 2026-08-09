@@ -71,7 +71,7 @@ To achieve **100% free hosting** for the DayDreamer monorepo without Render memo
    - **Plan**: `Free`
    - **Build Command**:
      ```bash
-     pnpm install && pnpm --filter @second-brain/db prisma:generate && pnpm --filter @second-brain/db build && pnpm --filter @second-brain/ai build && pnpm --filter @second-brain/api build:app && pnpm --filter @second-brain/worker build
+     pnpm install && pnpm --filter @second-brain/db prisma:generate && pnpm --filter @second-brain/shared build && pnpm --filter @second-brain/db build && pnpm --filter @second-brain/ai build && pnpm --filter @second-brain/api build:app && pnpm --filter @second-brain/worker build
      ```
    - **Start Command**:
      ```bash

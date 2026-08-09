@@ -4,7 +4,7 @@
   "scripts": {
     "dev": "pnpm --recursive --parallel --if-present run dev",
     "dev:runtime": "pnpm --parallel --filter web --filter @second-brain/api --filter @second-brain/worker dev",
-    "build": "pnpm --filter @second-brain/db build && pnpm --filter @second-brain/ai build && pnpm --filter @second-brain/api build:app && pnpm --filter @second-brain/worker build && pnpm --filter web build",
+    "build": "pnpm --filter @second-brain/shared build && pnpm --filter @second-brain/db build && pnpm --filter @second-brain/ai build && pnpm --filter @second-brain/api build:app && pnpm --filter @second-brain/worker build && pnpm --filter web build",
     "test": "pnpm --recursive --if-present run test",
     "audit": "pnpm audit --prod --audit-level moderate",
     "docker:build": "docker compose build",
