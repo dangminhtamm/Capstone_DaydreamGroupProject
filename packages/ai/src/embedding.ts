@@ -39,7 +39,7 @@ function normalize(values: number[]): number[] {
 export const DEFAULT_EMBEDDING_DIMENSION = 768;
 export const DEFAULT_EMBEDDING_PROVIDER: EmbeddingProviderName = "gemini";
 
-const TUTURUUU_EMBEDDING_MODEL = normalizeTuturuuuModelName(
+export const TUTURUUU_EMBEDDING_MODEL = normalizeTuturuuuModelName(
   process.env.TUTURUUU_EMBEDDING_MODEL ?? process.env.GEMINI_EMBEDDING_MODEL,
   DEFAULT_TUTURUUU_EMBEDDING_MODEL,
 );
