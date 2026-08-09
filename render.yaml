@@ -8,7 +8,9 @@ services:
     buildCommand: |
       npx -y pnpm@10.33.0 install --frozen-lockfile &&
       npx -y pnpm@10.33.0 --filter @second-brain/db prisma:generate &&
-      npx -y pnpm@10.33.0 --filter @second-brain/api build
+      npx -y pnpm@10.33.0 --filter @second-brain/db build &&
+      npx -y pnpm@10.33.0 --filter @second-brain/ai build &&
+      npx -y pnpm@10.33.0 --filter @second-brain/api build:app
     startCommand: node apps/api/dist/main.js
     healthCheckPath: /api/health
     envVars:
@@ -76,6 +78,8 @@ services:
     buildCommand: |
       npx -y pnpm@10.33.0 install --frozen-lockfile &&
       npx -y pnpm@10.33.0 --filter @second-brain/db prisma:generate &&
+      npx -y pnpm@10.33.0 --filter @second-brain/db build &&
+      npx -y pnpm@10.33.0 --filter @second-brain/ai build &&
       npx -y pnpm@10.33.0 --filter @second-brain/worker build
     startCommand: node apps/worker/dist/index.js
     healthCheckPath: /health
