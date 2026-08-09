@@ -56,7 +56,7 @@ services:
         value: gemini-3.6-flash
       - key: ADMIN_EMAILS
         sync: false
-      # ── CORS (set after Vercel deploy) ──
+      # ── CORS (set after frontend deploys) ──
       - key: CORS_ORIGIN
         sync: false
       - key: FRONTEND_URL
@@ -121,3 +121,33 @@ services:
         sync: false
       - key: PUBLISHABLE_KEY
         sync: false
+
+  # ─── Next.js Frontend ───
+  - type: web
+    name: daydreamer-web
+    runtime: node
+    region: singapore
+    plan: free
+    buildCommand: |
+      npx -y pnpm@10.33.0 install --frozen-lockfile &&
+      npx -y pnpm@10.33.0 --filter @second-brain/db prisma:generate &&
+      npx -y pnpm@10.33.0 --filter web build
+    startCommand: npx -y pnpm@10.33.0 --dir apps/web exec next start -H 0.0.0.0 -p 3000
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "3000"
+      - key: NODE_VERSION
+        value: "24"
+      - key: COREPACK_ENABLE_AUTO_PIN
+        value: "0"
+      - key: NEXT_PUBLIC_API_URL
+        sync: false
+      - key: NEXT_PUBLIC_SITE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
+        sync: false
+
