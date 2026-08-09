@@ -1,6 +1,6 @@
 // apps/worker/src/index.ts
-import './env';
 import { prisma } from './lib/prisma';
+import { captureWorkerException } from './instrument';
 
 // 1. Import all background jobs with a single line
 import {
@@ -86,7 +86,7 @@ try {
     console.log('===================================================');
 } catch (error) {
     console.error('Critical error while starting the Worker:', error);
-    process.exit(1);
+    void captureWorkerException(error).finally(() => process.exit(1));
 }
 
 installShutdownHandler('SIGINT');

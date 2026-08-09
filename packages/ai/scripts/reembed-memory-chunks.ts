@@ -73,14 +73,15 @@ function parseArgs(argv: string[]): ReembedOptions {
 }
 
 function buildSelectQuery(options: ReembedOptions, embeddingModel: string) {
-  const params: unknown[] = [embeddingModel];
+  const params: unknown[] = [];
   const conditions = [
     "mc.text IS NOT NULL",
     "length(trim(mc.text)) > 0",
   ];
 
   if (!options.force) {
-    conditions.push("(mc.embedding IS NULL OR mc.metadata->>'embeddingModel' IS DISTINCT FROM $1)");
+    params.push(embeddingModel);
+    conditions.push(`(mc.embedding IS NULL OR mc.metadata->>'embeddingModel' IS DISTINCT FROM $${params.length})`);
   }
 
   if (options.userEmail) {
@@ -153,7 +154,7 @@ async function main() {
   const { sql, params } = buildSelectQuery(options, TUTURUUU_EMBEDDING_MODEL);
 
   try {
-    const rows = await prisma.$queryRawUnsafe<MemoryChunkRow[]>(sql, ...params);
+    const rows = await prisma.$queryRawUnsafe(sql, ...params) as MemoryChunkRow[];
     console.log(`Embedding model: ${TUTURUUU_EMBEDDING_MODEL}`);
     console.log(`Target chunks: ${rows.length}`);
 

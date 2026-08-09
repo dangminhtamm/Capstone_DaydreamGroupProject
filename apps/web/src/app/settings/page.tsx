@@ -16,12 +16,24 @@ import {
   type SystemHealth,
 } from "@/lib/api-client";
 import { GoogleWorkspaceCard } from "@/components/integrations/google-workspace-card";
+import { fetchCalendarStatus } from "@/features/google-calendar/google-calendar-api";
+import { fetchContactStatus } from "@/features/google-contacts/google-contacts-api";
+import { fetchDriveStatus } from "@/features/google-drive/google-drive-api";
+import { fetchGmailStatus } from "@/features/google-gmail/google-gmail-api";
 
 type TokenStats = {
   today: number;
   week: number;
   month: number;
   queriesToday: number;
+};
+
+type GoogleSourceHealth = {
+  source: "Calendar" | "Gmail" | "Drive" | "Contacts";
+  connected: boolean;
+  importedCount: number;
+  lastSyncedAt: string | null;
+  lastError: string | null;
 };
 
 type SettingsTab = "profile" | "google" | "memory" | "preferences";
@@ -182,6 +194,77 @@ function ConfigCheckRow({
   );
 }
 
+async function getGoogleSourceHealth(accessToken: string | null): Promise<GoogleSourceHealth[]> {
+  const results = await Promise.allSettled([
+    fetchCalendarStatus(accessToken),
+    fetchGmailStatus(accessToken),
+    fetchDriveStatus(accessToken),
+    fetchContactStatus(accessToken),
+  ]);
+
+  const defaults: GoogleSourceHealth[] = [
+    { source: "Calendar", connected: false, importedCount: 0, lastSyncedAt: null, lastError: null },
+    { source: "Gmail", connected: false, importedCount: 0, lastSyncedAt: null, lastError: null },
+    { source: "Drive", connected: false, importedCount: 0, lastSyncedAt: null, lastError: null },
+    { source: "Contacts", connected: false, importedCount: 0, lastSyncedAt: null, lastError: null },
+  ];
+
+  return defaults.map((fallback, index) => {
+    const result = results[index];
+    if (!result || result.status === "rejected") {
+      return {
+        ...fallback,
+        lastError: result?.status === "rejected"
+          ? result.reason instanceof Error
+            ? result.reason.message
+            : "Could not load Google source status."
+          : "Could not load Google source status.",
+      };
+    }
+
+    const value = result.value;
+    const importedCount =
+      "eventCount" in value
+        ? value.eventCount
+        : "messageCount" in value
+          ? value.messageCount
+          : "fileCount" in value
+            ? value.fileCount
+            : value.contactCount;
+
+    return {
+      ...fallback,
+      connected: Boolean(value.connected),
+      importedCount,
+      lastSyncedAt: value.lastSyncedAt,
+      lastError: value.lastError ?? null,
+    };
+  });
+}
+
+function DemoStatusTile({
+  label,
+  value,
+  detail,
+  tone,
+}: {
+  label: string;
+  value: string;
+  detail: string;
+  tone: HealthTone;
+}) {
+  return (
+    <div className={`rounded-xl border px-4 py-3 ${healthPanelClass(tone)}`}>
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</p>
+        <span className={`h-2.5 w-2.5 rounded-full ${healthDotClass(tone)}`} aria-hidden />
+      </div>
+      <p className="mt-2 text-sm font-bold text-slate-950 dark:text-slate-100">{value}</p>
+      <p className="mt-0.5 text-xs leading-5 text-slate-600 dark:text-slate-400">{detail}</p>
+    </div>
+  );
+}
+
 export default function SettingsPage() {
   const { user, isAuthenticated, isLoading, supabase, getAccessToken, role, isAdmin } = useAuth();
   const { theme, resolvedTheme, setTheme } = useTheme();
@@ -195,6 +278,7 @@ export default function SettingsPage() {
   const [systemHealth, setSystemHealth] = useState<SystemHealth | null>(null);
   const [indexingStatus, setIndexingStatus] = useState<IndexingStatus | null>(null);
   const [demoReadiness, setDemoReadiness] = useState<DemoReadiness | null>(null);
+  const [googleSourceHealth, setGoogleSourceHealth] = useState<GoogleSourceHealth[] | null>(null);
   const [isLoadingSystemStatus, setIsLoadingSystemStatus] = useState(false);
   const [isRequeueingIndexing, setIsRequeueingIndexing] = useState(false);
   const [systemStatusMsg, setSystemStatusMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
@@ -243,15 +327,17 @@ export default function SettingsPage() {
     setSystemStatusMsg(null);
     try {
       const token = getAccessToken();
-      const [health, indexing, readiness] = await Promise.all([
+      const [health, indexing, readiness, googleHealth] = await Promise.all([
         isAuthenticated ? getSystemHealth(token) : Promise.resolve(null),
         isAuthenticated ? getIndexingStatus(token) : Promise.resolve(null),
         isAuthenticated ? getDemoReadiness(token) : Promise.resolve(null),
+        isAuthenticated ? getGoogleSourceHealth(token) : Promise.resolve(null),
       ]);
 
       setSystemHealth(health);
       setIndexingStatus(indexing);
       setDemoReadiness(readiness);
+      setGoogleSourceHealth(googleHealth);
     } catch (error) {
       setSystemStatusMsg({
         type: "error",
@@ -508,6 +594,37 @@ export default function SettingsPage() {
     : demoReadiness
       ? "working"
       : "idle";
+  const googleConnectedCount = googleSourceHealth?.filter((source) => source.connected).length ?? 0;
+  const googleImportedCount = googleSourceHealth?.filter((source) => source.importedCount > 0 || source.lastSyncedAt).length ?? 0;
+  const googleAttentionCount = googleSourceHealth?.filter((source) => source.lastError && !source.connected).length ?? 0;
+  const googleOverallTone: HealthTone = googleConnectedCount > 0
+    ? "ready"
+    : googleAttentionCount > 0
+      ? "attention"
+      : googleSourceHealth
+        ? "idle"
+        : "idle";
+  const workerFriendlyValue = workerStatus?.ok
+    ? "Worker running"
+    : workerStatus?.status === "missing"
+      ? "Start worker"
+      : workerStatus?.status === "stale"
+        ? "Restart worker"
+        : workerStatus
+          ? "Worker needs attention"
+          : "Worker unknown";
+  const indexingFriendlyValue = indexingOverallTone === "ready"
+    ? "Indexing clean"
+    : indexingOverallTone === "working"
+      ? "Indexing running"
+      : indexingOverallTone === "attention"
+        ? "Indexing needs action"
+        : "Indexing unknown";
+  const googleFriendlyValue = googleConnectedCount > 0
+    ? "Google connected"
+    : googleAttentionCount > 0
+      ? "Reconnect Google"
+      : "Connect Google";
   const schemaChecks = Object.entries({
     ...(systemHealth?.schema.tables ?? {}),
     ...(systemHealth?.schema.indexes ?? {}),
@@ -816,7 +933,46 @@ export default function SettingsPage() {
             </div>
           </div>
 
-          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            <DemoStatusTile
+              label="Worker"
+              value={workerFriendlyValue}
+              detail={
+                workerStatus?.heartbeatAgeMs != null
+                  ? `Last heartbeat ${formatDuration(workerStatus.heartbeatAgeMs)} ago.`
+                  : workerStatus?.detail ?? "Run API and worker together before the demo."
+              }
+              tone={workerTone}
+            />
+            <DemoStatusTile
+              label="Indexing"
+              value={indexingFriendlyValue}
+              detail={
+                indexingOverallTone === "ready"
+                  ? "No queued, failed, or stuck memory jobs."
+                  : indexingOverallTone === "working"
+                    ? `${totalActiveJobs + outboxActiveJobs} job(s) still becoming searchable memory.`
+                    : indexingOverallTone === "attention"
+                      ? `${userFailedJobs + outboxFailedJobs + staleProcessingJobs} job(s) need requeue or worker attention.`
+                      : "Refresh after signing in to inspect memory jobs."
+              }
+              tone={indexingOverallTone}
+            />
+            <DemoStatusTile
+              label="Google"
+              value={googleFriendlyValue}
+              detail={
+                googleConnectedCount > 0
+                  ? `${googleConnectedCount}/4 sources connected, ${googleImportedCount}/4 imported for AI.`
+                  : systemHealth?.environment.googleOAuthConfigured
+                    ? "OAuth is configured. Connect Google, then import each source."
+                    : "Google OAuth env vars are missing."
+              }
+              tone={googleOverallTone}
+            />
+          </div>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-7">
             <HealthSnapshotCard
               label="API"
               value={systemHealth ? systemHealth.status.toUpperCase() : "Unknown"}
@@ -895,6 +1051,17 @@ export default function SettingsPage() {
               }
               tone={embeddingOverallTone}
               loading={isLoadingSystemStatus && !indexingStatus && !systemHealth}
+            />
+            <HealthSnapshotCard
+              label="Google"
+              value={googleFriendlyValue}
+              detail={
+                googleSourceHealth
+                  ? `${googleConnectedCount}/4 connected · ${googleImportedCount}/4 imported.`
+                  : "Refresh to check Google source connection status."
+              }
+              tone={googleOverallTone}
+              loading={isLoadingSystemStatus && !googleSourceHealth}
             />
             <HealthSnapshotCard
               label="Demo"

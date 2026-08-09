@@ -44,7 +44,7 @@ if (!hasAiGatewayKey()) {
     import("@second-brain/db"),
     import("../src/index.ts"),
   ]);
-  const prisma = db.prisma ?? db.createPrismaClient();
+  const prisma = db.createPrismaClient();
 
   const userId = await resolveEvaluationUserId(prisma as any, "benchmark");
   const embedder = createDefaultEmbeddingProvider();

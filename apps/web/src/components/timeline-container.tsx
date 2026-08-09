@@ -33,6 +33,18 @@ function SkeletonCards() {
 /* ─── Mini Calendar ─── */
 const WEEKDAYS = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
 
+function getEntryActivityDate(entry: DiaryEntry) {
+  return entry.entryDate ?? entry.createdAt;
+}
+
+function getLocalDateKey(value: string | Date) {
+  const date = value instanceof Date ? value : new Date(value);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function MiniCalendar({
   entryDates,
   selectedDate,
@@ -54,7 +66,7 @@ function MiniCalendar({
   const firstDay = new Date(year, month, 1).getDay();
   const offset = firstDay === 0 ? 6 : firstDay - 1;
   const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const todayKey = new Date().toISOString().slice(0, 10);
+  const todayKey = getLocalDateKey(new Date());
 
   const cells: (number | null)[] = [
     ...Array.from({ length: offset }, () => null),
@@ -176,20 +188,27 @@ export function TimelineContainer() {
     setEntries((prev) => prev.filter((e) => e.id !== id));
   }, [getAccessToken]);
 
+  const sortedEntries = useMemo(() => {
+    return [...entries].sort(
+      (first, second) =>
+        new Date(getEntryActivityDate(second)).getTime() - new Date(getEntryActivityDate(first)).getTime(),
+    );
+  }, [entries]);
+
   // Build set of date keys that have entries
   const entryDates = useMemo(() => {
     const set = new Set<string>();
     for (const e of entries) {
-      set.add(new Date(e.createdAt).toISOString().slice(0, 10));
+      set.add(getLocalDateKey(getEntryActivityDate(e)));
     }
     return set;
   }, [entries]);
 
   // Filter entries by selected date
   const filteredEntries = useMemo(() => {
-    if (!selectedDate) return entries;
-    return entries.filter((e) => new Date(e.createdAt).toISOString().slice(0, 10) === selectedDate);
-  }, [entries, selectedDate]);
+    if (!selectedDate) return sortedEntries;
+    return sortedEntries.filter((e) => getLocalDateKey(getEntryActivityDate(e)) === selectedDate);
+  }, [selectedDate, sortedEntries]);
 
   const moodStats = useMemo(() => {
     return entries.reduce<Record<string, number>>((counts, entry) => {

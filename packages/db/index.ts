@@ -9,9 +9,14 @@ export * from "./src/search-history.js";
 export { toVectorLiteral } from "./src/vector.js";
 const { Prisma, PrismaClient } = PrismaPackage;
 
-export type PrismaClientLike = Pick<
+export type PrismaExecutorLike = Pick<
   PrismaClientPackage,
-  "$disconnect" | "$executeRawUnsafe" | "$queryRawUnsafe" | "$queryRaw" | "$transaction"
+  "$executeRawUnsafe" | "$queryRawUnsafe" | "$queryRaw"
+>;
+
+export type PrismaClientLike = PrismaExecutorLike & Pick<
+  PrismaClientPackage,
+  "$disconnect" | "$transaction"
 >;
 
 export interface PersistMemoryChunkInput {
@@ -29,9 +34,9 @@ export interface PersistMemoryChunkInput {
 
 export { Prisma, PrismaClient };
 
-let defaultPrismaClient: PrismaClientLike | null = null;
+let defaultPrismaClient: PrismaClientPackage | null = null;
 
-export function createPrismaClient(): PrismaClientLike {
+export function createPrismaClient(): PrismaClientPackage {
   const connectionString = process.env.DATABASE_URL;
 
   if (!connectionString) {
@@ -44,20 +49,19 @@ export function createPrismaClient(): PrismaClientLike {
   return new PrismaClient({ adapter });
 }
 
-function getDefaultPrismaClient(): PrismaClientLike {
+function getDefaultPrismaClient(): PrismaClientPackage {
   defaultPrismaClient ??= createPrismaClient();
   return defaultPrismaClient;
 }
 
 export async function insertMemoryChunk(
-  prismaOrInput: PrismaClientLike | PersistMemoryChunkInput,
+  prismaOrInput: PrismaExecutorLike | PersistMemoryChunkInput,
   maybeInput?: PersistMemoryChunkInput
 ): Promise<void> {
   const prisma = maybeInput
-    ? (prismaOrInput as PrismaClientLike)
+    ? (prismaOrInput as PrismaExecutorLike)
     : getDefaultPrismaClient();
   const input = maybeInput ?? (prismaOrInput as PersistMemoryChunkInput);
-  const metadataJson = JSON.stringify(input.metadata ?? {});
   const metadataRecord =
     input.metadata && typeof input.metadata === "object" && !Array.isArray(input.metadata)
       ? (input.metadata as Record<string, unknown>)
@@ -67,6 +71,9 @@ export async function insertMemoryChunk(
     (typeof metadataRecord.chunkIndex === "number" ? metadataRecord.chunkIndex : 0);
   const occurredAt =
     input.occurredAt == null ? new Date() : new Date(input.occurredAt);
+  const metadataJson = JSON.stringify(
+    normalizeMemoryMetadata(input.metadata, occurredAt),
+  );
   const embeddingLiteral = input.embedding == null ? null : toVectorLiteral(input.embedding);
 
   await prisma.$executeRawUnsafe(
@@ -124,17 +131,36 @@ export async function insertMemoryChunk(
 }
 
 export async function insertMemoryChunks(
-  prismaOrInputs: PrismaClientLike | PersistMemoryChunkInput[],
+  prismaOrInputs: PrismaExecutorLike | PersistMemoryChunkInput[],
   maybeInputs?: PersistMemoryChunkInput[]
 ): Promise<void> {
   const prisma = maybeInputs
-    ? (prismaOrInputs as PrismaClientLike)
+    ? (prismaOrInputs as PrismaExecutorLike)
     : getDefaultPrismaClient();
   const inputs = maybeInputs ?? (prismaOrInputs as PersistMemoryChunkInput[]);
 
   for (const input of inputs) {
     await insertMemoryChunk(prisma, input);
   }
+}
+
+function normalizeMemoryMetadata(metadata: unknown, occurredAt: Date) {
+  const record =
+    metadata && typeof metadata === "object" && !Array.isArray(metadata)
+      ? { ...(metadata as Record<string, unknown>) }
+      : {};
+  const memoryDate =
+    typeof record.memoryDate === "string"
+      ? record.memoryDate
+      : typeof record.date === "string"
+        ? record.date
+        : occurredAt.toISOString();
+
+  return {
+    ...record,
+    date: typeof record.date === "string" ? record.date : memoryDate,
+    memoryDate,
+  };
 }
 
 export interface MemorySourceRef {
@@ -148,11 +174,11 @@ export interface PruneMemoryChunksInput extends MemorySourceRef {
 }
 
 export async function deleteMemoryChunksForSource(
-  prismaOrRef: PrismaClientLike | MemorySourceRef,
+  prismaOrRef: PrismaExecutorLike | MemorySourceRef,
   maybeRef?: MemorySourceRef
 ): Promise<void> {
   const prisma = maybeRef
-    ? (prismaOrRef as PrismaClientLike)
+    ? (prismaOrRef as PrismaExecutorLike)
     : getDefaultPrismaClient();
   const ref = maybeRef ?? (prismaOrRef as MemorySourceRef);
 
@@ -170,11 +196,11 @@ export async function deleteMemoryChunksForSource(
 }
 
 export async function pruneMemoryChunksForSource(
-  prismaOrInput: PrismaClientLike | PruneMemoryChunksInput,
+  prismaOrInput: PrismaExecutorLike | PruneMemoryChunksInput,
   maybeInput?: PruneMemoryChunksInput
 ): Promise<void> {
   const prisma = maybeInput
-    ? (prismaOrInput as PrismaClientLike)
+    ? (prismaOrInput as PrismaExecutorLike)
     : getDefaultPrismaClient();
   const input = maybeInput ?? (prismaOrInput as PruneMemoryChunksInput);
 
@@ -291,7 +317,7 @@ interface RawChunkRow {
  * ```
  */
 export async function vectorSearch(
-  prisma: PrismaClientLike,
+  prisma: PrismaExecutorLike,
   queryEmbedding: number[],
   options: VectorSearchOptions
 ): Promise<VectorSearchResult[]> {
@@ -408,11 +434,11 @@ export interface EntityMentionInput {
  * Expects actual chunk IDs (UUIDs). Skips duplicates via ON CONFLICT.
  */
 export async function insertEntityMentions(
-  prismaOrInputs: PrismaClientLike | EntityMentionInput[],
+  prismaOrInputs: PrismaExecutorLike | EntityMentionInput[],
   maybeInputs?: EntityMentionInput[],
 ): Promise<void> {
   const prisma = maybeInputs
-    ? (prismaOrInputs as PrismaClientLike)
+    ? (prismaOrInputs as PrismaExecutorLike)
     : getDefaultPrismaClient();
   const inputs = maybeInputs ?? (prismaOrInputs as EntityMentionInput[]);
 
@@ -446,11 +472,11 @@ export async function insertEntityMentions(
  * Used before re-indexing to clear stale entity data.
  */
 export async function deleteEntityMentionsForSource(
-  prismaOrRef: PrismaClientLike | MemorySourceRef,
+  prismaOrRef: PrismaExecutorLike | MemorySourceRef,
   maybeRef?: MemorySourceRef,
 ): Promise<void> {
   const prisma = maybeRef
-    ? (prismaOrRef as PrismaClientLike)
+    ? (prismaOrRef as PrismaExecutorLike)
     : getDefaultPrismaClient();
   const ref = maybeRef ?? (prismaOrRef as MemorySourceRef);
 
@@ -475,11 +501,11 @@ export async function deleteEntityMentionsForSource(
  * Returns a map of chunkIndex → chunkId (UUID).
  */
 export async function resolveMemoryChunkIds(
-  prismaOrArgs: PrismaClientLike | { userId: string; sourceType: string; sourceId: string },
+  prismaOrArgs: PrismaExecutorLike | { userId: string; sourceType: string; sourceId: string },
   maybeArgs?: { userId: string; sourceType: string; sourceId: string },
 ): Promise<Map<number, string>> {
   const prisma = maybeArgs
-    ? (prismaOrArgs as PrismaClientLike)
+    ? (prismaOrArgs as PrismaExecutorLike)
     : getDefaultPrismaClient();
   const args = maybeArgs ?? (prismaOrArgs as { userId: string; sourceType: string; sourceId: string });
 

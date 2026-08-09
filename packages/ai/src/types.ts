@@ -16,6 +16,7 @@ export type ChunkType = (typeof CHUNK_TYPES)[number];
 
 export interface MemoryChunkMetadata {
   date: string | null;
+  memoryDate?: string | null;
   sourceType: "diary" | "calendar" | "gmail" | string;
   sourceId: string;
   chunkIndex: number;
@@ -37,6 +38,18 @@ export interface MemoryChunkMetadata {
   embeddingModel?: string;
   embeddingDimension?: number;
   embeddingUpdatedAt?: string;
+}
+
+export function withMemoryDate<T extends MemoryChunkMetadata>(
+  metadata: T,
+): T & { date: string | null; memoryDate: string | null } {
+  const memoryDate = metadata.memoryDate ?? metadata.date ?? null;
+
+  return {
+    ...metadata,
+    date: metadata.date ?? memoryDate,
+    memoryDate,
+  };
 }
 
 export interface MemoryChunk {

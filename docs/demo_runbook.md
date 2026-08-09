@@ -28,6 +28,14 @@ SUPABASE_SERVICE_ROLE_KEY="..."
 REDIS_URL="redis://localhost:6379"
 ```
 
+Optional Sentry error reporting:
+
+```bash
+SENTRY_DSN="<sentry project dsn>"
+SENTRY_ENVIRONMENT="demo"
+SENTRY_TRACES_SAMPLE_RATE="0.1"
+```
+
 Optional Redis tuning:
 
 ```bash
@@ -62,7 +70,13 @@ pnpm demo:drain
 
 ## 3. Run the app
 
-Open three terminals:
+Preferred single-command runtime:
+
+```bash
+pnpm dev:runtime
+```
+
+Or open three terminals:
 
 ```bash
 pnpm --filter @second-brain/api dev

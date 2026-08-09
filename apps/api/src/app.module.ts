@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { SentryModule } from '@sentry/nestjs/setup';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './modules/auth/auth.module';
@@ -27,9 +28,13 @@ import { GoogleConnectionsModule } from './modules/google-connections/google-con
 
 @Module({
   imports: [
+    SentryModule.forRoot(),
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: join(process.cwd(), '.env'),
+      envFilePath: [
+        join(process.cwd(), '.env'),
+        join(process.cwd(), '../../.env'),
+      ],
     }),
     AuthModule,
     CalendarModule,

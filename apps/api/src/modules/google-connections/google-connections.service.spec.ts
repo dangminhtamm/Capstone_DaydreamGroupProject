@@ -1,4 +1,9 @@
 import { NotFoundException } from '@nestjs/common';
+import {
+  getGoogleConnectionStatus,
+  isGoogleReconnectRequiredError,
+  recordGoogleSyncFailure,
+} from './google-connections';
 import { GoogleConnectionsService } from './google-connections.service';
 
 jest.mock('googleapis', () => ({
@@ -121,5 +126,114 @@ describe('GoogleConnectionsService', () => {
         email: 'user@example.com',
       }),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('marks a Google source disconnected when sync fails from token or scope errors', async () => {
+    const connectionPrisma = {
+      $executeRawUnsafe: jest.fn().mockResolvedValue(1),
+    };
+
+    await recordGoogleSyncFailure(connectionPrisma as any, {
+      userId: 'user-1',
+      source: 'gmail',
+      error: {
+        response: {
+          status: 403,
+          data: {
+            error: {
+              message: 'Request had insufficient authentication scopes.',
+            },
+          },
+        },
+      },
+    });
+
+    expect(connectionPrisma.$executeRawUnsafe).toHaveBeenCalledWith(
+      expect.any(String),
+      'user-1',
+      'gmail',
+      false,
+      ['https://www.googleapis.com/auth/gmail.readonly'],
+      null,
+      expect.stringContaining('Needs reconnect:'),
+      null,
+    );
+  });
+
+  it('keeps a Google source connected for transient sync failures', async () => {
+    const connectionPrisma = {
+      $executeRawUnsafe: jest.fn().mockResolvedValue(1),
+    };
+
+    await recordGoogleSyncFailure(connectionPrisma as any, {
+      userId: 'user-1',
+      source: 'drive',
+      error: new Error('AI quota or rate limit was reached.'),
+    });
+
+    expect(connectionPrisma.$executeRawUnsafe).toHaveBeenCalledWith(
+      expect.any(String),
+      'user-1',
+      'drive',
+      true,
+      ['https://www.googleapis.com/auth/drive.readonly'],
+      null,
+      'AI quota or rate limit was reached.',
+      null,
+    );
+  });
+
+  it('classifies invalid_grant as requiring Google reconnect', () => {
+    expect(isGoogleReconnectRequiredError(new Error('invalid_grant'))).toBe(true);
+  });
+
+  it('treats stale disconnected source rows as connected when user-level Google tokens are valid', async () => {
+    const connectionPrisma = {
+      $queryRawUnsafe: jest.fn().mockResolvedValue([
+        {
+          source: 'calendar',
+          connected: false,
+          scopes: ['https://www.googleapis.com/auth/calendar.readonly'],
+          last_sync_at: new Date('2026-08-06T15:59:40.006Z'),
+          last_error: null,
+          last_error_at: null,
+          sync_cursor: null,
+        },
+      ]),
+    };
+
+    await expect(
+      getGoogleConnectionStatus(connectionPrisma as any, 'user-1', 'calendar', true),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        source: 'calendar',
+        connected: true,
+      }),
+    );
+  });
+
+  it('keeps source disconnected when the row requires reconnect', async () => {
+    const connectionPrisma = {
+      $queryRawUnsafe: jest.fn().mockResolvedValue([
+        {
+          source: 'gmail',
+          connected: false,
+          scopes: ['https://www.googleapis.com/auth/gmail.readonly'],
+          last_sync_at: null,
+          last_error: 'Needs reconnect: invalid_grant',
+          last_error_at: new Date('2026-08-09T05:00:00.000Z'),
+          sync_cursor: null,
+        },
+      ]),
+    };
+
+    await expect(
+      getGoogleConnectionStatus(connectionPrisma as any, 'user-1', 'gmail', true),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        source: 'gmail',
+        connected: false,
+      }),
+    );
   });
 });

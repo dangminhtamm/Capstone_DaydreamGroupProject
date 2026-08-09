@@ -21,10 +21,11 @@ if (!question) {
   console.error("Set DATABASE_URL before running memory search.");
   process.exitCode = 1;
 } else {
-  const [{ prisma }, { answerMemory }] = await Promise.all([
+  const [db, { answerMemory }] = await Promise.all([
     import("@second-brain/db"),
     import("../src/index.ts"),
   ]);
+  const prisma = db.createPrismaClient();
 
   try {
     const result = await answerMemory(question, userId, prisma);

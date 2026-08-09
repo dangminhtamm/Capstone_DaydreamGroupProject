@@ -387,6 +387,10 @@ Return only the extracted text or factual description.
       return;
     }
 
+    const sourceTitle =
+      typeof job.payload?.sourceTitle === 'string'
+        ? job.payload.sourceTitle
+        : attachment.storage_path.split('/').pop();
     let extractedText = attachment.extracted_text?.trim() ?? '';
     if (!extractedText) {
       const supabase = this.getSupabaseClient();
@@ -399,7 +403,21 @@ Return only the extracted text or factual description.
       }
 
       const base64Data = Buffer.from(await data.arrayBuffer()).toString('base64');
-      extractedText = await this.extractTextFromBlob(base64Data, attachment.file_type);
+      try {
+        extractedText = await this.extractTextFromBlob(base64Data, attachment.file_type);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(
+          `[Worker - Ingestion] Attachment ${attachment.id} downloaded, but AI extraction failed; indexing metadata fallback: ${message}`,
+        );
+        extractedText = this.buildAttachmentExtractionFallback({
+          sourceTitle,
+          storagePath: attachment.storage_path,
+          fileType: attachment.file_type,
+          entryDate: attachment.diary_entry.entry_date,
+          error: message,
+        });
+      }
       await prisma.attachment.update({
         where: { id: attachment.id },
         data: { extracted_text: extractedText },
@@ -412,10 +430,7 @@ Return only the extracted text or factual description.
       diaryEntryId: attachment.diary_entry.id,
       extractedText,
       occurredAt: attachment.diary_entry.entry_date,
-      sourceTitle:
-        typeof job.payload?.sourceTitle === 'string'
-          ? job.payload.sourceTitle
-          : attachment.storage_path.split('/').pop(),
+      sourceTitle,
       fileType: attachment.file_type,
       insertChunks: (chunks) =>
         prisma.$transaction(async (tx: any) => {
@@ -436,6 +451,21 @@ Return only the extracted text or factual description.
         sourceId: attachment.id,
       });
     }
+  }
+
+  private static buildAttachmentExtractionFallback(input: {
+    sourceTitle?: string;
+    storagePath: string;
+    fileType: string;
+    entryDate: Date;
+    error: string;
+  }) {
+    return [
+      `Attachment "${input.sourceTitle ?? input.storagePath}" was uploaded for a diary entry.`,
+      `File type: ${input.fileType}.`,
+      `Diary memory date: ${input.entryDate.toISOString()}.`,
+      `Full text extraction was unavailable during indexing: ${input.error.slice(0, 240)}.`,
+    ].join('\n');
   }
 
   private static async processCalendarEvent(job: IndexingJob) {
@@ -640,6 +670,8 @@ Return only the extracted text or factual description.
     external_id: string;
     name: string;
     mime_type: string;
+    web_view_link?: string | null;
+    modified_time?: Date | null;
     user: {
       id: string;
       google_access_token: string | null;
@@ -696,7 +728,30 @@ Return only the extracted text or factual description.
     }
 
     const base64Data = buffer.toString('base64');
-    return this.extractTextFromBlob(base64Data, driveFile.mime_type);
+    try {
+      return await this.extractTextFromBlob(base64Data, driveFile.mime_type);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(
+        `[Worker - Ingestion] Drive file ${driveFile.external_id} imported, but AI extraction failed; indexing metadata fallback: ${message}`,
+      );
+      return this.buildDriveExtractionFallback(driveFile, message);
+    }
+  }
+
+  private static buildDriveExtractionFallback(driveFile: {
+    name: string;
+    mime_type: string;
+    web_view_link?: string | null;
+    modified_time?: Date | null;
+  }, error: string) {
+    return [
+      `Google Drive file "${driveFile.name}" was imported.`,
+      `MIME type: ${driveFile.mime_type}.`,
+      driveFile.modified_time ? `Modified at: ${driveFile.modified_time.toISOString()}.` : '',
+      driveFile.web_view_link ? `Google Drive URL: ${driveFile.web_view_link}.` : '',
+      `Full text extraction was unavailable during indexing: ${error.slice(0, 240)}.`,
+    ].filter(Boolean).join('\n');
   }
 
   private static getDriveExportMimeType(mimeType: string) {
@@ -780,8 +835,13 @@ Return only the extracted text or factual description.
   private static async markFailed(job: IndexingJob, error: unknown): Promise<'retry' | 'dead_letter'> {
     const message = this.toErrorMessage(error).slice(0, 4000);
     const nextRetryCount = job.retry_count + 1;
-    const exhausted = nextRetryCount >= job.max_retries;
+    const requiresReconnect = this.isGoogleReconnectRequiredError(message);
+    const exhausted = requiresReconnect || nextRetryCount >= job.max_retries;
     const nextStatus = exhausted ? 'dead_letter' : 'retry';
+
+    if (requiresReconnect) {
+      await this.markGoogleConnectionReconnectRequired(job, message);
+    }
 
     await prisma.indexingOutbox.update({
       where: { id: job.id },
@@ -800,6 +860,68 @@ Return only the extracted text or factual description.
     );
 
     return nextStatus;
+  }
+
+  private static isGoogleReconnectRequiredError(message: string) {
+    const normalized = message.toLowerCase();
+
+    return (
+      /\binvalid_grant\b/i.test(message) ||
+      /\binvalid_credentials\b/i.test(message) ||
+      normalized.includes('invalid credentials') ||
+      normalized.includes('token has been expired') ||
+      normalized.includes('token has been revoked') ||
+      normalized.includes('token expired') ||
+      normalized.includes('unauthorized') ||
+      normalized.includes('401') ||
+      normalized.includes('insufficient authentication scopes') ||
+      normalized.includes('insufficient permission') ||
+      normalized.includes('insufficient permissions') ||
+      normalized.includes('insufficient scope') ||
+      normalized.includes('insufficient_scope') ||
+      normalized.includes('forbidden') && (
+        normalized.includes('scope') ||
+        normalized.includes('permission')
+      )
+    );
+  }
+
+  private static async markGoogleConnectionReconnectRequired(job: IndexingJob, error: string) {
+    const source = this.toGoogleSource(job.source_type);
+    if (!source) return;
+
+    try {
+      await prisma.$executeRawUnsafe(
+        `
+        UPDATE google_connections
+        SET
+          connected = false,
+          last_error = $3,
+          last_error_at = now(),
+          updated_at = now()
+        WHERE user_id = $1 AND source = $2
+        `,
+        job.user_id,
+        source,
+        `Needs reconnect: ${error}`.slice(0, 1000),
+      );
+    } catch {
+      // Health/readiness reports missing google_connections in partially migrated environments.
+    }
+  }
+
+  private static toGoogleSource(sourceType: string) {
+    const normalized = this.normalizeSourceType(sourceType);
+    if (
+      normalized === 'calendar' ||
+      normalized === 'contact' ||
+      normalized === 'drive' ||
+      normalized === 'gmail'
+    ) {
+      return normalized;
+    }
+
+    return null;
   }
 
   private static nextRunAfter(retryCount: number) {

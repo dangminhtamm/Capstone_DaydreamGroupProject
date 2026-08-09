@@ -13,7 +13,10 @@ import {
   shouldTranslateFastAnswer,
   translateFastAnswerIfUseful,
 } from "./answer-memory-translation.ts";
-import { shouldUseAutoFastPath } from "./answer-memory-routing.ts";
+import {
+  selectMaxAnswerTokens,
+  shouldUseAutoFastPath,
+} from "./answer-memory-routing.ts";
 import type { AnswerMemoryResult } from "./answer-memory.ts";
 import type { MemorySearchHit } from "./retrieval.ts";
 
@@ -83,6 +86,16 @@ test("auto routing uses Deep for broad recent work synthesis but Fast for exact 
     shouldUseAutoFastPath("What did I work on 9/7?", "progress", exactDateFilters),
     true,
   );
+
+  const julyFilters = inferRetrievalFilters(
+    "tóm tắt tháng 7 tôi làm gì?",
+    new Date("2026-08-06T15:30:00.000Z"),
+  );
+  assert.equal(
+    shouldUseAutoFastPath("tóm tắt tháng 7 tôi làm gì?", "progress", julyFilters),
+    false,
+  );
+  assert.ok(selectMaxAnswerTokens("tóm tắt tháng 7 tôi làm gì?") >= 2048);
 });
 
 test("inferRetrievalFilters prefers attachment sources for document questions", () => {
@@ -109,7 +122,8 @@ test("inferRetrievalFilters prefers diary and summary context for risk questions
 test("inferRetrievalFilters uses broad source context for progress summaries", () => {
   const filters = inferRetrievalFilters("Summarize the team's progress across the week.");
 
-  assert.deepEqual(filters.preferredSourceTypes, ["diary", "calendar", "summary"]);
+  assert.deepEqual(filters.sourceTypes, ["diary", "calendar", "summary"]);
+  assert.deepEqual(filters.preferredSourceTypes, ["diary", "calendar"]);
   assert.ok(filters.preferredChunkTypes?.includes("event"));
 });
 
@@ -1565,9 +1579,99 @@ test("answerFromChunks broad recent work fallback keeps diverse diary days", asy
   );
 
   assert.equal(result.answerMode, "extractive_fallback");
-  assert.equal(result.citations.length, 8);
+  assert.equal(result.citations.length, 6);
   assert.match(result.answer, /July 1, 2026/);
-  assert.match(result.answer, /July 8, 2026/);
+  assert.match(result.answer, /July 6, 2026/);
+});
+
+test("answerFromChunks Vietnamese monthly fallback prefers diary evidence over raw summaries", async () => {
+  const chunks = [
+    makeHit({
+      id: "monthly-summary",
+      sourceType: "summary",
+      sourceId: "summary-july",
+      chunkType: "reflection",
+      text: "Monthly Retrospective: July 2026 This retrospective covers the period from July 1st to July 31st, 2026. The insights are primarily derived from weekly summaries.",
+      evidence: "Monthly Retrospective: July 2026 This retrospective covers the period from July 1st to July 31st, 2026. The insights are primarily derived from weekly summaries.",
+      similarity: 0.96,
+      vectorSimilarity: 0.96,
+      occurredAt: new Date("2026-07-01T02:00:00.000Z"),
+    }),
+    makeHit({
+      id: "weekly-summary",
+      sourceType: "summary",
+      sourceId: "summary-week",
+      chunkType: "reflection",
+      text: 'Weekly Review: 2026-07-06 to 2026-07-12 Key Events: On July 9th, the diarist reported doing nothing and sleeping "from morning to night."',
+      evidence: 'Weekly Review: 2026-07-06 to 2026-07-12 Key Events: On July 9th, the diarist reported doing nothing and sleeping "from morning to night."',
+      similarity: 0.94,
+      vectorSimilarity: 0.94,
+      occurredAt: new Date("2026-07-06T02:00:00.000Z"),
+    }),
+    makeHit({
+      id: "july-capstone-paper",
+      sourceType: "diary",
+      sourceId: "diary-2026-07-01",
+      chunkType: "general",
+      text: "I stayed home today to edit my capstone paper.",
+      evidence: "I stayed home today to edit my capstone paper.",
+      similarity: 0.91,
+      vectorSimilarity: 0.91,
+      occurredAt: new Date("2026-07-01T02:00:00.000Z"),
+    }),
+    makeHit({
+      id: "july-sleep",
+      sourceType: "diary",
+      sourceId: "diary-2026-07-09",
+      chunkType: "general",
+      text: "Hôm nay tôi không làm gì, chỉ nằm ngủ từ sáng tới tối.",
+      evidence: "Hôm nay tôi không làm gì, chỉ nằm ngủ từ sáng tới tối.",
+      similarity: 0.89,
+      vectorSimilarity: 0.89,
+      occurredAt: new Date("2026-07-09T02:00:00.000Z"),
+    }),
+    makeHit({
+      id: "july-cafe-project",
+      sourceType: "diary",
+      sourceId: "diary-2026-07-14",
+      chunkType: "general",
+      text: "Tôi chỉ đi ra ngoài ngồi Café và cố gắng hoàn thành project.",
+      evidence: "Tôi chỉ đi ra ngoài ngồi Café và cố gắng hoàn thành project.",
+      similarity: 0.88,
+      vectorSimilarity: 0.88,
+      occurredAt: new Date("2026-07-14T02:00:00.000Z"),
+    }),
+  ];
+
+  const result = await answerFromChunks(
+    "tóm tắt tháng 7 tôi làm gì?",
+    chunks,
+    {
+      responseLanguage: "vi",
+      generateAnswer: async (options: any) => ({
+        data: options.validator.parse({
+          answer: "Trong tháng 8, Martin làm deployment với Zoe.",
+          confidence: "medium",
+          citations: [],
+        }),
+        tokenUsage: {
+          promptTokens: 160,
+          completionTokens: 28,
+          totalTokens: 188,
+          model: "test-gemini",
+        },
+      }),
+    },
+  );
+
+  assert.equal(result.answerMode, "extractive_fallback");
+  assert.equal(result.citations.length, 3);
+  assert.ok(result.citations.every((citation) => citation.sourceType === "diary"));
+  assert.match(result.answer, /chỉnh sửa bài capstone/);
+  assert.match(result.answer, /ngủ từ sáng tới tối/);
+  assert.match(result.answer, /quán cà phê/);
+  assert.doesNotMatch(result.answer, /I stayed home today/i);
+  assert.doesNotMatch(result.answer, /Weekly Review|Monthly Retrospective/);
 });
 
 test("answerSingleDayFastPath assembles simple day answers without model generation", () => {
@@ -1602,6 +1706,44 @@ test("answerSingleDayFastPath assembles simple day answers without model generat
   assert.equal(result.analytics?.timing.generateMs, 0);
   assert.equal(result.citations.length, 2);
   assert.match(result.answer, /you went to a cafe to study that day/);
+});
+
+test("answerSingleDayFastPath strips diary titles from titled entries", () => {
+  const result = answerSingleDayFastPath(
+    "what did i do on 26/7",
+    [
+      makeHit({
+        id: "demo-mvp-checklist",
+        sourceType: "diary",
+        sourceId: "demo-mvp-diary-06",
+        chunkType: "general",
+        text: "[DEMO MVP] Final MVP checklist\n\nThe MVP is ready when diary entries, memory chunks, summaries, Calendar events, linked events, and outbox health all pass the demo readiness checks. We should rehearse the flow from diary creation to search answer with citations.",
+        evidence: "[DEMO MVP] Final MVP checklist\n\nThe MVP is ready when diary entries, memory chunks, summaries, Calendar events, linked events, and outbox health all pass the demo readiness checks. We should rehearse the flow from diary creation to search answer with citations.",
+        metadata: { sourceTitle: "[DEMO MVP] Final MVP checklist" },
+        similarity: 0.72,
+        vectorSimilarity: 0,
+        lexicalScore: 1,
+        retrievalMode: "temporal",
+        occurredAt: new Date("2026-07-26T05:00:00.000Z"),
+      }),
+    ],
+    {
+      startDate: new Date("2026-07-26T00:00:00.000Z"),
+      endDate: new Date("2026-07-26T23:59:59.999Z"),
+    },
+    "en",
+    0.62,
+  );
+
+  assert.ok(result);
+  assert.equal(result.answerMode, "fast_path");
+  assert.match(result.answer, /On July 26, 2026/);
+  assert.match(result.answer, /you worked on the final MVP checklist/);
+  assert.match(result.answer, /checking that diary entries, memory chunks, summaries, Calendar events, linked events, and outbox health/);
+  assert.match(result.answer, /you planned to rehearse the flow from diary creation to search answer with citations/);
+  assert.doesNotMatch(result.answer, /\[DEMO MVP\] Final MVP checklist/);
+  assert.doesNotMatch(result.answer, /a…/);
+  assert.doesNotMatch(result.citations[0]?.claim ?? "", /\[DEMO MVP\] Final MVP checklist/);
 });
 
 test("answerSingleDayFastPath prefers raw diary facts over generated daily summaries", () => {
@@ -1753,9 +1895,34 @@ test("answerSingleDayFastPath skips reasoning-heavy temporal questions", () => {
   assert.equal(result, null);
 });
 
-test("answerTemporalRangeFastPath skips blocker questions so Auto can generate a focused answer", () => {
+test("answerTemporalRangeFastPath answers direct blocker questions without generation", () => {
   const result = answerTemporalRangeFastPath(
     "What blockers did we have this week?",
+    [
+      makeHit({
+        text: "The main blocker is making sure the worker is running before rehearsal.",
+        chunkType: "action_item",
+        similarity: 0.8,
+        vectorSimilarity: 0.8,
+      }),
+    ],
+    {
+      startDate: new Date("2026-07-13T00:00:00.000Z"),
+      endDate: new Date("2026-07-19T23:59:59.999Z"),
+    },
+    "en",
+    0.62,
+  );
+
+  assert.ok(result);
+  assert.equal(result.answerMode, "fast_path");
+  assert.equal(result.analytics?.tokenUsage.model, "temporal-fast-path");
+  assert.match(result.answer, /worker is running/);
+});
+
+test("answerTemporalRangeFastPath skips analyze blocker questions so Auto can use Deep", () => {
+  const result = answerTemporalRangeFastPath(
+    "Analyze why the blockers happened this week.",
     [
       makeHit({
         text: "The main blocker is making sure the worker is running before rehearsal.",
@@ -1795,6 +1962,8 @@ test("answerMemory answers single-day questions from unindexed diary rows withou
 
   assert.equal(result.analytics?.tokenUsage.model, "unindexed-diary-fast-path");
   assert.equal(result.analytics?.timing.generateMs, 0);
+  assert.equal(result.debugTrace?.routingTrace?.selectedPath, "unindexed_fast_path");
+  assert.equal(result.debugTrace?.routingTrace?.usedUnindexedDiary, true);
   assert.match(result.answer, /Dung và Lâm/);
   assert.equal(result.citations[0]?.sourceId, "diary-today");
 });

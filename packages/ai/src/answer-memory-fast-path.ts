@@ -20,11 +20,18 @@ import {
   prepareFastCitations,
 } from "./answer-memory-fast-compose.ts";
 import {
+  countOverlap,
+  importantTokens,
+} from "./answer-memory-scoring.ts";
+import {
   buildQueryAnalytics,
   noMemoryResult,
 } from "./answer-memory-result.ts";
 import { hasAdequateSemanticSupport } from "./answer-memory-validation.ts";
-import { requiresGenerativeReasoning } from "./answer-memory-routing.ts";
+import {
+  isBroadTemporalSynthesisQuestion,
+  requiresGenerativeReasoning,
+} from "./answer-memory-routing.ts";
 import type { MemorySearchHit, RetrievalFilters } from "./retrieval.ts";
 
 export function answerSingleDayFastPath(
@@ -96,9 +103,12 @@ export function answerTemporalRangeFastPath(
   }
 
   const intent = detectMemoryIntent(question);
+  const broadSynthesis = isBroadTemporalSynthesisQuestion(question, intent, filters);
   const citations = prepareFastCitations(buildCitations(sortedChunks), {
     intent,
-    maxCitations: 6,
+    question,
+    focused: !broadSynthesis,
+    maxCitations: broadSynthesis || intent === "progress" ? 6 : 3,
   });
 
   if (!citations.length) return null;
@@ -169,10 +179,29 @@ export function answerFastExtractiveFromChunks(
   }
 
   const intent = detectMemoryIntent(question);
+  const broadSynthesis = isBroadTemporalSynthesisQuestion(question, intent);
   const citations = prepareFastCitations(buildCitations(sortedChunks), {
     intent,
-    maxCitations: 6,
+    question,
+    focused: !broadSynthesis,
+    maxCitations: broadSynthesis ? 6 : 1,
   });
+
+  if (!hasFocusedFastSupport(question, citations, broadSynthesis)) {
+    const result = noMemoryResult(
+      lang === "vi"
+        ? "Mình chưa tìm thấy ký ức đủ liên quan để trả lời nhanh."
+        : "I could not find enough relevant memories for a fast answer.",
+      lang,
+    );
+    result.analytics = buildQueryAnalytics({
+      model: "fast-extractive",
+      chunksRetrieved: chunks.length,
+      status: "no_memory",
+      answerMode: "no_memory",
+    });
+    return result;
+  }
 
   return {
     answer: formatGenericFastAnswer({
@@ -212,3 +241,77 @@ function isMultiDayRange(filters: RetrievalFilters): boolean {
 
   return end - start > 24 * 60 * 60 * 1000;
 }
+
+function hasFocusedFastSupport(
+  question: string,
+  citations: Array<{
+    quote: string;
+    sourceTitle?: string;
+    lexicalScore?: number;
+  }>,
+  broadSynthesis: boolean,
+): boolean {
+  if (!citations.length) return false;
+
+  const queryTokens = new Set(getTopicalSupportTokens(question));
+  if (queryTokens.size === 0) return true;
+
+  const bestOverlapRatio = citations.reduce((best, citation) => {
+    const sourceTokens = buildSupportTokenSet(`${citation.sourceTitle ?? ""} ${citation.quote}`);
+    const overlapRatio = countOverlap(queryTokens, sourceTokens) / queryTokens.size;
+    return Math.max(best, overlapRatio);
+  }, 0);
+  const hasLexicalSupport = citations.some((citation) => (citation.lexicalScore ?? 0) >= 0.25);
+
+  if (broadSynthesis) return bestOverlapRatio >= 0.22;
+
+  return hasLexicalSupport || bestOverlapRatio >= 0.22;
+}
+
+function getTopicalSupportTokens(question: string): string[] {
+  return importantTokens(question)
+    .map((token) => singularizeToken(token))
+    .filter((token) => !FAST_SUPPORT_IGNORED_TOKENS.has(token) && !/^\d+$/u.test(token));
+}
+
+function buildSupportTokenSet(value: string): Set<string> {
+  const tokens = new Set<string>();
+  for (const token of importantTokens(value)) {
+    tokens.add(token);
+    tokens.add(singularizeToken(token));
+  }
+  return tokens;
+}
+
+function singularizeToken(token: string): string {
+  return token.length > 3 && token.endsWith("s") ? token.slice(0, -1) : token;
+}
+
+const FAST_SUPPORT_IGNORED_TOKENS = new Set([
+  "across",
+  "during",
+  "happen",
+  "happened",
+  "latest",
+  "main",
+  "mentioned",
+  "month",
+  "recent",
+  "recently",
+  "team",
+  "week",
+  "weekly",
+  "year",
+  "january",
+  "february",
+  "march",
+  "april",
+  "may",
+  "june",
+  "july",
+  "august",
+  "september",
+  "october",
+  "november",
+  "december",
+]);

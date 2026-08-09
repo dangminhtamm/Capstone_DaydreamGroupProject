@@ -14,6 +14,7 @@ type DiaryEntry = {
   tags?: string[];
   attachments?: Array<string | DiaryAttachment>;
   calendarEvents?: DiaryCalendarEvent[];
+  entryDate?: Date | string;
   createdAt: Date | string;
   updatedAt?: Date | string;
 };
@@ -87,6 +88,14 @@ function formatEventTime(event: DiaryCalendarEvent) {
   const start = new Date(event.startTime);
   const end = new Date(event.endTime);
   return `${start.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} - ${end.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+}
+
+function getEntryActivityDate(entry: DiaryEntry) {
+  return entry.entryDate ?? entry.createdAt;
+}
+
+function isDifferentTimestamp(first: Date | string, second: Date | string) {
+  return new Date(first).getTime() !== new Date(second).getTime();
 }
 
 export function TimelineList({ entries, onUpdate, onDelete }: TimelineListProps) {
@@ -173,7 +182,11 @@ export function TimelineList({ entries, onUpdate, onDelete }: TimelineListProps)
       )}
       
       <ul className="space-y-6">
-        {paginatedEntries.map((entry, index) => (
+        {paginatedEntries.map((entry, index) => {
+          const activityDate = getEntryActivityDate(entry);
+          const showCreatedDate = isDifferentTimestamp(activityDate, entry.createdAt);
+
+          return (
           <li key={entry.id} className="relative pl-14">
             {/* Timeline dot */}
             <div className="absolute left-0 top-6 z-10 flex h-10 w-10 items-center justify-center rounded-full border-4 border-white bg-slate-900 text-white dark:border-slate-950 dark:bg-slate-700">
@@ -230,7 +243,8 @@ export function TimelineList({ entries, onUpdate, onDelete }: TimelineListProps)
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                   </svg>
-                  <time className="font-medium">{formatDateTime(entry.createdAt)}</time>
+                  <span className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Memory date</span>
+                  <time className="font-medium">{formatDateTime(activityDate)}</time>
                 </div>
                 {(entry.mood || entry.tags?.length) && (
                   <div className="flex flex-wrap items-center gap-2 pt-1">
@@ -348,15 +362,18 @@ export function TimelineList({ entries, onUpdate, onDelete }: TimelineListProps)
               )}
               
               {/* Footer decoration */}
-              <div className="mt-4 pt-4 border-t border-slate-100 flex items-center gap-2 text-xs text-slate-400 dark:border-slate-700 dark:text-slate-500">
+              {showCreatedDate ? (
+                <div className="mt-4 pt-4 border-t border-slate-100 flex items-center gap-2 text-xs text-slate-400 dark:border-slate-700 dark:text-slate-500">
                 <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
                 </svg>
                 <span>Created {formatDateTime(entry.createdAt)}</span>
-              </div>
+                </div>
+              ) : null}
             </div>
           </li>
-        ))}
+          );
+        })}
       </ul>
       
       {/* Empty state */}

@@ -188,14 +188,6 @@ function assertGenerationComplete(finishReason: string | undefined, text: string
   );
 }
 
-function getGeminiFinishReason(response: unknown): string | undefined {
-  const candidates = (response as { candidates?: unknown })?.candidates;
-  if (!Array.isArray(candidates)) return undefined;
-
-  const finishReason = (candidates[0] as { finishReason?: unknown } | undefined)?.finishReason;
-  return typeof finishReason === "string" ? finishReason : undefined;
-}
-
 function summarizeJsonFormatError(error: Error): string {
   if (error instanceof ZodError) {
     const issues = error.issues

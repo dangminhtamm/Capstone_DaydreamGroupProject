@@ -18,6 +18,7 @@ type EvaluationQuestion = {
 };
 
 type EvaluationDataset = {
+  referenceNow?: string;
   questions: EvaluationQuestion[];
 };
 
@@ -83,11 +84,12 @@ if (!hasAiGatewayKey()) {
     import("@second-brain/db"),
     import("../src/index.ts"),
   ]);
-  const prisma = db.prisma ?? db.createPrismaClient();
+  const prisma = db.createPrismaClient();
   const userId = await resolveEvaluationUserId(prisma as any, "evaluate retrieval");
   const dataset = JSON.parse(
     readFileSync(datasetPath, "utf8"),
   ) as EvaluationDataset;
+  const referenceNow = resolveReferenceNow(dataset);
   const embedder = createDefaultEmbeddingProvider();
 
   try {
@@ -110,7 +112,7 @@ if (!hasAiGatewayKey()) {
             prisma,
             embedding,
             {
-              ...inferRetrievalFilters(item.question),
+              ...inferRetrievalFilters(item.question, referenceNow),
               limit: retrievalLimit,
               maxDistance: process.env.MEMORY_MAX_DISTANCE
                 ? Number(process.env.MEMORY_MAX_DISTANCE)
@@ -274,6 +276,16 @@ function parseEvalLimit(value: string): number | undefined {
   if (value.toLowerCase() === "all") return undefined;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function resolveReferenceNow(dataset: EvaluationDataset): Date {
+  const configured = process.env.MEMORY_EVAL_NOW ?? dataset.referenceNow;
+  if (configured) {
+    const parsed = new Date(configured);
+    if (Number.isFinite(parsed.getTime())) return parsed;
+  }
+
+  return new Date();
 }
 
 function failIfRequested(

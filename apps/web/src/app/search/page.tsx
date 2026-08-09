@@ -62,6 +62,24 @@ type MemoryDebugTrace = {
   appliedFilters: Record<string, unknown>;
   status: "success" | "no_memory" | "error";
   reason: string;
+  routingTrace?: {
+    intent: string;
+    requestedStrategy: AnswerStrategy;
+    selectedPath:
+      | "unindexed_fast_path"
+      | "embedding_error_fallback"
+      | "created_date_mismatch"
+      | "indexed_fast_path"
+      | "deep_generation"
+      | "deep_validation_fallback"
+      | "deep_model_error_fallback"
+      | "no_memory";
+    reason: string;
+    autoFastEligible: boolean;
+    fastPathEligible: boolean;
+    usedUnindexedDiary: boolean;
+    translationRan: boolean;
+  };
   chunksRetrieved: number;
   diagnostics?: MemoryIndexDiagnostics;
   topChunks: Array<{
@@ -311,6 +329,12 @@ function formatSimilarityScore(value: number) {
   return `${Math.round(value * 100)}%`;
 }
 
+function formatSourceReliability(value: number) {
+  if (value >= 0.78) return "Strong citation";
+  if (value >= 0.55) return "Useful evidence";
+  return "Context evidence";
+}
+
 function sourceCardTone(sourceType: string) {
   return sourceToneStyles[sourceType] ?? "border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200";
 }
@@ -377,6 +401,29 @@ function formatIndexAction(issue: MemoryIndexDiagnostics["issue"], model: string
       return `Some chunks still need re-embedding with ${model}.`;
     default:
       return "Index and embedding model look aligned for these filters.";
+  }
+}
+
+function formatRoutingPath(value: NonNullable<MemoryDebugTrace["routingTrace"]>["selectedPath"]) {
+  switch (value) {
+    case "unindexed_fast_path":
+      return "Unindexed diary fast path";
+    case "embedding_error_fallback":
+      return "Embedding fallback";
+    case "created_date_mismatch":
+      return "Date mismatch helper";
+    case "indexed_fast_path":
+      return "Indexed fast path";
+    case "deep_generation":
+      return "Deep generation";
+    case "deep_validation_fallback":
+      return "Deep validation fallback";
+    case "deep_model_error_fallback":
+      return "Deep model fallback";
+    case "no_memory":
+      return "No memory";
+    default:
+      return value;
   }
 }
 
@@ -525,6 +572,49 @@ function AiDebugPanel({ result }: { result: SearchResponse }) {
         </div>
       )}
 
+      {trace?.routingTrace ? (
+        <div className="mt-3 rounded-lg border border-blue-100 bg-blue-50/60 p-3 dark:border-blue-900/60 dark:bg-blue-950/20">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-blue-600 dark:text-blue-300">Routing</p>
+              <p className="mt-1 text-sm font-semibold text-slate-950 dark:text-slate-100">
+                {formatRoutingPath(trace.routingTrace.selectedPath)}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <span className="status-badge">Strategy: {trace.routingTrace.requestedStrategy}</span>
+              <span className="status-badge">Intent: {trace.routingTrace.intent}</span>
+              <span className={`status-badge ${trace.routingTrace.translationRan ? "status-badge-success" : ""}`}>
+                Translation: {trace.routingTrace.translationRan ? "ran" : "skipped"}
+              </span>
+            </div>
+          </div>
+          <p className="mt-2 text-xs leading-5 text-slate-600 dark:text-slate-300">
+            {trace.routingTrace.reason}
+          </p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-3">
+            <div className="rounded-lg border border-blue-100 bg-white px-3 py-2 dark:border-blue-900/50 dark:bg-slate-950">
+              <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Auto Fast</p>
+              <p className="mt-1 text-xs font-semibold text-slate-800 dark:text-slate-200">
+                {trace.routingTrace.autoFastEligible ? "Eligible" : "Not eligible"}
+              </p>
+            </div>
+            <div className="rounded-lg border border-blue-100 bg-white px-3 py-2 dark:border-blue-900/50 dark:bg-slate-950">
+              <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Fast Path</p>
+              <p className="mt-1 text-xs font-semibold text-slate-800 dark:text-slate-200">
+                {trace.routingTrace.fastPathEligible ? "Allowed" : "Blocked"}
+              </p>
+            </div>
+            <div className="rounded-lg border border-blue-100 bg-white px-3 py-2 dark:border-blue-900/50 dark:bg-slate-950">
+              <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Unindexed Diary</p>
+              <p className="mt-1 text-xs font-semibold text-slate-800 dark:text-slate-200">
+                {trace.routingTrace.usedUnindexedDiary ? "Used" : "Not used"}
+              </p>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {diagnostics ? (
         <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950">
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -627,43 +717,47 @@ function AiDebugPanel({ result }: { result: SearchResponse }) {
 
 function EvidenceSourceCard({ source }: { source: SearchCitation }) {
   return (
-    <article className="group overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md dark:border-slate-800 dark:bg-slate-950/70 dark:hover:border-blue-800">
+    <article className="group overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition hover:border-blue-200 hover:shadow-md dark:border-slate-800 dark:bg-slate-950/70 dark:hover:border-blue-800">
       <div className={`h-1.5 bg-gradient-to-r ${sourceCardAccent(source.sourceType)}`} />
+      <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3 dark:border-slate-800">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <span className="rounded-md bg-slate-950 px-2 py-1 text-[11px] font-bold text-white dark:bg-slate-100 dark:text-slate-950">
+            Citation {source.marker}
+          </span>
+          <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold capitalize ${sourceCardTone(source.sourceType)}`}>
+            {sourceShortLabel(source.sourceType)}
+          </span>
+        </div>
+        <span className="shrink-0 rounded-full border border-emerald-100 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-300">
+          {formatSourceReliability(source.similarity)}
+        </span>
+      </div>
       <div className="p-4">
-        <div className="flex items-start gap-3">
-          <div className="flex h-11 w-11 shrink-0 flex-col items-center justify-center rounded-xl border border-slate-200 bg-slate-950 text-white shadow-sm dark:border-slate-700 dark:bg-slate-100 dark:text-slate-950">
-            <span className="text-[10px] font-bold leading-none">{source.marker}</span>
-            <span className="mt-0.5 text-[9px] font-semibold uppercase leading-none opacity-70">
-              {sourceShortLabel(source.sourceType).slice(0, 4)}
-            </span>
-          </div>
+        <h4 className="line-clamp-2 text-sm font-semibold leading-5 text-slate-950 dark:text-slate-100">
+          {source.sourceTitle || "Untitled memory"}
+        </h4>
 
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold capitalize ${sourceCardTone(source.sourceType)}`}>
-                {formatSourceType(source.sourceType)}
-              </span>
-              <span className="status-badge">
-                {formatSourceChunk(source.chunkType)}
-              </span>
-            </div>
-            <h4 className="mt-2 line-clamp-2 text-sm font-semibold leading-5 text-slate-950 dark:text-slate-100">
-              {source.sourceTitle || "Untitled memory"}
-            </h4>
-            <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
-              <span>{formatSourceDate(source.occurredAt)}</span>
-              <span aria-hidden>·</span>
-              <span>{formatSimilarityScore(source.similarity)} match</span>
-            </div>
+        <div className="mt-3 grid gap-2 sm:grid-cols-3">
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900/70">
+            <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Memory date</p>
+            <p className="mt-1 text-xs font-semibold text-slate-800 dark:text-slate-200">{formatSourceDate(source.occurredAt)}</p>
+          </div>
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900/70">
+            <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Match</p>
+            <p className="mt-1 text-xs font-semibold text-slate-800 dark:text-slate-200">{formatSimilarityScore(source.similarity)}</p>
+          </div>
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900/70">
+            <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Chunk</p>
+            <p className="mt-1 text-xs font-semibold capitalize text-slate-800 dark:text-slate-200">{formatSourceChunk(source.chunkType)}</p>
           </div>
         </div>
 
         {source.claim ? (
           <div className="mt-4 rounded-lg border border-blue-100 bg-blue-50/70 px-3 py-2.5 dark:border-blue-900/60 dark:bg-blue-950/30">
             <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-blue-600 dark:text-blue-300">
-              Claim supported
+              Grounded claim
             </p>
-            <p className="mt-1 line-clamp-2 text-xs font-medium leading-5 text-blue-950 dark:text-blue-100">
+            <p className="mt-1 line-clamp-3 text-xs font-medium leading-5 text-blue-950 dark:text-blue-100">
               {source.claim}
             </p>
           </div>
@@ -671,9 +765,9 @@ function EvidenceSourceCard({ source }: { source: SearchCitation }) {
 
         <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 dark:border-slate-800 dark:bg-slate-900/70">
           <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
-            Evidence quote
+            Quoted evidence
           </p>
-          <blockquote className="line-clamp-4 text-sm leading-6 text-slate-700 dark:text-slate-300">
+          <blockquote className="max-h-44 overflow-auto text-sm leading-6 text-slate-700 dark:text-slate-300">
             {highlightQuote(source.quote, source.claim)}
           </blockquote>
         </div>

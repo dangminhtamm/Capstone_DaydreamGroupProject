@@ -93,9 +93,15 @@ export async function getGoogleConnectionStatus(
     return fallback;
   }
 
+  const reconnectRequired = row.last_error
+    ? isGoogleReconnectRequiredError(row.last_error)
+    : false;
+  const effectivelyConnected =
+    row.connected || (fallbackConnected && !reconnectRequired);
+
   return {
     source,
-    connected: row.connected,
+    connected: effectivelyConnected,
     scopes: row.scopes ?? [],
     lastSyncAt: row.last_sync_at,
     lastError: row.last_error,
@@ -131,13 +137,42 @@ export async function recordGoogleSyncFailure(
     error: unknown;
   },
 ) {
+  const publicError = toPublicErrorMessage(input.error);
+  const reconnectRequired = isGoogleReconnectRequiredError(input.error);
+
   await upsertGoogleConnection(prisma, {
     userId: input.userId,
     source: input.source,
-    connected: true,
+    connected: !reconnectRequired,
     scopes: GOOGLE_SOURCE_SCOPES[input.source],
-    lastError: toPublicErrorMessage(input.error),
+    lastError: reconnectRequired
+      ? `Needs reconnect: ${publicError}`
+      : publicError,
   });
+}
+
+export function isGoogleReconnectRequiredError(error: unknown) {
+  const details = collectErrorParts(error).join(' ').toLowerCase();
+
+  return (
+    details.includes('invalid_grant') ||
+    details.includes('invalid credentials') ||
+    details.includes('invalid_credentials') ||
+    details.includes('token has been expired') ||
+    details.includes('token has been revoked') ||
+    details.includes('token expired') ||
+    details.includes('unauthorized') ||
+    details.includes('401') ||
+    details.includes('insufficient authentication scopes') ||
+    details.includes('insufficient permission') ||
+    details.includes('insufficient permissions') ||
+    details.includes('insufficient scope') ||
+    details.includes('insufficient_scope') ||
+    details.includes('forbidden') && (
+      details.includes('scope') ||
+      details.includes('permission')
+    )
+  );
 }
 
 async function upsertGoogleConnection(
@@ -194,4 +229,32 @@ async function upsertGoogleConnection(
 function toPublicErrorMessage(error: unknown) {
   if (error instanceof Error) return error.message.slice(0, 1000);
   return String(error).slice(0, 1000);
+}
+
+function collectErrorParts(error: unknown, seen = new Set<unknown>()): string[] {
+  if (error == null || seen.has(error)) return [];
+  seen.add(error);
+
+  if (error instanceof Error) {
+    return [
+      error.name,
+      error.message,
+      error.stack ?? '',
+      ...collectErrorParts((error as { cause?: unknown }).cause, seen),
+    ];
+  }
+
+  if (typeof error === 'object') {
+    const record = error as Record<string, unknown>;
+    return [
+      String(record.code ?? ''),
+      String(record.status ?? ''),
+      String(record.message ?? ''),
+      JSON.stringify(record.response ?? {}),
+      JSON.stringify(record.errors ?? {}),
+      ...collectErrorParts(record.cause, seen),
+    ];
+  }
+
+  return [String(error)];
 }

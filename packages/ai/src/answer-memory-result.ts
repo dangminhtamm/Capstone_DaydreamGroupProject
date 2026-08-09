@@ -71,6 +71,7 @@ export function buildDebugTrace(input: {
   chunks: MemorySearchHit[];
   result: AnswerMemoryResult;
   diagnostics?: MemoryIndexDiagnostics;
+  routingTrace?: MemoryDebugTrace["routingTrace"];
 }): MemoryDebugTrace {
   const chunkById = new Map(input.chunks.map((chunk) => [chunk.id, chunk]));
 
@@ -80,6 +81,7 @@ export function buildDebugTrace(input: {
     appliedFilters: serializeFilters(input.appliedFilters),
     status: input.result.analytics?.status ?? "error",
     reason: explainResult(input.result, input.chunks, input.diagnostics),
+    routingTrace: input.routingTrace,
     chunksRetrieved: input.chunks.length,
     diagnostics: input.diagnostics,
     topChunks: buildCitations([...input.chunks].sort((a, b) => b.similarity - a.similarity))

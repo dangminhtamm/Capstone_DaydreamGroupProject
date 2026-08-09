@@ -16,7 +16,7 @@ import {
   withEmbeddings,
 } from "./indexing-utils.ts";
 import type { PersistedMemoryChunkPayload } from "./memory-indexer.ts";
-import type { MemoryChunkMetadata } from "./types.ts";
+import { withMemoryDate, type MemoryChunkMetadata } from "./types.ts";
 
 export interface IndexMemoryFromAttachmentInput {
   userId: string;
@@ -67,7 +67,7 @@ export async function indexMemoryFromAttachment(
     input.embeddingProvider ?? createDefaultEmbeddingProvider();
 
   const chunkPayloads = textChunks.map((text, index) => {
-    const metadata: MemoryChunkMetadata = {
+    const metadata: MemoryChunkMetadata = withMemoryDate({
       date: occurredAt.toISOString(),
       sourceType: "attachment",
       sourceId: input.attachmentId,
@@ -83,7 +83,7 @@ export async function indexMemoryFromAttachment(
       goals: [],
       habits: [],
       importance: 3,
-    };
+    });
 
     return {
       userId: input.userId,

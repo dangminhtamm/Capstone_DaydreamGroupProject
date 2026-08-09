@@ -10,9 +10,9 @@ export function detectMemoryIntent(question: string): MemoryIntent {
   if (isFeedbackIntent(normalizedQuestion)) return "feedback";
   if (isMoodIntent(normalizedQuestion)) return "mood";
   if (isCalendarIntent(normalizedQuestion)) return "calendar";
-  if (isAttachmentIntent(normalizedQuestion)) return "attachment";
   if (isDecisionIntent(normalizedQuestion)) return "decision";
   if (isTaskIntent(normalizedQuestion)) return "task";
+  if (isAttachmentIntent(normalizedQuestion)) return "attachment";
   if (isProgressIntent(normalizedQuestion)) return "progress";
 
   return "generic";
@@ -55,6 +55,11 @@ export function isLatencyIntent(normalizedQuestion: string): boolean {
     "separately",
     "embedding time",
     "database retrieval",
+    "index",
+    "indexes",
+    "hnsw",
+    "gin",
+    "performance",
     "reranking",
     "time to first result",
     "độ trễ",
@@ -136,6 +141,7 @@ export function isTaskIntent(normalizedQuestion: string): boolean {
   return includesAny(normalizedQuestion, [
     "task",
     "action item",
+    "assigned",
     "follow up",
     "remaining",
     "pending",

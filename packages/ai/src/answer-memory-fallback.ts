@@ -234,7 +234,7 @@ function selectFallbackSources(
   const normalizedQuestion = normalizeForIntent(question);
   const deduped = dedupeCitationsBySource(sources);
   const broadSynthesis = isBroadTemporalSynthesisQuestion(question, fallbackTopic);
-  const maxSources = broadSynthesis || fallbackTopic === "progress" ? 8 : 4;
+  const maxSources = broadSynthesis || fallbackTopic === "progress" ? 6 : 4;
   const scored = deduped
     .map((source) => ({
       source,
@@ -256,10 +256,30 @@ function selectFallbackSources(
       : scored;
 
   if (broadSynthesis || fallbackTopic === "progress") {
-    return diversifySourcesByDay(pool, maxSources);
+    return diversifySourcesByDay(preferPrimarySourcesForBroadProgress(pool), maxSources);
   }
 
   return pool.slice(0, maxSources).map((item) => item.source);
+}
+
+function preferPrimarySourcesForBroadProgress(
+  scored: Array<{ source: MemoryCitation; score: number }>,
+): Array<{ source: MemoryCitation; score: number }> {
+  const primary = scored.filter((item) => !isSummaryLikeSource(item.source));
+  if (primary.length >= 3) return primary;
+
+  const summaries = scored.filter((item) => isSummaryLikeSource(item.source));
+  return primary.length ? [...primary, ...summaries] : scored;
+}
+
+function isSummaryLikeSource(source: MemoryCitation): boolean {
+  const text = `${source.sourceTitle ?? ""} ${source.chunkType} ${source.quote}`.toLowerCase();
+  return (
+    source.sourceType === "summary" ||
+    text.includes("weekly review") ||
+    text.includes("monthly retrospective") ||
+    text.includes("daily log:")
+  );
 }
 
 function diversifySourcesByDay(
