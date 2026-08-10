@@ -15,9 +15,9 @@ export class StorageService {
     const supabaseUrl = process.env.SUPABASE_URL;
     const supabaseKey =
       process.env.SUPABASE_SERVICE_ROLE_KEY ??
+      process.env.SUPABASE_SERVICE_KEY ??
       process.env.SUPABASE_SECRET_KEY ??
-      process.env.SECRET_KEY ??
-      process.env.SUPABASE_SERVICE_KEY;
+      process.env.SECRET_KEY;
 
     if (!supabaseUrl || !supabaseKey) {
       throw new InternalServerErrorException(
@@ -35,22 +35,52 @@ export class StorageService {
     return this.supabase;
   }
 
+  private async ensureBucketExists(bucket: string) {
+    const supabase = this.getSupabaseClient();
+    try {
+      const { data: buckets } = await supabase.storage.listBuckets();
+      if (buckets && buckets.some((b) => b.name === bucket)) {
+        return;
+      }
+      await supabase.storage.createBucket(bucket, { public: false });
+    } catch (err) {
+      console.warn(`[StorageService] Auto-create bucket '${bucket}' note:`, err);
+    }
+  }
+
   async uploadFile(file: Express.Multer.File, bucket: string, userId: string) {
     const supabase = this.getSupabaseClient();
+    await this.ensureBucketExists(bucket);
+
     const safeName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');
     const filePath = `attachments/${userId}/${randomUUID()}-${safeName}`;
 
-    const { data, error } = await supabase.storage
+    let result = await supabase.storage
       .from(bucket)
       .upload(filePath, file.buffer, {
         contentType: file.mimetype,
         upsert: false,
       });
 
-    if (error) throw error;
+    if (result.error && (result.error as any).statusCode === '404') {
+      await this.ensureBucketExists(bucket);
+      result = await supabase.storage
+        .from(bucket)
+        .upload(filePath, file.buffer, {
+          contentType: file.mimetype,
+          upsert: false,
+        });
+    }
+
+    if (result.error) {
+      console.error('[StorageService] Upload error:', result.error);
+      throw new InternalServerErrorException(
+        `Failed to upload file to storage: ${result.error.message}`,
+      );
+    }
 
     return {
-      path: data.path,
+      path: result.data.path,
     };
   }
 
@@ -60,7 +90,10 @@ export class StorageService {
       .from(bucket)
       .createSignedUrl(path, expiresInSeconds);
 
-    if (error) throw error;
+    if (error) {
+      console.error('[StorageService] createSignedUrl error:', error);
+      throw error;
+    }
     return data.signedUrl;
   }
 
@@ -70,7 +103,10 @@ export class StorageService {
       .from(bucket)
       .download(path);
 
-    if (error) throw error;
+    if (error) {
+      console.error('[StorageService] downloadFile error:', error);
+      throw error;
+    }
     if (!data) throw new Error(`File not found in storage: ${path}`);
 
     return Buffer.from(await data.arrayBuffer());
@@ -79,6 +115,10 @@ export class StorageService {
   async deleteFile(bucket: string, path: string) {
     const supabase = this.getSupabaseClient();
     const { error } = await supabase.storage.from(bucket).remove([path]);
-    if (error) throw error;
+    if (error) {
+      console.error('[StorageService] deleteFile error:', error);
+      throw error;
+    }
   }
 }
+

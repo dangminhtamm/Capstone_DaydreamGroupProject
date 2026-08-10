@@ -434,9 +434,9 @@ export class HealthService {
   private getEnvironmentStatus(redis: Awaited<ReturnType<typeof checkRedisRateLimitHealth>>) {
     const supabaseServerKey =
       process.env.SUPABASE_SERVICE_ROLE_KEY ??
+      process.env.SUPABASE_SERVICE_KEY ??
       process.env.SUPABASE_SECRET_KEY ??
-      process.env.SECRET_KEY ??
-      process.env.SUPABASE_SERVICE_KEY;
+      process.env.SECRET_KEY;
     const supabaseServerKeyIsPublishable = supabaseServerKey?.startsWith('sb_publishable') ?? false;
 
     return {

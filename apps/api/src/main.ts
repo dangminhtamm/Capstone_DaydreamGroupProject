@@ -10,11 +10,15 @@ import { requestIdMiddleware } from './common/middleware/request-id.middleware';
 import { securityHeadersMiddleware } from './common/middleware/security-headers.middleware';
 
 function getCorsOrigins() {
-  const configuredOrigins = process.env.CORS_ORIGIN?.split(',')
+  const rawOrigins = [process.env.CORS_ORIGIN, process.env.FRONTEND_URL]
+    .filter(Boolean)
+    .flatMap((val) => val!.split(','))
     .map((origin) => origin.trim())
     .filter(Boolean);
 
-  if (configuredOrigins?.length) {
+  const configuredOrigins = Array.from(new Set(rawOrigins));
+
+  if (configuredOrigins.length > 0) {
     return configuredOrigins;
   }
 
