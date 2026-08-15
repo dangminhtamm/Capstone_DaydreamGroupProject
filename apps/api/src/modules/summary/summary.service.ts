@@ -5,8 +5,12 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  formatSummaryDateTime,
+  formatSummaryPeriodRange,
   generateAiText,
-  getGeminiSummaryModel,
+  getSummaryPeriod,
+  getTuturuuuSummaryModel,
+  type SummaryPeriod,
 } from '@second-brain/ai';
 import { PrismaService } from '../../prisma/prisma.service';
 import { invalidateUserSearchCache } from '../../common/cache/search-answer-cache';
@@ -206,6 +210,7 @@ export class SummaryService {
         payload: {},
         run_after: new Date(),
         locked_at: null,
+        locked_by: null,
         processed_at: null,
       },
       create: {
@@ -236,14 +241,14 @@ export class SummaryService {
   private async buildSummaryContext(
     userId: string,
     type: SummaryType,
-    period: { start: Date; end: Date },
+    period: SummaryPeriod,
   ) {
     if (type === 'weekly') {
       const dailySummaries = await this.findLowerSummaries(userId, 'daily', period);
       if (dailySummaries.length) {
         return {
           hasContent: true,
-          text: formatSummaryList('Daily summaries', dailySummaries),
+          text: formatSummaryList('Daily summaries', dailySummaries, period.timeZone),
         };
       }
     }
@@ -253,7 +258,7 @@ export class SummaryService {
       if (weeklySummaries.length) {
         return {
           hasContent: true,
-          text: formatSummaryList('Weekly summaries', weeklySummaries),
+          text: formatSummaryList('Weekly summaries', weeklySummaries, period.timeZone),
         };
       }
 
@@ -261,7 +266,7 @@ export class SummaryService {
       if (dailySummaries.length) {
         return {
           hasContent: true,
-          text: formatSummaryList('Daily summaries', dailySummaries),
+          text: formatSummaryList('Daily summaries', dailySummaries, period.timeZone),
         };
       }
     }
@@ -271,7 +276,7 @@ export class SummaryService {
       if (monthlySummaries.length) {
         return {
           hasContent: true,
-          text: formatSummaryList('Monthly summaries', monthlySummaries),
+          text: formatSummaryList('Monthly summaries', monthlySummaries, period.timeZone),
         };
       }
 
@@ -279,7 +284,7 @@ export class SummaryService {
       if (weeklySummaries.length) {
         return {
           hasContent: true,
-          text: formatSummaryList('Weekly summaries', weeklySummaries),
+          text: formatSummaryList('Weekly summaries', weeklySummaries, period.timeZone),
         };
       }
     }
@@ -290,7 +295,7 @@ export class SummaryService {
   private async findLowerSummaries(
     userId: string,
     type: SummaryType,
-    period: { start: Date; end: Date },
+    period: SummaryPeriod,
   ) {
     return this.prisma.summary.findMany({
       where: {
@@ -305,7 +310,7 @@ export class SummaryService {
 
   private async buildRawActivityContext(
     userId: string,
-    period: { start: Date; end: Date },
+    period: SummaryPeriod,
   ) {
     const itemLimit = this.getSummaryContextItemLimit();
     const [diaries, events] = await Promise.all([
@@ -333,7 +338,7 @@ export class SummaryService {
         [
           'Diary entries:',
           ...diaries.map((entry) =>
-            `- ${entry.entry_date.toISOString()}: ${entry.raw_text}`,
+            `- ${formatSummaryDateTime(entry.entry_date, period.timeZone)}: ${entry.raw_text}`,
           ),
         ].join('\n'),
       );
@@ -344,7 +349,10 @@ export class SummaryService {
         [
           'Calendar events:',
           ...events.map((event) =>
-            `- ${event.start_time.toISOString()}-${event.end_time.toISOString()}: ${event.title}${
+            `- ${formatSummaryDateTime(event.start_time, period.timeZone)}-${formatSummaryDateTime(
+              event.end_time,
+              period.timeZone,
+            )}: ${event.title}${
               event.description ? ` - ${event.description}` : ''
             }`,
           ),
@@ -360,12 +368,12 @@ export class SummaryService {
 
   private async generateAiSummary(
     type: SummaryType,
-    period: { start: Date; end: Date },
+    period: SummaryPeriod,
     context: string,
   ) {
     const prompt = buildSummaryPrompt(type, period, context);
     const text = await generateAiText({
-      model: getGeminiSummaryModel(),
+      model: getTuturuuuSummaryModel(),
       prompt,
     });
 
@@ -403,57 +411,21 @@ export class SummaryService {
   }
 }
 
-function getSummaryPeriod(type: SummaryType, anchor: Date) {
-  if (type === 'daily') {
-    const start = startOfUtcDay(anchor);
-    return { start, end: endOfUtcDay(start) };
-  }
-
-  if (type === 'weekly') {
-    const start = startOfUtcWeek(anchor);
-    return { start, end: new Date(start.getTime() + 7 * dayMs - 1) };
-  }
-
-  if (type === 'monthly') {
-    const start = new Date(Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth(), 1));
-    const end = new Date(Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth() + 1, 1) - 1);
-    return { start, end };
-  }
-
-  const start = new Date(Date.UTC(anchor.getUTCFullYear(), 0, 1));
-  const end = new Date(Date.UTC(anchor.getUTCFullYear() + 1, 0, 1) - 1);
-  return { start, end };
-}
-
-const dayMs = 24 * 60 * 60 * 1000;
-
-function startOfUtcDay(date: Date) {
-  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
-}
-
-function endOfUtcDay(start: Date) {
-  return new Date(start.getTime() + dayMs - 1);
-}
-
-function startOfUtcWeek(date: Date) {
-  const day = date.getUTCDay();
-  const mondayOffset = day === 0 ? -6 : 1 - day;
-  const start = startOfUtcDay(date);
-  return new Date(start.getTime() + mondayOffset * dayMs);
-}
-
-function formatSummaryList(label: string, summaries: SummaryRecord[]) {
+function formatSummaryList(label: string, summaries: SummaryRecord[], timeZone: string) {
   return [
     `${label}:`,
     ...summaries.map((summary) =>
-      `- ${summary.period_start.toISOString()} to ${summary.period_end.toISOString()}: ${summary.content}`,
+      `- ${formatSummaryDateTime(summary.period_start, timeZone)} to ${formatSummaryDateTime(
+        summary.period_end,
+        timeZone,
+      )}: ${summary.content}`,
     ),
   ].join('\n');
 }
 
 function buildSummaryPrompt(
   type: SummaryType,
-  period: { start: Date; end: Date },
+  period: SummaryPeriod,
   context: string,
 ) {
   const instructions = {
@@ -471,7 +443,7 @@ function buildSummaryPrompt(
 You are the reflection engine for a personal Second Brain diary.
 
 Summary type: ${type}
-Period: ${period.start.toISOString()} to ${period.end.toISOString()}
+Period: ${formatSummaryPeriodRange(period)}
 
 Task:
 ${instructions[type]}

@@ -87,7 +87,7 @@
       "id": "eval-diary-2026-05-16",
       "entryDate": "2026-05-16T19:50:00.000Z",
       "title": "Benchmark concern",
-      "content": "We discussed the 500ms memory recall requirement. The database retrieval may be fast enough with HNSW and GIN indexes, but full answer generation is slower because Gemini has to create the response. The plan is to measure embedding time, retrieval time, answer generation time, and total time separately. For MVP, Search should keep using the validated grounded answer path so citation recovery and fallback behavior stay reliable."
+      "content": "We discussed the 500ms memory recall requirement. The database retrieval may be fast enough with HNSW and GIN indexes, but full answer generation is slower because Tuturuuu AI has to create the response. The plan is to measure embedding time, retrieval time, answer generation time, and total time separately. For MVP, Search should keep using the validated grounded answer path so citation recovery and fallback behavior stay reliable."
     },
     {
       "id": "eval-diary-2026-05-17",

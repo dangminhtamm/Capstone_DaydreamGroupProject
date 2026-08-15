@@ -1,5 +1,10 @@
 import { Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
-import { answerMemory } from '@second-brain/ai';
+import {
+  DEFAULT_TUTURUUU_EMBEDDING_MODEL,
+  TUTURUUU_EMBEDDING_MODEL,
+  answerMemory,
+  getTuturuuuAnswerModel,
+} from '@second-brain/ai';
 import {
   saveSearchHistory,
   findCachedAnswer,
@@ -11,22 +16,36 @@ import {
   getCachedSearchAnswer,
   setCachedSearchAnswer,
 } from '../../common/cache/search-answer-cache';
+import { getQueryEmbeddingProvider } from '../../common/cache/query-embedding-cache';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SearchQueryDto } from './dto/search-query.dto';
+import {
+  type AuthenticatedRequestUser,
+  canUseAdminPrivileges,
+  isAdminEmail,
+  normalizeUserRole,
+} from '../auth/user-role';
 
 const DEFAULT_SEARCH_LIMIT = 8;
-const SEARCH_CACHE_PIPELINE_VERSION = 'ai-recall-v5';
+const SEARCH_CACHE_PIPELINE_VERSION = 'ai-recall-v10-year-aware';
 const DEFAULT_TUTURUUU_ANSWER_MODEL = 'google/gemini-3.5-flash-lite';
-const DEFAULT_TUTURUUU_EMBEDDING_MODEL = 'google/gemini-embedding-2';
+
+type SearchAuthInput = string | AuthenticatedRequestUser;
+type SearchDbUser = {
+  id: string;
+  email: string | null;
+  role: string | null;
+};
 
 @Injectable()
 export class SearchService {
   constructor(private prisma: PrismaService) {}
 
-  async answerQuestion(userId: string, queryDto: SearchQueryDto) {
+  async answerQuestion(authInput: SearchAuthInput, queryDto: SearchQueryDto) {
+    const authUser = this.normalizeAuthInput(authInput);
     const user = await this.prisma.user.findUnique({
-      where: { supabaseId: userId },
-      select: { id: true },
+      where: { supabaseId: authUser.userId },
+      select: { id: true, email: true, role: true },
     });
 
     if (!user) {
@@ -40,7 +59,8 @@ export class SearchService {
 
     // ── Live search ──
     try {
-      const includeDebugTrace = this.debugTraceEnabled();
+      const includeDebugTrace =
+        this.debugTraceEnabled() && this.canReturnDebugTrace(authUser, user);
 
       if (this.canUseExactAnswerCache(queryDto) && !includeDebugTrace) {
         const redisCached = await getCachedSearchAnswer({
@@ -111,9 +131,10 @@ export class SearchService {
         answerStrategy: queryDto.answerStrategy ?? 'auto',
         timeZone,
         filters,
+        embeddingProvider: getQueryEmbeddingProvider(),
       });
 
-      const answerMode = result.answerMode ?? result.analytics?.answerMode ?? 'gemini';
+      const answerMode = result.answerMode ?? result.analytics?.answerMode ?? 'tuturuuu';
       const responseAnalytics = this.withCacheVersion(result.analytics ?? null, cacheVersion);
       const response = {
         answer: result.answer,
@@ -261,7 +282,7 @@ export class SearchService {
       !result.modelError &&
       result.noMemory !== true &&
       result.analytics?.status === 'success' &&
-      ['gemini', 'fast_path'].includes(answerMode)
+      ['tuturuuu', 'fast_path'].includes(answerMode)
     );
   }
 
@@ -279,7 +300,7 @@ export class SearchService {
 
     const analyticsAnswerMode = this.getAnalyticsAnswerMode(value.analytics);
     const answerMode = value.answerMode === 'cache' ? analyticsAnswerMode : value.answerMode;
-    return ['gemini', 'fast_path'].includes(answerMode ?? '');
+    return ['tuturuuu', 'fast_path'].includes(answerMode ?? '');
   }
 
   private isCacheableStoredAnswer(analytics: Record<string, unknown> | null, answer?: string) {
@@ -289,7 +310,7 @@ export class SearchService {
 
     const status = typeof analytics.status === 'string' ? analytics.status : undefined;
     const answerMode = this.getAnalyticsAnswerMode(analytics);
-    return status === 'success' && ['gemini', 'fast_path'].includes(answerMode ?? '');
+    return status === 'success' && ['tuturuuu', 'fast_path'].includes(answerMode ?? '');
   }
 
   private getAnalyticsAnswerMode(analytics: unknown) {
@@ -301,12 +322,12 @@ export class SearchService {
 
   private getSearchCacheVersion() {
     const answerModel = normalizeTuturuuuModelForCache(
-      process.env.TUTURUUU_RESPONSE_MODEL ?? process.env.GEMINI_ANSWER_MODEL,
+      getTuturuuuAnswerModel(),
       DEFAULT_TUTURUUU_ANSWER_MODEL,
     );
     const embeddingModel = normalizeTuturuuuModelForCache(
-      process.env.TUTURUUU_EMBEDDING_MODEL ?? process.env.GEMINI_EMBEDDING_MODEL,
-      DEFAULT_TUTURUUU_EMBEDDING_MODEL,
+      TUTURUUU_EMBEDDING_MODEL,
+      'google/gemini-embedding-2',
     );
 
     return [
@@ -370,6 +391,27 @@ export class SearchService {
     if (configured === 'true') return true;
     if (configured === 'false') return false;
     return process.env.NODE_ENV !== 'production';
+  }
+
+  private normalizeAuthInput(input: SearchAuthInput): AuthenticatedRequestUser {
+    if (typeof input === 'string') {
+      return { userId: input, email: '' };
+    }
+
+    return input;
+  }
+
+  private canReturnDebugTrace(
+    authUser: AuthenticatedRequestUser,
+    user: SearchDbUser,
+  ) {
+    const role = normalizeUserRole(authUser.role ?? user.role);
+    if (role === 'admin') {
+      return canUseAdminPrivileges(authUser);
+    }
+
+    const email = authUser.email || user.email;
+    return isAdminEmail(email) && canUseAdminPrivileges(authUser);
   }
 
   private parseJsonArray(value: string | null | undefined) {

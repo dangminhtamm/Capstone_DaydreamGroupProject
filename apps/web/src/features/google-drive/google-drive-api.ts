@@ -2,6 +2,7 @@ import type {
   DriveConnectionStatus,
   DriveSyncResult,
   GoogleDriveFile,
+  GoogleDriveImportCandidate,
 } from './google-drive-types';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
@@ -68,6 +69,41 @@ export async function fetchDriveFiles(accessToken: string | null): Promise<Googl
     thumbnailLink: file.thumbnail_link ?? null,
     modifiedTime: file.modified_time ?? null,
   }));
+}
+
+export async function fetchDriveImportCandidates(
+  accessToken: string | null,
+  options: { limit?: number; query?: string } = {},
+): Promise<GoogleDriveImportCandidate[]> {
+  const params = new URLSearchParams();
+  if (options.limit) params.set('limit', String(options.limit));
+  if (options.query?.trim()) params.set('q', options.query.trim());
+  const query = params.toString() ? `?${params.toString()}` : '';
+  const response = await authFetch(`/api/drive/candidates${query}`, { method: 'GET' }, accessToken);
+  if (!response.ok) {
+    throw new Error(await readApiError(response, 'Failed to list Google Drive files'));
+  }
+
+  const data = await response.json() as { candidates?: GoogleDriveImportCandidate[] };
+  return data.candidates ?? [];
+}
+
+export async function importDriveFiles(
+  accessToken: string | null,
+  fileIds: string[],
+): Promise<DriveSyncResult> {
+  const response = await authFetch(
+    '/api/drive/import',
+    {
+      method: 'POST',
+      body: JSON.stringify({ fileIds }),
+    },
+    accessToken,
+  );
+  if (!response.ok) {
+    throw new Error(await readApiError(response, 'Failed to import selected Google Drive files'));
+  }
+  return response.json();
 }
 
 export async function syncDriveFiles(accessToken: string | null, limit?: number): Promise<DriveSyncResult> {

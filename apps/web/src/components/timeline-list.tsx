@@ -23,6 +23,7 @@ type TimelineListProps = {
   entries: DiaryEntry[];
   onUpdate?: (id: string, payload: UpdateDiaryPayload) => Promise<void>;
   onDelete?: (id: string) => Promise<void>;
+  isAdmin?: boolean;
 };
 
 const PAGE_SIZE = 5;
@@ -68,6 +69,10 @@ function getAttachmentStatus(attachment: string | DiaryAttachment) {
   return attachment.extractionStatus === "extracted" ? "queued" : "extracting";
 }
 
+function isAudioAttachment(attachment: string | DiaryAttachment): attachment is DiaryAttachment {
+  return isAttachmentObject(attachment) && attachment.fileType.startsWith("audio/");
+}
+
 function getStatusClass(status: string) {
   if (status === "indexed") {
     return "status-badge-success";
@@ -98,8 +103,19 @@ function isDifferentTimestamp(first: Date | string, second: Date | string) {
   return new Date(first).getTime() !== new Date(second).getTime();
 }
 
-export function TimelineList({ entries, onUpdate, onDelete }: TimelineListProps) {
+function formatDiaryDate(value: Date | string) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return String(value);
+  return date.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+export function TimelineList({ entries, onUpdate, onDelete, isAdmin = false }: TimelineListProps) {
   const [currentPage, setCurrentPage] = useState(1);
+  const [expandedEntryIds, setExpandedEntryIds] = useState<Set<string>>(() => new Set());
   const totalPages = Math.max(1, Math.ceil(entries.length / PAGE_SIZE));
   const paginatedEntries = useMemo(() => {
     const start = (currentPage - 1) * PAGE_SIZE;
@@ -154,6 +170,18 @@ export function TimelineList({ entries, onUpdate, onDelete }: TimelineListProps)
     setCurrentPage(Math.min(Math.max(page, 1), totalPages));
   };
 
+  const toggleEntryExpanded = (id: string) => {
+    setExpandedEntryIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
   return (
     <div className="relative">
       {/* Toast notification */}
@@ -178,34 +206,38 @@ export function TimelineList({ entries, onUpdate, onDelete }: TimelineListProps)
 
       {/* Timeline vertical line */}
       {paginatedEntries.length > 1 && (
-        <div className="absolute left-[19px] top-8 bottom-28 w-px bg-slate-200 dark:bg-slate-800" />
+        <div className="absolute left-[14px] top-8 bottom-28 w-px bg-slate-200 dark:bg-slate-800" />
       )}
       
-      <ul className="space-y-6">
+      <ul className="space-y-4">
         {paginatedEntries.map((entry, index) => {
           const activityDate = getEntryActivityDate(entry);
           const showCreatedDate = isDifferentTimestamp(activityDate, entry.createdAt);
+          const isExpanded = expandedEntryIds.has(entry.id);
+          const shouldClamp = entry.content.trim().length > 360;
 
           return (
-          <li key={entry.id} className="relative pl-14">
+          <li key={entry.id} className="relative pl-10">
             {/* Timeline dot */}
-            <div className="absolute left-0 top-6 z-10 flex h-10 w-10 items-center justify-center rounded-full border-4 border-white bg-slate-900 text-white dark:border-slate-950 dark:bg-slate-700">
-              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+            <div className="absolute left-0 top-5 z-10 flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-slate-900 text-white dark:border-slate-950 dark:bg-slate-700">
+              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
             </div>
             
             {/* Card */}
-            <div className="group relative enterprise-card p-5 transition hover:border-indigo-200 dark:hover:border-indigo-800">
+            <div className="group relative enterprise-card p-4 transition hover:border-indigo-200 dark:hover:border-indigo-800">
               {/* Entry number badge + action buttons */}
+              {isAdmin ? (
               <div className="absolute -top-3 right-6 flex items-center gap-2">
                 <span className="status-badge">
                   Entry #{entries.length - ((currentPage - 1) * PAGE_SIZE + index)}
                 </span>
               </div>
+              ) : null}
 
               {/* Header */}
-              <div className="flex flex-col gap-2 mb-4">
+              <div className="mb-3 flex flex-col gap-2">
                 <div className="flex items-start justify-between gap-3">
-                  <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100">
+                  <h3 className="text-lg font-bold leading-7 text-slate-900 dark:text-slate-100">
                     {entry.title}
                   </h3>
 
@@ -239,12 +271,16 @@ export function TimelineList({ entries, onUpdate, onDelete }: TimelineListProps)
                     </div>
                   )}
                 </div>
-                <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <div className="flex flex-wrap items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                   </svg>
-                  <span className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Memory date</span>
-                  <time className="font-medium">{formatDateTime(activityDate)}</time>
+                  <span className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                    {isAdmin ? "Memory date" : "Diary date"}
+                  </span>
+                  <time className="font-medium">
+                    {isAdmin ? formatDateTime(activityDate) : formatDiaryDate(activityDate)}
+                  </time>
                 </div>
                 {(entry.mood || entry.tags?.length) && (
                   <div className="flex flex-wrap items-center gap-2 pt-1">
@@ -269,9 +305,18 @@ export function TimelineList({ entries, onUpdate, onDelete }: TimelineListProps)
               {/* Content */}
               <div className="relative">
                 <div className="absolute bottom-0 left-0 top-0 w-1 rounded-full bg-indigo-500"></div>
-                <p className="pl-4 text-sm text-slate-700 leading-relaxed dark:text-slate-300">
+                <p className={`pl-4 text-sm leading-7 text-slate-700 dark:text-slate-300 ${shouldClamp && !isExpanded ? "line-clamp-4" : ""}`}>
                   {entry.content}
                 </p>
+                {shouldClamp ? (
+                  <button
+                    type="button"
+                    onClick={() => toggleEntryExpanded(entry.id)}
+                    className="mt-2 cursor-pointer pl-4 text-xs font-semibold text-indigo-600 transition hover:text-indigo-700 dark:text-indigo-300 dark:hover:text-indigo-200"
+                  >
+                    {isExpanded ? "Show less" : "View more"}
+                  </button>
+                ) : null}
               </div>
 
               {/* Linked calendar events */}
@@ -338,6 +383,27 @@ export function TimelineList({ entries, onUpdate, onDelete }: TimelineListProps)
                         </>
                       );
 
+                      if (href && isAudioAttachment(attachment)) {
+                        return (
+                          <div
+                            key={attachment.id}
+                            className="w-full max-w-md rounded-lg border border-slate-200 bg-slate-50 p-2.5 dark:border-slate-800 dark:bg-slate-900"
+                          >
+                            <div className="mb-2 flex items-center gap-1.5 text-xs text-slate-700 dark:text-slate-300">
+                              {content}
+                            </div>
+                            <audio
+                              controls
+                              preload="metadata"
+                              src={href}
+                              className="h-9 w-full"
+                            >
+                              Your browser does not support audio playback.
+                            </audio>
+                          </div>
+                        );
+                      }
+
                       return href ? (
                         <a
                           key={isAttachmentObject(attachment) ? attachment.id : `${attachment}-${i}`}
@@ -362,7 +428,7 @@ export function TimelineList({ entries, onUpdate, onDelete }: TimelineListProps)
               )}
               
               {/* Footer decoration */}
-              {showCreatedDate ? (
+              {isAdmin && showCreatedDate ? (
                 <div className="mt-4 pt-4 border-t border-slate-100 flex items-center gap-2 text-xs text-slate-400 dark:border-slate-700 dark:text-slate-500">
                 <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />

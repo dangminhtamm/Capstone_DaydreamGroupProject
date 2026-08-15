@@ -6,7 +6,7 @@ import {
 } from "./tuturuuu-client.ts";
 import type { EmbeddingProvider } from "./types.ts";
 
-type EmbeddingProviderName = "gemini";
+type EmbeddingProviderName = "tuturuuu";
 export type EmbeddingTask = "RETRIEVAL_DOCUMENT" | "RETRIEVAL_QUERY";
 
 async function retry<T>(fn: () => Promise<T>, retries = 3): Promise<T> {
@@ -37,20 +37,19 @@ function normalize(values: number[]): number[] {
 }
 
 export const DEFAULT_EMBEDDING_DIMENSION = 768;
-export const DEFAULT_EMBEDDING_PROVIDER: EmbeddingProviderName = "gemini";
+export const DEFAULT_EMBEDDING_PROVIDER: EmbeddingProviderName = "tuturuuu";
 
 export const TUTURUUU_EMBEDDING_MODEL = normalizeTuturuuuModelName(
-  process.env.TUTURUUU_EMBEDDING_MODEL ?? process.env.GEMINI_EMBEDDING_MODEL,
+  process.env.TUTURUUU_EMBEDDING_MODEL,
   DEFAULT_TUTURUUU_EMBEDDING_MODEL,
 );
-export const GEMINI_EMBEDDING_MODEL = TUTURUUU_EMBEDDING_MODEL;
 
 export interface AdvancedEmbeddingProvider extends EmbeddingProvider {
   embedDocument(text: string): Promise<number[]>;
   embedQuery(text: string): Promise<number[]>;
 }
 
-export class GeminiEmbeddingProvider implements AdvancedEmbeddingProvider {
+export class TuturuuuEmbeddingProvider implements AdvancedEmbeddingProvider {
   readonly dimension = DEFAULT_EMBEDDING_DIMENSION;
 
   // In-memory LRU cache for query embeddings — avoids re-embedding identical questions
@@ -111,7 +110,7 @@ export class GeminiEmbeddingProvider implements AdvancedEmbeddingProvider {
       void taskType;
       return embedTuturuuu({
         input: text,
-        model: GEMINI_EMBEDDING_MODEL,
+        model: TUTURUUU_EMBEDDING_MODEL,
         dimensions: DEFAULT_EMBEDDING_DIMENSION,
       });
     });
@@ -120,7 +119,7 @@ export class GeminiEmbeddingProvider implements AdvancedEmbeddingProvider {
 
     if (!values?.length) {
       throw new Error(
-        `Tuturuuu embedding request succeeded but returned no values for model "${GEMINI_EMBEDDING_MODEL}".`
+        `Tuturuuu embedding request succeeded but returned no values for model "${TUTURUUU_EMBEDDING_MODEL}".`
       );
     }
 
@@ -137,12 +136,12 @@ export class GeminiEmbeddingProvider implements AdvancedEmbeddingProvider {
 export function getEmbeddingProviderName(
   providerName: string | undefined = process.env.AI_EMBEDDING_PROVIDER
 ): EmbeddingProviderName {
-  if (!providerName || providerName === "gemini") {
-    return "gemini";
+  if (!providerName || providerName === "tuturuuu") {
+    return DEFAULT_EMBEDDING_PROVIDER;
   }
 
   throw new Error(
-    `Unsupported embedding provider "${providerName}". Only "gemini" is supported.`
+    `Unsupported embedding provider "${providerName}". Set AI_EMBEDDING_PROVIDER to "tuturuuu" or leave it unset.`
   );
 }
 
@@ -151,7 +150,7 @@ export function createEmbeddingProvider(
   apiKey?: string
 ): AdvancedEmbeddingProvider {
   getEmbeddingProviderName(providerName);
-  return new GeminiEmbeddingProvider(apiKey);
+  return new TuturuuuEmbeddingProvider(apiKey);
 }
 
 let _cachedDefaultProvider: AdvancedEmbeddingProvider | null = null;

@@ -62,6 +62,9 @@ importers:
       '@second-brain/ai':
         specifier: workspace:*
         version: link:../../packages/ai
+      '@second-brain/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       '@sentry/nestjs':
         specifier: ^10.69.0
         version: 10.69.0(@nestjs/common@11.1.19(class-transformer@0.5.1)(class-validator@0.15.1)(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.19)
@@ -254,9 +257,6 @@ importers:
 
   packages/ai:
     dependencies:
-      '@google/generative-ai':
-        specifier: ^0.24.1
-        version: 0.24.1
       '@second-brain/db':
         specifier: workspace:*
         version: link:../db
@@ -749,10 +749,6 @@ packages:
   '@eslint/plugin-kit@0.4.1':
     resolution: {integrity: sha512-43/qtrDUokr7LJqoF2c3+RInu/t4zfrpYdoSDfYyhg52rwLV6TnOvdG4fXm7IkSB3wErkcmJS9iEhjVtOSEjjA==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
-
-  '@google/generative-ai@0.24.1':
-    resolution: {integrity: sha512-MqO+MLfM6kjxcKoy0p1wRzG3b4ZZXtPI+z2IE26UogS2Cm/XHO+7gGRBh6gcJsOiIVoH93UwKvW4HdgiOZCy9Q==}
-    engines: {node: '>=18.0.0'}
 
   '@hono/node-server@2.0.10':
     resolution: {integrity: sha512-ZcnNVhKTmyDJeg0UlnZjvM73JBsTAuhrH/J4fjwGOw59PwOW51r4J+p6CsKZWXdKSme4MFqU62CZMOsdDrU4CA==}
@@ -5603,8 +5599,6 @@ snapshots:
     dependencies:
       '@eslint/core': 0.17.0
       levn: 0.4.1
-
-  '@google/generative-ai@0.24.1': {}
 
   '@hono/node-server@2.0.10(hono@4.12.34)':
     dependencies:

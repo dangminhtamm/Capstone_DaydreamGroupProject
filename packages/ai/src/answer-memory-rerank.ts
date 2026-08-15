@@ -1,4 +1,5 @@
 import {
+  detectMemoryIntent,
   hasGmailEvidence,
   hasLatencyEvidence,
   hasOnlyQuestionListEvidence,
@@ -18,7 +19,14 @@ import {
   countOverlap,
   importantTokens,
 } from "./answer-memory-scoring.ts";
+import {
+  getIntentProfile,
+  getSourceReliabilityBoost,
+  type IntentProfile,
+} from "./answer-memory-intent-profiles.ts";
 import type { MemorySearchHit, RetrievalFilters } from "./retrieval.ts";
+
+type ScoreProfile = NonNullable<IntentProfile["rerank"]>;
 
 export function rerankMemoryHits(
   question: string,
@@ -41,6 +49,7 @@ export function rerankMemoryHits(
     ? (filters.endDate.getTime() - filters.startDate.getTime()) / (24 * 60 * 60 * 1000)
     : 0;
   const broadTemporalRange = temporalSpanDays > 2;
+  const annualTemporalRange = temporalSpanDays >= 330;
 
   return chunks
     .map((chunk) => {
@@ -63,15 +72,22 @@ export function rerankMemoryHits(
       const lexicalBoost = Math.min(0.1, overlapRatio * 0.1);
       const titleBoost = Math.min(0.04, titleRatio * 0.04);
       const metadataBoost = Math.min(0.08, metadataRatio * 0.08);
+      const entityBoost = Math.min(
+        0.1,
+        Math.max(0, chunk.entityScore ?? 0) * 0.1,
+      );
       const importanceBoost = getMetadataImportance(chunk.metadata) * 0.012;
       const sourceReliabilityBoost = getSourceReliabilityBoost(chunk.sourceType);
       const timeMatchBoost = hasTimeFilter ? 0.03 : 0;
       const primaryTemporalBoost = broadTemporalRange && isPrimaryMemorySource(chunk.sourceType)
         ? 0.055
         : 0;
+      const annualSummaryBoost = annualTemporalRange
+        ? getAnnualSummaryBoost(chunk)
+        : 0;
       const intentBoost = getIntentSpecificBoost(normalizedQuestion, chunk);
       const noisePenalty = getMemoryNoisePenalty(chunk);
-      const summaryPenalty = hasPrimarySources && chunk.sourceType === "summary"
+      const summaryPenalty = hasPrimarySources && chunk.sourceType === "summary" && !annualTemporalRange
         ? broadTemporalRange
           ? 0.14
           : 0.06
@@ -85,10 +101,12 @@ export function rerankMemoryHits(
         lexicalBoost +
         titleBoost +
         metadataBoost +
+        entityBoost +
         importanceBoost +
         sourceReliabilityBoost +
         timeMatchBoost +
         primaryTemporalBoost +
+        annualSummaryBoost +
         intentBoost -
         noisePenalty -
         summaryPenalty;
@@ -106,6 +124,16 @@ export function rerankMemoryHits(
         b.occurredAt.getTime() - a.occurredAt.getTime(),
     )
     .map(({ rerankScore: _rerankScore, ...chunk }) => chunk);
+}
+
+function getAnnualSummaryBoost(chunk: MemorySearchHit): number {
+  if (chunk.sourceType !== "summary") return 0;
+
+  const summaryType = getMetadataString(chunk.metadata, "summaryType").toLowerCase();
+  const sourceTitle = getMetadataString(chunk.metadata, "sourceTitle").toLowerCase();
+  if (summaryType === "yearly" || sourceTitle.includes("yearly")) return 0.18;
+  if (summaryType === "monthly" || sourceTitle.includes("monthly")) return 0.1;
+  return 0;
 }
 
 function getMetadataString(metadata: unknown, key: string): string {
@@ -134,21 +162,6 @@ function getMetadataImportance(metadata: unknown): number {
   return Math.min(5, Math.max(0, value));
 }
 
-function getSourceReliabilityBoost(sourceType: string): number {
-  switch (sourceType) {
-    case "diary":
-      return 0.035;
-    case "calendar":
-      return 0.03;
-    case "attachment":
-      return 0.025;
-    case "summary":
-      return -0.015;
-    default:
-      return 0;
-  }
-}
-
 function isPrimaryMemorySource(sourceType: string): boolean {
   return sourceType !== "summary";
 }
@@ -159,111 +172,140 @@ function getIntentSpecificBoost(normalizedQuestion: string, chunk: MemorySearchH
   );
 
   if (isFeedbackIntent(normalizedQuestion)) {
-    let boost = 0;
-    if (includesAny(searchable, ["feedback", "mentor", "review", "linh", "citation", "citations", "trust", "ui", "gop y", "góp ý", "nhan xet", "nhận xét"])) {
-      boost += 0.18;
-    }
-    if (
-      includesAny(normalizedQuestion, ["citation", "citations", "trich dan", "trích dẫn"]) &&
-      includesAny(searchable, ["citation", "citations", "cite", "source", "trust", "ui", "trich dan", "trích dẫn"])
-    ) {
-      boost += 0.16;
-    }
-    if (chunk.chunkType === "feedback") {
-      boost += 0.08;
-    }
+    const profile = getIntentProfile("feedback").rerank;
+    let boost = applyConfiguredRerankProfile(0, profile, normalizedQuestion, searchable, chunk);
     if (isGoogleContactsSearchText(searchable) && !isGoogleContactsIntent(normalizedQuestion)) {
-      boost -= 0.34;
+      boost -= profile?.googleContactsOffIntentPenalty ?? 0.34;
     }
     return boost;
   }
 
   if (isBlockerIntent(normalizedQuestion)) {
-    let boost = 0;
-    if (includesAny(searchable, ["blocker", "risk", "challenge", "stuck", "quota", "worker", "indexing", "fallback", "blocked", "trở ngại", "rủi ro", "khó khăn"])) {
-      boost += 0.16;
-    }
-    if (chunk.chunkType === "action_item" || chunk.chunkType === "reflection") {
-      boost += 0.05;
-    }
+    const profile = getIntentProfile("blocker").rerank;
+    let boost = applyConfiguredRerankProfile(0, profile, normalizedQuestion, searchable, chunk);
     if (hasOnlyQuestionListEvidence(searchable)) {
-      boost -= 0.24;
+      boost -= profile?.onlyQuestionListPenalty ?? 0.24;
     }
     return boost;
   }
 
   if (isLatencyIntent(normalizedQuestion)) {
+    const profile = getIntentProfile("latency").rerank;
     let boost = 0;
     if (hasOnlyQuestionListEvidence(searchable)) {
-      boost -= 0.22;
+      boost -= profile?.onlyQuestionListPenalty ?? 0.22;
     }
-    if (includesAny(searchable, [
-      "retrieval latency",
-      "answer generation",
-      "generation latency",
-      "embedding time",
-      "database retrieval",
-      "reranking",
-      "p95",
-      "500 millisecond",
-      "500 ms",
-      "time to first result",
-      "separate",
-      "separately",
-    ])) {
-      boost += 0.22;
-    }
-    if (chunk.chunkType === "decision" || chunk.chunkType === "general_note") {
-      boost += 0.04;
-    }
+    boost = applyConfiguredRerankProfile(boost, profile, normalizedQuestion, searchable, chunk);
     return boost;
   }
 
   if (isGmailIntent(normalizedQuestion)) {
+    const profile = getIntentProfile("gmail").rerank;
     let boost = 0;
-    if (hasGmailEvidence(searchable)) {
-      boost += 0.24;
+    const isGmailSource = chunk.sourceType === "gmail";
+    const hasEmailEvidence = hasGmailEvidence(searchable);
+
+    if (isGmailSource) {
+      boost += profile?.sourceTypeBoosts?.gmail ?? 0.36;
+    } else if (hasEmailEvidence) {
+      boost += profile?.evidenceBoost ?? 0.12;
     } else {
-      boost -= 0.12;
+      boost -= profile?.noDirectSupportPenalty ?? 0.2;
     }
-    if (chunk.chunkType === "decision" || chunk.chunkType === "feedback") {
-      boost += 0.06;
-    }
-    if (hasLatencyEvidence(searchable) && !hasGmailEvidence(searchable)) {
-      boost -= 0.18;
+
+    if (isGmailSource) boost += getQuestionMatchBoost(profile, normalizedQuestion);
+
+    boost += profile?.chunkTypeBoosts?.[chunk.chunkType] ?? 0;
+    boost += profile?.sourceChunkTypeBoosts?.[chunk.sourceType]?.[chunk.chunkType] ?? 0;
+    if (hasLatencyEvidence(searchable) && !hasEmailEvidence) {
+      boost -= profile?.latencyWithoutEvidencePenalty ?? 0.18;
     }
     return boost;
   }
 
   if (isMoodIntent(normalizedQuestion)) {
+    const profile = getIntentProfile("mood").rerank;
     let boost = 0;
     if (isStressIntent(normalizedQuestion) && hasOnlyQuestionListEvidence(searchable)) {
-      boost -= 0.22;
+      boost -= profile?.onlyQuestionListPenalty ?? 0.22;
     }
-    if (includesAny(searchable, ["stress", "stressed", "worried", "confident", "relieved", "mood", "emotion", "blocker", "risk", "weak", "quota", "bad", "căng thẳng", "tâm trạng", "cảm xúc"])) {
-      boost += 0.12;
-    }
-    if (chunk.chunkType === "reflection") {
-      boost += 0.06;
-    }
+    boost = applyConfiguredRerankProfile(boost, profile, normalizedQuestion, searchable, chunk);
     return boost;
   }
 
   if (isGoogleContactsIntent(normalizedQuestion)) {
-    let boost = 0;
-    if (chunk.sourceType === "contact") {
-      boost += 0.28;
-    }
-    if (includesAny(searchable, ["google contacts", "contacts", "people api", "contact names", "emails", "phone numbers", "organizations", "danh bạ", "danh ba"])) {
-      boost += 0.2;
-    }
-    if (chunk.chunkType === "decision" || chunk.chunkType === "action_item") {
-      boost += 0.05;
-    }
-    return boost;
+    return applyConfiguredRerankProfile(
+      0,
+      getIntentProfile("google_contacts").rerank,
+      normalizedQuestion,
+      searchable,
+      chunk,
+    );
+  }
+
+  const detectedIntent = getDetectedProfileIntent(normalizedQuestion);
+  if (detectedIntent) {
+    return applyConfiguredRerankProfile(
+      0,
+      getIntentProfile(detectedIntent).rerank,
+      normalizedQuestion,
+      searchable,
+      chunk,
+    );
   }
 
   return 0;
+}
+
+function getDetectedProfileIntent(normalizedQuestion: string) {
+  const intent = detectMemoryIntent(normalizedQuestion);
+  return intent === "drive" || intent === "calendar" ? intent : null;
+}
+
+function applyConfiguredRerankProfile(
+  boost: number,
+  profile: ScoreProfile | undefined,
+  normalizedQuestion: string,
+  searchable: string,
+  chunk: MemorySearchHit,
+): number {
+  if (!profile) return boost;
+
+  let nextBoost = boost;
+  if (profile.evidenceKeywords && includesAny(searchable, profile.evidenceKeywords)) {
+    nextBoost += profile.evidenceBoost ?? 0;
+  }
+
+  nextBoost += getQuestionEvidenceMatchBoost(profile, normalizedQuestion, searchable);
+  nextBoost += profile.chunkTypeBoosts?.[chunk.chunkType] ?? 0;
+  nextBoost += profile.sourceTypeBoosts?.[chunk.sourceType] ?? 0;
+  nextBoost += profile.sourceChunkTypeBoosts?.[chunk.sourceType]?.[chunk.chunkType] ?? 0;
+  nextBoost -= profile.sourceTypePenalties?.[chunk.sourceType] ?? 0;
+
+  return nextBoost;
+}
+
+function getQuestionEvidenceMatchBoost(
+  profile: ScoreProfile | undefined,
+  normalizedQuestion: string,
+  searchable: string,
+): number {
+  return profile?.queryEvidenceMatches
+    ?.filter(
+      (match) =>
+        includesAny(normalizedQuestion, match.questionKeywords) &&
+        includesAny(searchable, match.evidenceKeywords),
+    )
+    .reduce((total, match) => total + match.boost, 0) ?? 0;
+}
+
+function getQuestionMatchBoost(
+  profile: ScoreProfile | undefined,
+  normalizedQuestion: string,
+): number {
+  return profile?.queryEvidenceMatches
+    ?.filter((match) => includesAny(normalizedQuestion, match.questionKeywords))
+    .reduce((total, match) => total + match.boost, 0) ?? 0;
 }
 
 function getMemoryNoisePenalty(chunk: MemorySearchHit): number {

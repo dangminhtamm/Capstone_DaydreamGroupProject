@@ -34,8 +34,16 @@ export function hasAdequateSemanticSupport(chunks: MemorySearchHit[]): boolean {
   const top = chunks[0];
   if (!top) return false;
 
+  if (chunks.some((chunk) => (chunk.entityScore ?? 0) >= 0.8)) {
+    return true;
+  }
+
   if (top.retrievalMode === "lexical" && top.vectorSimilarity < 0.3) {
-    return false;
+    return chunks.some((chunk) =>
+      isEmbeddingErrorLexicalFallbackHit(chunk) &&
+      chunk.retrievalMode === "lexical" &&
+      chunk.lexicalScore >= 0.75
+    );
   }
 
   if (top.retrievalMode === "temporal") {
@@ -43,6 +51,16 @@ export function hasAdequateSemanticSupport(chunks: MemorySearchHit[]): boolean {
   }
 
   return chunks.some((chunk) => chunk.vectorSimilarity >= 0.5);
+}
+
+function isEmbeddingErrorLexicalFallbackHit(chunk: MemorySearchHit): boolean {
+  const metadata = chunk.metadata;
+  return Boolean(
+    metadata &&
+    typeof metadata === "object" &&
+    !Array.isArray(metadata) &&
+    (metadata as { retrievalFallback?: unknown }).retrievalFallback === "embedding_error_lexical",
+  );
 }
 
 export function isClaimSupportedByQuote(claim: string, quote: string): boolean {
@@ -63,9 +81,7 @@ export function isAnswerGroundedByCitations(
   lang: ResponseLanguage,
 ): boolean {
   if (isInsufficientAnswer(answer)) return false;
-  if (lang === "vi" && citations.length > 0) {
-    return true;
-  }
+  if (citations.length === 0) return false;
 
   const citedEvidence = citations
     .map((citation) => {
@@ -73,14 +89,52 @@ export function isAnswerGroundedByCitations(
       return `${citation.claim} ${source?.quote ?? ""}`;
     })
     .join(" ");
+  if (!citedEvidence.trim()) return false;
+
+  const hasSupportedCitation = citations.some((citation) => {
+    const source = sourceByMarker.get(citation.marker);
+    return source ? isClaimSupportedByQuote(citation.claim, source.quote) : false;
+  });
+  if (!hasSupportedCitation) return false;
+
   const answerTokens = importantTokens(answer);
 
   if (answerTokens.length <= 4) {
+    if (lang === "vi") {
+      const groundingAnswerTokens = groundingTokens(answer);
+      const groundingEvidenceTokens = new Set(groundingTokens(citedEvidence));
+      return (
+        quoteContainsMeaningfulPhrase(answer, citedEvidence) ||
+        groundingAnswerTokens.some((token) => groundingEvidenceTokens.has(token))
+      );
+    }
+
     return quoteContainsMeaningfulPhrase(answer, citedEvidence);
   }
 
   const evidenceTokens = new Set(importantTokens(citedEvidence));
   const hits = answerTokens.filter((token) => evidenceTokens.has(token)).length;
+  const coverage = hits / answerTokens.length;
+
+  if (lang === "vi") {
+    const groundingAnswerTokens = groundingTokens(answer);
+    const groundingEvidenceTokens = new Set(groundingTokens(citedEvidence));
+    const groundingHits = groundingAnswerTokens.filter((token) =>
+      groundingEvidenceTokens.has(token),
+    ).length;
+    const groundingCoverage = groundingHits / groundingAnswerTokens.length;
+
+    const conciseTranslatedAnswer =
+      answerTokens.length <= 8 &&
+      groundingHits >= 2 &&
+      groundingCoverage >= 0.25;
+
+    return (
+      conciseTranslatedAnswer ||
+      (hits >= 2 && groundingHits >= 3 && groundingCoverage >= 0.2)
+    );
+  }
+
   return hits >= 3 && hits / answerTokens.length >= 0.35;
 }
 
@@ -293,6 +347,42 @@ function namedEntityAliases(normalizedName: string): string[] {
   return aliasesByName[normalizedName] ?? [];
 }
 
+const crossLanguageGroundingConcepts = [
+  ["ai", "artificial intelligence"],
+  ["attachment", "attachments", "file dinh kem", "tep dinh kem", "uploaded file", "upload"],
+  ["calendar", "google calendar", "lich", "su kien", "event", "events", "meeting", "meetings", "cuoc hop"],
+  ["citation", "citations", "cite", "source", "sources", "trich dan", "nguon"],
+  ["decision", "decided", "quyet dinh", "thong nhat"],
+  ["diary", "journal", "memory", "memories", "nhat ky", "ky uc"],
+  ["feedback", "comment", "comments", "review", "gop y", "nhan xet", "phan hoi"],
+  ["fix", "fixed", "fixing", "repair", "sua", "sua loi", "khac phuc"],
+  ["index", "indexed", "indexing", "chunk", "chunks", "embedding", "lap chi muc"],
+  ["mood", "emotion", "feeling", "feelings", "tam trang", "cam xuc"],
+  ["quota", "rate limit", "billing", "credit", "credits", "gioi han"],
+  ["relieved", "relief", "nhe nhom", "do ap luc"],
+  ["search", "semantic search", "retrieval", "tim kiem"],
+  ["stress", "stressed", "anxious", "pressure", "cang thang", "lo lang", "ap luc"],
+  ["summary", "summaries", "summarize", "tom tat"],
+  ["task", "todo", "action item", "viec", "nhiem vu", "can lam"],
+  ["trust", "trusted", "reliable", "tin tuong", "dang tin"],
+  ["ui", "ux", "interface", "giao dien"],
+  ["worker", "outbox", "pipeline", "heartbeat"],
+] as const;
+
+function groundingTokens(value: string): string[] {
+  const normalized = normalizeForIntent(value).replace(/[^\p{Letter}\p{Number}\s]/gu, " ");
+  const tokens = new Set(importantTokens(value));
+
+  for (const conceptTerms of crossLanguageGroundingConcepts) {
+    const normalizedTerms = conceptTerms.map((term) => normalizeForIntent(term));
+    if (!normalizedTerms.some((term) => normalized.includes(term))) continue;
+
+    tokens.add(`concept:${normalizedTerms[0].replace(/\s+/g, "_")}`);
+  }
+
+  return [...tokens];
+}
+
 function quoteContainsMeaningfulPhrase(value: string, quote: string): boolean {
   const normalizedValue = normalizeForIntent(value).replace(/[^\p{Letter}\p{Number}\s]/gu, " ");
   const normalizedQuote = normalizeForIntent(quote).replace(/[^\p{Letter}\p{Number}\s]/gu, " ");
@@ -303,4 +393,3 @@ function quoteContainsMeaningfulPhrase(value: string, quote: string): boolean {
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
-

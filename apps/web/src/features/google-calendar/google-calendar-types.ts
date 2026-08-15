@@ -1,6 +1,6 @@
 export type CalendarConnectionStatus = {
   source?: 'calendar';
-  oauthMode?: 'all_google_sources';
+  oauthMode?: 'all_google_sources' | 'source_scoped';
   connected: boolean;
   scopes?: string[];
   requestedScopes?: string[];

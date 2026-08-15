@@ -22,6 +22,7 @@ jest.mock('googleapis', () => ({
 }));
 
 describe('ContactsService', () => {
+  const originalStoreRawPayloads = process.env.GOOGLE_STORE_RAW_PAYLOADS;
   const prisma = {
     user: {
       findUnique: jest.fn(),
@@ -49,7 +50,12 @@ describe('ContactsService', () => {
     process.env.GOOGLE_CLIENT_ID = 'google-client-id';
     process.env.GOOGLE_CLIENT_SECRET = 'google-client-secret';
     process.env.GOOGLE_TOKEN_ENCRYPTION_KEY = 'test-token-encryption-key';
+    delete process.env.GOOGLE_STORE_RAW_PAYLOADS;
     service = new ContactsService(prisma as any);
+  });
+
+  afterAll(() => {
+    restoreOptionalEnv('GOOGLE_STORE_RAW_PAYLOADS', originalStoreRawPayloads);
   });
 
   it('returns contacts status without exposing Google tokens', async () => {
@@ -69,7 +75,7 @@ describe('ContactsService', () => {
     expect(status).toEqual(
       expect.objectContaining({
         source: 'contact',
-        oauthMode: 'all_google_sources',
+        oauthMode: 'source_scoped',
         connected: true,
         scopes: ['https://www.googleapis.com/auth/contacts.readonly'],
         requestedScopes: ['https://www.googleapis.com/auth/contacts.readonly'],
@@ -137,6 +143,7 @@ describe('ContactsService', () => {
           email_addresses: ['linh@example.com'],
           phone_numbers: ['+84 900 000 001'],
           organizations: ['RMIT', 'Mentor'],
+          raw_json: null,
         }),
       }),
     );
@@ -183,3 +190,12 @@ describe('ContactsService', () => {
     expect(prisma.googleContact.findMany).not.toHaveBeenCalled();
   });
 });
+
+function restoreOptionalEnv(name: string, value: string | undefined) {
+  if (value === undefined) {
+    delete process.env[name];
+    return;
+  }
+
+  process.env[name] = value;
+}

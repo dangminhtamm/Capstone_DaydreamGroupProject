@@ -53,13 +53,15 @@ test('parseCalendarCallbackParams returns null when no calendar param', () => {
   const result = parseCalendarCallbackParams(params);
   assert.equal(result.result, null);
   assert.equal(result.reason, null);
+  assert.equal(result.source, null);
 });
 
 test('parseCalendarCallbackParams detects connected', () => {
-  const params = new URLSearchParams('calendar=connected');
+  const params = new URLSearchParams('calendar=connected&source=drive');
   const result = parseCalendarCallbackParams(params);
   assert.equal(result.result, 'connected');
   assert.equal(result.reason, null);
+  assert.equal(result.source, 'drive');
 });
 
 test('parseCalendarCallbackParams detects error with reason', () => {
@@ -77,9 +79,10 @@ test('parseCalendarCallbackParams detects error without reason', () => {
 });
 
 test('buildCalendarFeedback returns success for connected', () => {
-  const feedback = buildCalendarFeedback('connected', null);
+  const feedback = buildCalendarFeedback('connected', null, 'gmail');
   assert.equal(feedback.type, 'success');
   assert.ok(feedback.text.includes('connected'));
+  assert.ok(feedback.text.includes('Gmail'));
 });
 
 test('buildCalendarFeedback returns cancel message for access_denied', () => {

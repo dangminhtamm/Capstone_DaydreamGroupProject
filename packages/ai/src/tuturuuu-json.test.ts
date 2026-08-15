@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { parseJsonResponse } from "./gemini-json.ts";
+import { parseJsonResponse } from "./tuturuuu-json.ts";
 
 test("parseJsonResponse extracts valid JSON from surrounding prose", () => {
   const parsed = parseJsonResponse(`

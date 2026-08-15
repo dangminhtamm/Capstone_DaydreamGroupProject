@@ -1,5 +1,6 @@
 import { insertMemoryChunks } from "@second-brain/db";
 import { generateSemanticChunks } from "./chunker.ts";
+import type { GenerateSemanticChunksOptions } from "./chunker.ts";
 import {
   createDefaultEmbeddingProvider,
   type AdvancedEmbeddingProvider,
@@ -22,7 +23,7 @@ export interface PersistedMemoryChunkPayload {
   evidence: string | null;
   metadata: MemoryChunkMetadata;
   occurredAt: Date;
-  embedding: number[];
+  embedding: number[] | null;
 }
 
 export interface IndexedMemoryChunk {
@@ -52,6 +53,8 @@ export interface IndexMemoryFromDiaryInput {
   entryDate?: Date | string | null;
   sourceTitle?: string;
   embeddingProvider?: Pick<AdvancedEmbeddingProvider, "embedDocument">;
+  chunkingOptions?: GenerateSemanticChunksOptions;
+  onEmbeddingFallback?: (error: Error) => void;
   insertChunks?: (chunks: PersistedMemoryChunkPayload[]) => Promise<unknown>;
   /**
    * Optional callback to persist entity mentions after chunks are inserted.
@@ -89,12 +92,16 @@ export async function indexMemoryFromDiary(
   }
 
   const date = normalizeOptionalDateToIso(input.entryDate);
-  const semanticChunks = await generateSemanticChunks(rawText, {
-    sourceType: "diary",
-    sourceId: input.diaryId,
-    date,
-    sourceTitle: input.sourceTitle,
-  });
+  const semanticChunks = await generateSemanticChunks(
+    rawText,
+    {
+      sourceType: "diary",
+      sourceId: input.diaryId,
+      date,
+      sourceTitle: input.sourceTitle,
+    },
+    input.chunkingOptions,
+  );
 
   if (!semanticChunks.length) {
     return {
@@ -120,10 +127,27 @@ export async function indexMemoryFromDiary(
     metadata: chunk.metadata,
     occurredAt: chunk.metadata.date ? new Date(chunk.metadata.date) : new Date(),
   } satisfies Omit<PersistedMemoryChunkPayload, "embedding">));
-  const persistedChunks: PersistedMemoryChunkPayload[] = await withEmbeddings(
-    chunkPayloads,
-    embeddingProvider,
-  );
+  let persistedChunks: PersistedMemoryChunkPayload[];
+  try {
+    persistedChunks = await withEmbeddings(chunkPayloads, embeddingProvider);
+  } catch (error) {
+    const embeddingError = error instanceof Error ? error : new Error(String(error));
+    input.onEmbeddingFallback?.(embeddingError);
+    if (!input.onEmbeddingFallback) {
+      console.warn(
+        `[MemoryIndexer] Diary embeddings unavailable; storing lexical-searchable chunks: ${summarizeIndexingError(embeddingError)}`,
+      );
+    }
+
+    persistedChunks = chunkPayloads.map((chunk) => ({
+      ...chunk,
+      metadata: {
+        ...chunk.metadata,
+        embeddingStatus: "pending",
+      },
+      embedding: null,
+    }));
+  }
 
   await (input.insertChunks ?? insertMemoryChunks)(persistedChunks);
 
@@ -179,9 +203,13 @@ export async function indexMemoryFromDiary(
       evidence: chunk.evidence,
       metadata: chunk.metadata,
       occurredAt: chunk.occurredAt.toISOString(),
-      embeddingDimension: chunk.embedding.length,
+      embeddingDimension: chunk.embedding?.length ?? 0,
       entityMentions: mentionsByChunkIndex.get(chunk.chunkIndex),
     })),
   };
+}
+
+function summarizeIndexingError(error: Error): string {
+  return error.message.replace(/\s+/g, " ").slice(0, 180);
 }
 

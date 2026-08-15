@@ -1,6 +1,6 @@
 export type ContactConnectionStatus = {
   source?: 'contact';
-  oauthMode?: 'all_google_sources';
+  oauthMode?: 'all_google_sources' | 'source_scoped';
   connected: boolean;
   scopes?: string[];
   requestedScopes?: string[];

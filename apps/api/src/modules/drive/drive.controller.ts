@@ -1,5 +1,6 @@
-import { Controller, Get, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { ImportDriveFilesDto } from './dto/import-drive-files.dto';
 import { DriveService } from './drive.service';
 
 @Controller('drive')
@@ -10,6 +11,25 @@ export class DriveController {
   @Get('status')
   async getStatus(@Req() req) {
     return this.driveService.getConnectionStatus(req.user.userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('candidates')
+  async getImportCandidates(
+    @Req() req,
+    @Query('limit') limit?: string,
+    @Query('q') query?: string,
+  ) {
+    return this.driveService.listImportCandidates(req.user.userId, {
+      limit: this.parseFileLimit(limit),
+      query,
+    });
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('import')
+  async importSelectedFiles(@Req() req, @Body() body: ImportDriveFilesDto) {
+    return this.driveService.importSelectedFiles(req.user.userId, body.fileIds);
   }
 
   @UseGuards(JwtAuthGuard)

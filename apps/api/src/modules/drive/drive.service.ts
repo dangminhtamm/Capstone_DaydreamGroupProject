@@ -15,6 +15,7 @@ import {
   getGoogleConnectionStatus,
   recordGoogleSyncFailure,
   recordGoogleSyncSuccess,
+  shouldStoreGoogleRawPayloads,
 } from '../google-connections/google-connections';
 
 type GoogleDriveFileRow = {
@@ -26,7 +27,18 @@ type GoogleDriveFileRow = {
   thumbnail_link: string | null;
   size: bigint | null;
   modified_time: Date | null;
-  raw_json: drive_v3.Schema$File;
+  raw_json: drive_v3.Schema$File | null;
+};
+
+type GoogleUserWithTokens = {
+  id: string;
+  google_access_token: string | null;
+  google_refresh_token: string | null;
+};
+
+type DriveClientContext = {
+  user: GoogleUserWithTokens;
+  drive: drive_v3.Drive;
 };
 
 @Injectable()
@@ -94,7 +106,7 @@ export class DriveService {
 
     return {
       source: 'drive',
-      oauthMode: 'all_google_sources',
+      oauthMode: this.getOauthMode(connection.scopes),
       connected: connection.connected && fallbackConnected,
       scopes: connection.scopes,
       requestedScopes: GOOGLE_SOURCE_SCOPES.drive,
@@ -117,37 +129,124 @@ export class DriveService {
 
     return this.prisma.googleDriveFile.findMany({
       where: { user_id: user.id },
+      select: {
+        id: true,
+        external_id: true,
+        name: true,
+        mime_type: true,
+        web_view_link: true,
+        icon_link: true,
+        thumbnail_link: true,
+        size: true,
+        modified_time: true,
+        extracted_text: true,
+        created_at: true,
+        updated_at: true,
+      },
       orderBy: [{ modified_time: 'desc' }, { updated_at: 'desc' }],
       take: 50,
     });
   }
 
-  async syncGoogleDriveFiles(supabaseId: string, options: { limit?: number } = {}) {
-    const user = await this.getGoogleUser(supabaseId);
-    const oauth2Client = this.getOAuthClient();
-    oauth2Client.setCredentials({
-      access_token: decryptOAuthToken(user.google_access_token),
-      refresh_token: decryptOAuthToken(user.google_refresh_token),
-    });
-    oauth2Client.on('tokens', async (tokens) => {
-      await this.prisma.user.update({
-        where: { id: user.id },
-        data: {
-          ...(tokens.access_token && { google_access_token: encryptOAuthToken(tokens.access_token) }),
-          ...(tokens.refresh_token && { google_refresh_token: encryptOAuthToken(tokens.refresh_token) }),
-        },
-      });
-    });
+  async listImportCandidates(supabaseId: string, options: { limit?: number; query?: string } = {}) {
+    const { user, drive } = await this.getDriveClientContext(supabaseId);
+    const maxFiles = Math.min(Math.max(options.limit ?? 25, 1), 100);
 
-    const drive = google.drive({ version: 'v3', auth: oauth2Client });
+    try {
+      const response = await drive.files.list({
+        q: this.buildDriveListQuery(options.query),
+        pageSize: maxFiles,
+        orderBy: 'modifiedTime desc',
+        fields: `nextPageToken, files(${this.getDriveFileFields()})`,
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
+      });
+      const files = response.data.files ?? [];
+      const externalIds = files.map((file) => file.id).filter((id): id is string => Boolean(id));
+      const importedIds = externalIds.length
+        ? await this.prisma.googleDriveFile.findMany({
+            where: {
+              user_id: user.id,
+              external_id: { in: externalIds },
+            },
+            select: { external_id: true },
+          })
+        : [];
+      const importedSet = new Set(importedIds.map((file) => file.external_id));
+
+      return {
+        message: 'Google Drive import candidates fetched successfully.',
+        count: files.length,
+        candidates: files
+          .filter((file) => file.id && file.name && file.mimeType)
+          .map((file) => ({
+            id: file.id!,
+            name: file.name!,
+            mimeType: file.mimeType!,
+            webViewLink: file.webViewLink ?? null,
+            iconLink: file.iconLink ?? null,
+            thumbnailLink: file.thumbnailLink ?? null,
+            size: file.size ?? null,
+            modifiedTime: file.modifiedTime ?? null,
+            alreadyImported: importedSet.has(file.id!),
+          })),
+      };
+    } catch (error) {
+      await recordGoogleSyncFailure(this.prisma, { userId: user.id, source: 'drive', error });
+      if (this.isInsufficientScopeError(error)) {
+        throw new ForbiddenException('Reconnect Google to grant Drive permission.');
+      }
+      console.error('Failed to list Google Drive import candidates:', error);
+      throw new InternalServerErrorException('Could not list Google Drive files for import');
+    }
+  }
+
+  async importSelectedFiles(supabaseId: string, fileIds: string[]) {
+    const { user, drive } = await this.getDriveClientContext(supabaseId);
+    const selectedIds = this.normalizeSelectedIds(fileIds, 50);
+
+    try {
+      const normalizedFiles: GoogleDriveFileRow[] = [];
+      for (const fileId of selectedIds) {
+        const response = await drive.files.get({
+          fileId,
+          fields: this.getDriveFileFields(),
+          supportsAllDrives: true,
+        });
+        const normalized = this.normalizeFile(response.data);
+        if (normalized) normalizedFiles.push(normalized);
+      }
+
+      const queuedIndexingJobs = await this.saveFilesAndQueueIndexing(user.id, normalizedFiles);
+      await recordGoogleSyncSuccess(this.prisma, { userId: user.id, source: 'drive' });
+
+      return {
+        message: 'Selected Google Drive files imported; Drive memory indexing queued.',
+        syncedCount: normalizedFiles.length,
+        requestedCount: selectedIds.length,
+        queuedIndexingJobs,
+        memoryIndexingStatus: 'queued',
+      };
+    } catch (error) {
+      await recordGoogleSyncFailure(this.prisma, { userId: user.id, source: 'drive', error });
+      if (this.isInsufficientScopeError(error)) {
+        throw new ForbiddenException('Reconnect Google to grant Drive permission.');
+      }
+      console.error('Failed to import selected Google Drive files:', error);
+      throw new InternalServerErrorException('Could not import selected Google Drive files');
+    }
+  }
+
+  async syncGoogleDriveFiles(supabaseId: string, options: { limit?: number } = {}) {
+    const { user, drive } = await this.getDriveClientContext(supabaseId);
     const maxFiles = Math.min(Math.max(options.limit ?? 50, 1), 200);
 
     try {
       const response = await drive.files.list({
-        q: "trashed = false and mimeType != 'application/vnd.google-apps.folder'",
+        q: this.buildDriveListQuery(),
         pageSize: maxFiles,
         orderBy: 'modifiedTime desc',
-        fields: 'nextPageToken, files(id, name, mimeType, webViewLink, iconLink, thumbnailLink, size, modifiedTime, owners(displayName,emailAddress), lastModifyingUser(displayName,emailAddress))',
+        fields: `nextPageToken, files(${this.getDriveFileFields()})`,
         supportsAllDrives: true,
         includeItemsFromAllDrives: true,
       });
@@ -156,53 +255,7 @@ export class DriveService {
         .map((file) => this.normalizeFile(file))
         .filter((file): file is GoogleDriveFileRow => Boolean(file));
 
-      const queuedIndexingJobs = await this.prisma.$transaction(async (tx) => {
-        let queuedCount = 0;
-
-        for (const file of normalizedFiles) {
-          const savedFile = await tx.googleDriveFile.upsert({
-            where: {
-              user_id_external_id: {
-                user_id: user.id,
-                external_id: file.external_id,
-              },
-            },
-            update: {
-              name: file.name,
-              mime_type: file.mime_type,
-              web_view_link: file.web_view_link,
-              icon_link: file.icon_link,
-              thumbnail_link: file.thumbnail_link,
-              size: file.size,
-              modified_time: file.modified_time,
-              raw_json: file.raw_json as any,
-            },
-            create: {
-              user_id: user.id,
-              external_id: file.external_id,
-              name: file.name,
-              mime_type: file.mime_type,
-              web_view_link: file.web_view_link,
-              icon_link: file.icon_link,
-              thumbnail_link: file.thumbnail_link,
-              size: file.size,
-              modified_time: file.modified_time,
-              raw_json: file.raw_json as any,
-            },
-          });
-
-          await this.enqueueDriveIndexingJob(tx, {
-            userId: user.id,
-            driveFileId: savedFile.id,
-            externalId: savedFile.external_id,
-            fileName: savedFile.name,
-            mimeType: savedFile.mime_type,
-          });
-          queuedCount += 1;
-        }
-
-        return queuedCount;
-      });
+      const queuedIndexingJobs = await this.saveFilesAndQueueIndexing(user.id, normalizedFiles);
 
       await recordGoogleSyncSuccess(this.prisma, { userId: user.id, source: 'drive' });
 
@@ -222,6 +275,98 @@ export class DriveService {
     }
   }
 
+  private async getDriveClientContext(supabaseId: string): Promise<DriveClientContext> {
+    const user = await this.getGoogleUser(supabaseId);
+    const oauth2Client = this.getOAuthClient();
+    oauth2Client.setCredentials({
+      access_token: decryptOAuthToken(user.google_access_token),
+      refresh_token: decryptOAuthToken(user.google_refresh_token),
+    });
+    oauth2Client.on('tokens', async (tokens) => {
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: {
+          ...(tokens.access_token && { google_access_token: encryptOAuthToken(tokens.access_token) }),
+          ...(tokens.refresh_token && { google_refresh_token: encryptOAuthToken(tokens.refresh_token) }),
+        },
+      });
+    });
+
+    const drive = google.drive({ version: 'v3', auth: oauth2Client });
+    return { user, drive };
+  }
+
+  private getDriveFileFields() {
+    return 'id, name, mimeType, webViewLink, iconLink, thumbnailLink, size, modifiedTime, owners(displayName,emailAddress), lastModifyingUser(displayName,emailAddress)';
+  }
+
+  private buildDriveListQuery(query?: string) {
+    const filters = ["trashed = false", "mimeType != 'application/vnd.google-apps.folder'"];
+    const normalizedQuery = query?.trim();
+    if (normalizedQuery) {
+      filters.push(`name contains '${this.escapeDriveQueryValue(normalizedQuery)}'`);
+    }
+    return filters.join(' and ');
+  }
+
+  private escapeDriveQueryValue(value: string) {
+    return value.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  }
+
+  private normalizeSelectedIds(fileIds: string[], maxItems: number) {
+    return Array.from(new Set(fileIds.map((id) => id.trim()).filter(Boolean))).slice(0, maxItems);
+  }
+
+  private async saveFilesAndQueueIndexing(userId: string, files: GoogleDriveFileRow[]) {
+    return this.prisma.$transaction(async (tx) => {
+      let queuedCount = 0;
+
+      for (const file of files) {
+        const savedFile = await tx.googleDriveFile.upsert({
+          where: {
+            user_id_external_id: {
+              user_id: userId,
+              external_id: file.external_id,
+            },
+          },
+          update: {
+            name: file.name,
+            mime_type: file.mime_type,
+            web_view_link: file.web_view_link,
+            icon_link: file.icon_link,
+            thumbnail_link: file.thumbnail_link,
+            size: file.size,
+            modified_time: file.modified_time,
+            raw_json: file.raw_json as any,
+          },
+          create: {
+            user_id: userId,
+            external_id: file.external_id,
+            name: file.name,
+            mime_type: file.mime_type,
+            web_view_link: file.web_view_link,
+            icon_link: file.icon_link,
+            thumbnail_link: file.thumbnail_link,
+            size: file.size,
+            modified_time: file.modified_time,
+            raw_json: file.raw_json as any,
+          },
+        });
+
+        await this.enqueueDriveIndexingJob(tx, {
+          userId,
+          driveFileId: savedFile.id,
+          externalId: savedFile.external_id,
+          fileName: savedFile.name,
+          mimeType: savedFile.mime_type,
+        });
+        queuedCount += 1;
+      }
+
+      return queuedCount;
+    });
+  }
+
   private normalizeFile(file: drive_v3.Schema$File): GoogleDriveFileRow | null {
     if (!file.id || !file.name || !file.mimeType) return null;
 
@@ -234,8 +379,16 @@ export class DriveService {
       thumbnail_link: file.thumbnailLink ?? null,
       size: file.size ? BigInt(file.size) : null,
       modified_time: file.modifiedTime ? new Date(file.modifiedTime) : null,
-      raw_json: file,
+      raw_json: shouldStoreGoogleRawPayloads() ? file : null,
     };
+  }
+
+  private getOauthMode(scopes: string[]) {
+    const workspaceScopes = getAllGoogleWorkspaceScopes();
+    const normalizedScopes = new Set(scopes);
+    return workspaceScopes.every((scope) => normalizedScopes.has(scope))
+      ? 'all_google_sources'
+      : 'source_scoped';
   }
 
   private async enqueueDriveIndexingJob(
@@ -268,6 +421,7 @@ export class DriveService {
         },
         run_after: new Date(),
         locked_at: null,
+        locked_by: null,
         processed_at: null,
       },
       create: {

@@ -1,4 +1,3 @@
-import { SchemaType, type ResponseSchema } from "@google/generative-ai";
 import { z } from "zod";
 import { normalizeForIntent } from "./answer-memory-intents.ts";
 
@@ -24,25 +23,25 @@ export const GroundedAnswerSchema = z.object({
 
 export type GroundedAnswer = z.infer<typeof GroundedAnswerSchema>;
 
-export const GeminiGroundedAnswerResponseSchema: ResponseSchema = {
-  type: SchemaType.OBJECT,
+export const TuturuuuGroundedAnswerResponseSchema = {
+  type: "object",
   properties: {
-    answer: { type: SchemaType.STRING },
+    answer: { type: "string" },
     confidence: {
-      type: SchemaType.STRING,
+      type: "string",
       description: "One of high, medium, low.",
     },
     citations: {
-      type: SchemaType.ARRAY,
+      type: "array",
       items: {
-        type: SchemaType.OBJECT,
+        type: "object",
         properties: {
           marker: {
-            type: SchemaType.STRING,
+            type: "string",
             description: "Citation marker matching S1, S2, S3, etc.",
           },
           claim: {
-            type: SchemaType.STRING,
+            type: "string",
             description: "The specific claim supported by this source.",
           },
         },

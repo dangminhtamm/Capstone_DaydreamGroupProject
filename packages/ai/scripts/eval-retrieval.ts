@@ -162,7 +162,7 @@ if (!hasAiGatewayKey()) {
         errors: results.filter((row) => row.error).length,
         limit: evalLimit ?? null,
         note:
-          "Retrieval evaluation checks source matching only. It does not call Gemini answer generation, but still uses query embeddings.",
+          "Retrieval evaluation checks source matching only. It does not call Tuturuuu answer generation, but still uses query embeddings.",
       };
 
       console.log(JSON.stringify({ summary, results }, null, 2));

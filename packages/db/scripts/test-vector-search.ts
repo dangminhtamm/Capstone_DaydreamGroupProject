@@ -12,7 +12,7 @@
  *   node --env-file=.env --experimental-strip-types scripts/test-vector-search.ts
  */
 
-import { GeminiEmbeddingProvider } from "../../ai/src/index.ts";
+import { TuturuuuEmbeddingProvider } from "../../ai/src/index.ts";
 import { createPrismaClient, vectorSearch } from "../index.ts";
 
 async function main(): Promise<void> {
@@ -27,7 +27,7 @@ async function main(): Promise<void> {
   }
 
   const prisma = createPrismaClient();
-  const embedder = new GeminiEmbeddingProvider(apiKey);
+  const embedder = new TuturuuuEmbeddingProvider(apiKey);
 
   // --- Test 1: Pure similarity search (no filters) ---
   console.log("\n=== Test 1: Pure similarity search ===");

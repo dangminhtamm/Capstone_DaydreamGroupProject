@@ -5,7 +5,7 @@ export default function SummaryPage() {
   return (
     <DashboardShell
       title="Summary"
-      description="Review AI reflections, focus trends, mood patterns, and writing activity."
+      description="See what you have been focusing on, how your week felt, and what changed over time."
     >
       <SummaryDashboard />
     </DashboardShell>

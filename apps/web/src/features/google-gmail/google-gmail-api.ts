@@ -1,5 +1,6 @@
 import type {
   GmailConnectionStatus,
+  GmailImportCandidate,
   GmailMessage,
   GmailSyncResult,
 } from './google-gmail-types';
@@ -49,6 +50,41 @@ export async function fetchGmailMessages(accessToken: string | null): Promise<Gm
 
   const data = await response.json() as { messages?: GmailMessage[] };
   return data.messages ?? [];
+}
+
+export async function fetchGmailImportCandidates(
+  accessToken: string | null,
+  options: { limit?: number; query?: string } = {},
+): Promise<GmailImportCandidate[]> {
+  const params = new URLSearchParams();
+  if (options.limit) params.set('limit', String(options.limit));
+  if (options.query?.trim()) params.set('q', options.query.trim());
+  const query = params.toString() ? `?${params.toString()}` : '';
+  const response = await authFetch(`/api/gmail/candidates${query}`, { method: 'GET' }, accessToken);
+  if (!response.ok) {
+    throw new Error(await readApiError(response, 'Failed to list Gmail messages'));
+  }
+
+  const data = await response.json() as { candidates?: GmailImportCandidate[] };
+  return data.candidates ?? [];
+}
+
+export async function importGmailMessages(
+  accessToken: string | null,
+  messageIds: string[],
+): Promise<GmailSyncResult> {
+  const response = await authFetch(
+    '/api/gmail/import',
+    {
+      method: 'POST',
+      body: JSON.stringify({ messageIds }),
+    },
+    accessToken,
+  );
+  if (!response.ok) {
+    throw new Error(await readApiError(response, 'Failed to import selected Gmail messages'));
+  }
+  return response.json();
 }
 
 export async function syncGmailMessages(accessToken: string | null, limit?: number): Promise<GmailSyncResult> {

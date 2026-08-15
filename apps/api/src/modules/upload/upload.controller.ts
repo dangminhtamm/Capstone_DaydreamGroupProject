@@ -20,6 +20,11 @@ import { StorageService } from '../../storage/storage.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PrismaService } from '../../prisma/prisma.service';
 import { invalidateUserSearchCache } from '../../common/cache/search-answer-cache';
+import {
+  AUDIO_ATTACHMENT_MAX_BYTES,
+  getAttachmentValidationError,
+  SUPPORTED_ATTACHMENT_MIME_PATTERN,
+} from './attachment-upload-policy';
 
 @Controller('upload')
 @UseGuards(JwtAuthGuard)
@@ -90,16 +95,20 @@ export class UploadController {
   }
 
   @Post('attachment')
-  @UseInterceptors(FileInterceptor('file')) // 'file' matches the field name in your form-data
+  @UseInterceptors(FileInterceptor('file', {
+    limits: { fileSize: AUDIO_ATTACHMENT_MAX_BYTES },
+  }))
   async uploadAttachment(
     @Request() req: { user: { userId: string } },
     @Body('diaryEntryId') diaryEntryId: string,
     @UploadedFile(
       new ParseFilePipe({
         validators: [
-          new MaxFileSizeValidator({ maxSize: 5 * 1024 * 1024 }), // 5MB limit
+          new MaxFileSizeValidator({ maxSize: AUDIO_ATTACHMENT_MAX_BYTES }),
           new FileTypeValidator({
-            fileType: /^(image\/png|image\/jpeg|application\/pdf|application\/msword|application\/vnd\.openxmlformats-officedocument\.wordprocessingml\.document|text\/plain)$/,
+            fileType: SUPPORTED_ATTACHMENT_MIME_PATTERN,
+            fallbackToMimetype: true,
+            errorMessage: 'Unsupported attachment content. Upload a supported document, image, or audio file.',
           }),
         ],
       }),
@@ -108,6 +117,11 @@ export class UploadController {
   ) {
     if (!diaryEntryId) {
       throw new BadRequestException('diaryEntryId is required.');
+    }
+
+    const validationError = getAttachmentValidationError(file);
+    if (validationError) {
+      throw new BadRequestException(validationError);
     }
 
     const user = await this.findUserOrThrow(req.user.userId);
@@ -248,6 +262,7 @@ export class UploadController {
         payload: { sourceTitle: input.sourceTitle },
         run_after: new Date(),
         locked_at: null,
+        locked_by: null,
         processed_at: null,
       },
       create: {

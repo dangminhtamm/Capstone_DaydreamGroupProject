@@ -1,17 +1,8 @@
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { AUDIO_ATTACHMENT_MAX_BYTES } from './attachment-upload-policy';
 import { indexMemoryFromAttachment } from '@second-brain/ai';
 import { insertMemoryChunks, pruneMemoryChunksForSource } from '@second-brain/db';
 import { UploadController } from './upload.controller';
-
-const mockGenerateContent = jest.fn();
-
-jest.mock('@google/generative-ai', () => ({
-  GoogleGenerativeAI: jest.fn().mockImplementation(() => ({
-    getGenerativeModel: jest.fn().mockReturnValue({
-      generateContent: mockGenerateContent,
-    }),
-  })),
-}));
 
 jest.mock('@second-brain/ai', () => ({
   indexMemoryFromAttachment: jest.fn(),
@@ -52,11 +43,6 @@ describe('UploadController', () => {
     jest.clearAllMocks();
     process.env.TUTURUUU_AI_API_KEY = 'test-tuturuuu-key';
     controller = new UploadController(storageService as any, prisma as any);
-    mockGenerateContent.mockResolvedValue({
-      response: {
-        text: () => 'Extracted PDF text about the Alpha research plan.',
-      },
-    });
     (indexMemoryFromAttachment as jest.Mock).mockImplementation(async (input) => {
       await input.insertChunks([
         {
@@ -209,6 +195,68 @@ describe('UploadController', () => {
     });
   });
 
+  it('stores audio attachments as pending transcription jobs', async () => {
+    const entryDate = new Date('2026-05-18T09:00:00.000Z');
+    prisma.user.findUnique.mockResolvedValue({ id: 'user-1' });
+    prisma.diaryEntry.findFirst.mockResolvedValue({
+      id: 'diary-1',
+      entry_date: entryDate,
+    });
+    storageService.uploadFile.mockResolvedValue({
+      path: 'attachments/meeting.m4a',
+    });
+    prisma.attachment.create.mockResolvedValue({
+      id: 'attachment-audio-1',
+      diary_entry_id: 'diary-1',
+      storage_path: 'attachments/meeting.m4a',
+      file_type: 'audio/mp4',
+      extracted_text: null,
+      created_at: entryDate,
+    });
+
+    const result = await controller.uploadAttachment(
+      { user: { userId: 'supabase-user-1' } },
+      'diary-1',
+      fileFixture('meeting.m4a', 'audio/mp4', 'audio-bytes'),
+    );
+
+    expect(prisma.attachment.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        diary_entry_id: 'diary-1',
+        file_type: 'audio/mp4',
+      }),
+    });
+    expect(prisma.indexingOutbox.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          job_type_source_type_source_id: {
+            job_type: 'index_memory',
+            source_type: 'attachment',
+            source_id: 'attachment-audio-1',
+          },
+        },
+      }),
+    );
+    expect(result).toMatchObject({
+      extractionStatus: 'pending',
+      memoryIndexingStatus: 'queued',
+      attachment: { fileType: 'audio/mp4' },
+    });
+  });
+
+  it('rejects audio files larger than the audio upload limit', async () => {
+    const file = fileFixture('long-recording.mp3', 'audio/mpeg', 'audio');
+    file.size = AUDIO_ATTACHMENT_MAX_BYTES + 1;
+
+    await expect(controller.uploadAttachment(
+      { user: { userId: 'supabase-user-1' } },
+      'diary-1',
+      file,
+    )).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(storageService.uploadFile).not.toHaveBeenCalled();
+  });
+
   it('removes the uploaded storage object if attachment DB creation fails', async () => {
     const entryDate = new Date('2026-05-18T09:00:00.000Z');
     prisma.user.findUnique.mockResolvedValue({ id: 'user-1' });
@@ -259,7 +307,6 @@ describe('UploadController', () => {
     );
 
     expect(storageService.downloadFile).not.toHaveBeenCalled();
-    expect(mockGenerateContent).not.toHaveBeenCalled();
     expect(prisma.attachment.update).not.toHaveBeenCalled();
     expect(indexMemoryFromAttachment).not.toHaveBeenCalled();
     expect(prisma.indexingOutbox.upsert).toHaveBeenCalledWith(

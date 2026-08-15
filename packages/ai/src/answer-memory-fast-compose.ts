@@ -8,6 +8,7 @@ import {
   cleanMemoryText,
   formatFallbackSourceDate,
   formatLocalizedMemoryBullet,
+  formatSourceLabeledMemoryBullet,
 } from "./answer-memory-format.ts";
 import {
   includesAny,
@@ -17,6 +18,7 @@ import {
   isNoisyFallbackSource,
   scoreSourceForIntent,
 } from "./answer-memory-scoring.ts";
+import { getFastPerSourceLimit } from "./answer-memory-intent-profiles.ts";
 
 export function prepareFastCitations(
   sources: MemoryCitation[],
@@ -246,10 +248,14 @@ function formatFastFact(
   intent: MemoryIntent,
   lang: ResponseLanguage,
 ): string {
-  const base = lang === "vi"
+  const base = citation.sourceType === "diary" && lang === "vi"
     ? formatLocalizedMemoryBullet(citation, intent, lang)
     : cleanMemoryText(citation.quote);
   const cleaned = trimTrailingPunctuation(base);
+
+  if (citation.sourceType !== "diary") {
+    return sentenceCase(formatSourceLabeledMemoryBullet(citation, cleaned, lang));
+  }
 
   if (lang === "vi") {
     return sentenceCase(naturalizeVietnameseFactIfVietnamese(cleaned));
@@ -290,13 +296,7 @@ function getPerSourceLimit(
   source: MemoryCitation,
   intent: MemoryIntent,
 ): number {
-  if (source.sourceType === "diary" && ["generic", "progress", "task"].includes(intent)) {
-    return 2;
-  }
-  if (source.sourceType === "calendar" || source.sourceType === "attachment") {
-    return 2;
-  }
-  return 1;
+  return getFastPerSourceLimit(intent, source.sourceType);
 }
 
 function buildFastFactFingerprint(source: MemoryCitation): Set<string> {

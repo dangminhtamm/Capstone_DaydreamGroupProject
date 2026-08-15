@@ -19,6 +19,7 @@ import {
   getGoogleConnectionStatus,
   recordGoogleSyncFailure,
   recordGoogleSyncSuccess,
+  shouldStoreGoogleRawPayloads,
 } from '../google-connections/google-connections';
 
 type GmailMessageRow = {
@@ -29,7 +30,18 @@ type GmailMessageRow = {
   snippet: string | null;
   body: string;
   received_at: Date | null;
-  raw_json: gmail_v1.Schema$Message;
+  raw_json: gmail_v1.Schema$Message | null;
+};
+
+type GoogleUserWithTokens = {
+  id: string;
+  google_access_token: string | null;
+  google_refresh_token: string | null;
+};
+
+type GmailClientContext = {
+  user: GoogleUserWithTokens;
+  gmail: gmail_v1.Gmail;
 };
 
 type GoogleApiErrorDetails = {
@@ -109,7 +121,7 @@ export class GmailService {
 
     return {
       source: 'gmail',
-      oauthMode: 'all_google_sources',
+      oauthMode: this.getOauthMode(connection.scopes),
       connected: connection.connected && fallbackConnected,
       scopes: connection.scopes,
       requestedScopes: GOOGLE_SOURCE_SCOPES.gmail,
@@ -133,6 +145,17 @@ export class GmailService {
     try {
       return await this.prisma.gmailMessage.findMany({
         where: { user_id: user.id },
+        select: {
+          id: true,
+          external_id: true,
+          thread_id: true,
+          sender: true,
+          subject: true,
+          snippet: true,
+          received_at: true,
+          created_at: true,
+          updated_at: true,
+        },
         orderBy: [{ received_at: 'desc' }, { updated_at: 'desc' }],
         take: 50,
       });
@@ -141,31 +164,101 @@ export class GmailService {
     }
   }
 
-  async syncGmailMessages(supabaseId: string, options: { limit?: number } = {}) {
-    const user = await this.getGoogleUser(supabaseId);
-    const oauth2Client = this.getOAuthClient();
-    oauth2Client.setCredentials({
-      access_token: decryptOAuthToken(user.google_access_token),
-      refresh_token: decryptOAuthToken(user.google_refresh_token),
-    });
-    oauth2Client.on('tokens', async (tokens) => {
-      await this.prisma.user.update({
-        where: { id: user.id },
-        data: {
-          ...(tokens.access_token && { google_access_token: encryptOAuthToken(tokens.access_token) }),
-          ...(tokens.refresh_token && { google_refresh_token: encryptOAuthToken(tokens.refresh_token) }),
-        },
-      });
-    });
+  async listImportCandidates(supabaseId: string, options: { limit?: number; query?: string } = {}) {
+    const { user, gmail } = await this.getGmailClientContext(supabaseId);
+    const maxMessages = Math.min(Math.max(options.limit ?? 20, 1), 50);
 
-    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+    try {
+      const listResponse = await gmail.users.messages.list({
+        userId: 'me',
+        maxResults: maxMessages,
+        q: this.buildGmailSearchQuery(options.query),
+      });
+      const messageRefs = listResponse.data.messages ?? [];
+      const metadataMessages: gmail_v1.Schema$Message[] = [];
+
+      for (const ref of messageRefs) {
+        if (!ref.id) continue;
+        const response = await gmail.users.messages.get({
+          userId: 'me',
+          id: ref.id,
+          format: 'metadata',
+          metadataHeaders: ['From', 'Subject', 'Date'],
+        });
+        metadataMessages.push(response.data);
+      }
+
+      const externalIds = metadataMessages.map((message) => message.id).filter((id): id is string => Boolean(id));
+      const importedIds = externalIds.length
+        ? await this.prisma.gmailMessage.findMany({
+            where: {
+              user_id: user.id,
+              external_id: { in: externalIds },
+            },
+            select: { external_id: true },
+          })
+        : [];
+      const importedSet = new Set(importedIds.map((message) => message.external_id));
+
+      return {
+        message: 'Gmail import candidates fetched successfully.',
+        count: metadataMessages.length,
+        candidates: metadataMessages
+          .filter((message) => message.id)
+          .map((message) => this.toCandidate(message, importedSet.has(message.id!))),
+      };
+    } catch (error) {
+      await recordGoogleSyncFailure(this.prisma, { userId: user.id, source: 'gmail', error });
+      this.throwGoogleApiException(error);
+      console.error('Failed to list Gmail import candidates:', this.getSafeErrorContext(error));
+      throw new InternalServerErrorException('Could not list Gmail messages for import.');
+    }
+  }
+
+  async importSelectedMessages(supabaseId: string, messageIds: string[]) {
+    const { user, gmail } = await this.getGmailClientContext(supabaseId);
+    const selectedIds = this.normalizeSelectedIds(messageIds, 50);
+
+    try {
+      const normalizedMessages: GmailMessageRow[] = [];
+      for (const messageId of selectedIds) {
+        const response = await gmail.users.messages.get({
+          userId: 'me',
+          id: messageId,
+          format: 'full',
+        });
+        const normalized = this.normalizeMessage(response.data);
+        if (normalized) normalizedMessages.push(normalized);
+      }
+
+      const queuedIndexingJobs = await this.saveMessagesAndQueueIndexing(user.id, normalizedMessages);
+      await recordGoogleSyncSuccess(this.prisma, { userId: user.id, source: 'gmail' });
+
+      return {
+        message: 'Selected Gmail messages imported; Gmail memory indexing queued.',
+        syncedCount: normalizedMessages.length,
+        requestedCount: selectedIds.length,
+        queuedIndexingJobs,
+        memoryIndexingStatus: 'queued',
+      };
+    } catch (error) {
+      await recordGoogleSyncFailure(this.prisma, { userId: user.id, source: 'gmail', error });
+      this.throwGoogleApiException(error);
+      this.throwGmailDatabaseException(error, 'Could not import selected Gmail messages.');
+      console.error('Failed to import selected Gmail messages:', this.getSafeErrorContext(error));
+      throw new InternalServerErrorException('Could not import selected Gmail messages. Check API logs for details.');
+    }
+  }
+
+  async syncGmailMessages(supabaseId: string, options: { limit?: number } = {}) {
+    const { user, gmail } = await this.getGmailClientContext(supabaseId);
     const maxMessages = Math.min(Math.max(options.limit ?? 25, 1), 100);
 
     try {
       const listResponse = await gmail.users.messages.list({
         userId: 'me',
         maxResults: maxMessages,
-        q: 'newer_than:90d -in:spam -in:trash',
+        q: this.buildGmailSearchQuery(),
       });
 
       const messageRefs = listResponse.data.messages ?? [];
@@ -182,50 +275,7 @@ export class GmailService {
         if (normalized) normalizedMessages.push(normalized);
       }
 
-      const queuedIndexingJobs = await this.prisma.$transaction(async (tx) => {
-        let queuedCount = 0;
-
-        for (const message of normalizedMessages) {
-          const savedMessage = await tx.gmailMessage.upsert({
-            where: {
-              user_id_external_id: {
-                user_id: user.id,
-                external_id: message.external_id,
-              },
-            },
-            update: {
-              thread_id: message.thread_id,
-              sender: message.sender,
-              subject: message.subject,
-              snippet: message.snippet,
-              body: message.body,
-              received_at: message.received_at,
-              raw_json: message.raw_json as any,
-            },
-            create: {
-              user_id: user.id,
-              external_id: message.external_id,
-              thread_id: message.thread_id,
-              sender: message.sender,
-              subject: message.subject,
-              snippet: message.snippet,
-              body: message.body,
-              received_at: message.received_at,
-              raw_json: message.raw_json as any,
-            },
-          });
-
-          await this.enqueueGmailIndexingJob(tx, {
-            userId: user.id,
-            gmailMessageId: savedMessage.id,
-            externalId: savedMessage.external_id,
-            subject: savedMessage.subject,
-          });
-          queuedCount += 1;
-        }
-
-        return queuedCount;
-      });
+      const queuedIndexingJobs = await this.saveMessagesAndQueueIndexing(user.id, normalizedMessages);
 
       await recordGoogleSyncSuccess(this.prisma, { userId: user.id, source: 'gmail' });
 
@@ -244,6 +294,106 @@ export class GmailService {
     }
   }
 
+  private async getGmailClientContext(supabaseId: string): Promise<GmailClientContext> {
+    const user = await this.getGoogleUser(supabaseId);
+    const oauth2Client = this.getOAuthClient();
+    oauth2Client.setCredentials({
+      access_token: decryptOAuthToken(user.google_access_token),
+      refresh_token: decryptOAuthToken(user.google_refresh_token),
+    });
+    oauth2Client.on('tokens', async (tokens) => {
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: {
+          ...(tokens.access_token && { google_access_token: encryptOAuthToken(tokens.access_token) }),
+          ...(tokens.refresh_token && { google_refresh_token: encryptOAuthToken(tokens.refresh_token) }),
+        },
+      });
+    });
+
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+    return { user, gmail };
+  }
+
+  private buildGmailSearchQuery(query?: string) {
+    const normalizedQuery = query?.trim();
+    return [normalizedQuery, 'newer_than:365d', '-in:spam', '-in:trash']
+      .filter((part): part is string => Boolean(part))
+      .join(' ');
+  }
+
+  private normalizeSelectedIds(messageIds: string[], maxItems: number) {
+    return Array.from(new Set(messageIds.map((id) => id.trim()).filter(Boolean))).slice(0, maxItems);
+  }
+
+  private toCandidate(message: gmail_v1.Schema$Message, alreadyImported: boolean) {
+    const headers = message.payload?.headers ?? [];
+    const headerDate = this.getHeader(headers, 'Date');
+    const internalDate = message.internalDate ? Number(message.internalDate) : NaN;
+    const receivedAt = Number.isFinite(internalDate)
+      ? new Date(internalDate)
+      : headerDate
+        ? new Date(headerDate)
+        : null;
+
+    return {
+      id: message.id!,
+      threadId: message.threadId ?? null,
+      sender: this.sanitizePostgresText(this.getHeader(headers, 'From') || 'Unknown sender'),
+      subject: this.sanitizePostgresText(this.getHeader(headers, 'Subject') || '(no subject)'),
+      snippet: message.snippet ? this.sanitizePostgresText(message.snippet) : null,
+      receivedAt: receivedAt && Number.isFinite(receivedAt.getTime()) ? receivedAt.toISOString() : null,
+      alreadyImported,
+    };
+  }
+
+  private async saveMessagesAndQueueIndexing(userId: string, messages: GmailMessageRow[]) {
+    return this.prisma.$transaction(async (tx) => {
+      let queuedCount = 0;
+
+      for (const message of messages) {
+        const savedMessage = await tx.gmailMessage.upsert({
+          where: {
+            user_id_external_id: {
+              user_id: userId,
+              external_id: message.external_id,
+            },
+          },
+          update: {
+            thread_id: message.thread_id,
+            sender: message.sender,
+            subject: message.subject,
+            snippet: message.snippet,
+            body: message.body,
+            received_at: message.received_at,
+            raw_json: message.raw_json as any,
+          },
+          create: {
+            user_id: userId,
+            external_id: message.external_id,
+            thread_id: message.thread_id,
+            sender: message.sender,
+            subject: message.subject,
+            snippet: message.snippet,
+            body: message.body,
+            received_at: message.received_at,
+            raw_json: message.raw_json as any,
+          },
+        });
+
+        await this.enqueueGmailIndexingJob(tx, {
+          userId,
+          gmailMessageId: savedMessage.id,
+          externalId: savedMessage.external_id,
+          subject: savedMessage.subject,
+        });
+        queuedCount += 1;
+      }
+
+      return queuedCount;
+    });
+  }
+
   private normalizeMessage(message: gmail_v1.Schema$Message): GmailMessageRow | null {
     if (!message.id) return null;
 
@@ -257,7 +407,9 @@ export class GmailService {
       : headerDate
         ? new Date(headerDate)
         : null;
-    const body = this.sanitizePostgresText(this.extractBody(message.payload) || message.snippet || '');
+    const body = this.limitStoredBody(
+      this.sanitizePostgresText(this.extractBody(message.payload) || message.snippet || ''),
+    );
 
     return {
       external_id: message.id,
@@ -267,7 +419,9 @@ export class GmailService {
       snippet: message.snippet ? this.sanitizePostgresText(message.snippet) : null,
       body,
       received_at: receivedAt && Number.isFinite(receivedAt.getTime()) ? receivedAt : null,
-      raw_json: this.sanitizeJsonValue(message) as gmail_v1.Schema$Message,
+      raw_json: shouldStoreGoogleRawPayloads()
+        ? this.sanitizeJsonValue(message) as gmail_v1.Schema$Message
+        : null,
     };
   }
 
@@ -338,6 +492,20 @@ export class GmailService {
     return JSON.parse(JSON.stringify(value)) as T;
   }
 
+  private limitStoredBody(value: string) {
+    const maxChars = Number(process.env.GOOGLE_GMAIL_BODY_MAX_CHARS ?? 20_000);
+    if (!Number.isFinite(maxChars) || maxChars <= 0) return value;
+    return value.length > maxChars ? value.slice(0, maxChars).trimEnd() : value;
+  }
+
+  private getOauthMode(scopes: string[]) {
+    const workspaceScopes = getAllGoogleWorkspaceScopes();
+    const normalizedScopes = new Set(scopes);
+    return workspaceScopes.every((scope) => normalizedScopes.has(scope))
+      ? 'all_google_sources'
+      : 'source_scoped';
+  }
+
   private async enqueueGmailIndexingJob(
     tx: any,
     input: {
@@ -366,6 +534,7 @@ export class GmailService {
         },
         run_after: new Date(),
         locked_at: null,
+        locked_by: null,
         processed_at: null,
       },
       create: {

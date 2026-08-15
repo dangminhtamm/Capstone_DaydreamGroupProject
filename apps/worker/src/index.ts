@@ -1,6 +1,8 @@
 // apps/worker/src/index.ts
+import './env';
 import { prisma } from './lib/prisma';
 import { captureWorkerException } from './instrument';
+import { renderWorkerMetrics, WORKER_METRICS_CONTENT_TYPE } from './metrics';
 
 // 1. Import all background jobs with a single line
 import {
@@ -55,7 +57,10 @@ function startWorkerHeartbeat() {
 function installShutdownHandler(signal: NodeJS.Signals) {
     process.on(signal, () => {
         if (heartbeatTimer) clearInterval(heartbeatTimer);
-        void writeWorkerHeartbeat('stopping', `Worker received ${signal}.`).finally(() => {
+        void Promise.allSettled([
+            writeWorkerHeartbeat('stopping', `Worker received ${signal}.`),
+            DataIngestionJob.stopRealtimeListener(),
+        ]).finally(() => {
             void prisma.$disconnect().finally(() => process.exit(0));
         });
     });
@@ -97,11 +102,23 @@ import http from 'http';
 
 const port = Number(process.env.PORT ?? 3002);
 const server = http.createServer((req, res) => {
-  if (req.url === '/health' || req.url === '/') {
+  const pathname = req.url ? new URL(req.url, 'http://worker.local').pathname : '/';
+
+  if (pathname === '/health' || pathname === '/') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ status: 'ok', workerId: WORKER_HEARTBEAT_ID, uptime: process.uptime() }));
     return;
   }
+
+  if (pathname === '/metrics') {
+    res.writeHead(200, {
+      'Content-Type': WORKER_METRICS_CONTENT_TYPE,
+      'Cache-Control': 'no-store',
+    });
+    res.end(renderWorkerMetrics(DataIngestionJob.getMetrics()));
+    return;
+  }
+
   res.writeHead(404);
   res.end();
 });

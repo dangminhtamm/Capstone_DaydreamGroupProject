@@ -32,6 +32,10 @@ import {
   isBroadTemporalSynthesisQuestion,
   requiresGenerativeReasoning,
 } from "./answer-memory-routing.ts";
+import {
+  getGenericFastMaxCitations,
+  getTemporalFastMaxCitations,
+} from "./answer-memory-intent-profiles.ts";
 import type { MemorySearchHit, RetrievalFilters } from "./retrieval.ts";
 
 export function answerSingleDayFastPath(
@@ -108,7 +112,7 @@ export function answerTemporalRangeFastPath(
     intent,
     question,
     focused: !broadSynthesis,
-    maxCitations: broadSynthesis || intent === "progress" ? 6 : 3,
+    maxCitations: getTemporalFastMaxCitations(intent, broadSynthesis),
   });
 
   if (!citations.length) return null;
@@ -184,7 +188,7 @@ export function answerFastExtractiveFromChunks(
     intent,
     question,
     focused: !broadSynthesis,
-    maxCitations: broadSynthesis ? 6 : 1,
+    maxCitations: getGenericFastMaxCitations(intent, broadSynthesis),
   });
 
   if (!hasFocusedFastSupport(question, citations, broadSynthesis)) {

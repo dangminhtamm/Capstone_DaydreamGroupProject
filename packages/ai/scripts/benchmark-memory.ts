@@ -91,7 +91,7 @@ if (!hasAiGatewayKey()) {
           memoryRecallPass: retrievalMs <= 500,
           answerGenerationIncluded: includeAnswer,
           note: includeAnswer
-            ? "memoryRecallPass only evaluates DB retrieval after query embedding; totalMs includes Gemini embedding + answer generation."
+            ? "memoryRecallPass only evaluates DB retrieval after query embedding; totalMs includes Tuturuuu embedding + answer generation."
             : "Recall-only benchmark: totalRecallMs = embeddingMs + retrievalMs. Set MEMORY_BENCHMARK_INCLUDE_ANSWER=true to include answer generation.",
         });
 

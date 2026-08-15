@@ -1,10 +1,13 @@
 import type { MemoryCitation } from "./answer-utils.ts";
 import type { RetrievalFilters } from "./retrieval.ts";
+import type { generateTuturuuuJsonWithMeta } from "./tuturuuu-json.ts";
+import type { GroundedAnswer } from "./answer-memory-schema.ts";
+import type { FastTranslationGenerator } from "./answer-memory-translation.ts";
 
 export type AnswerMode =
   | "cache"
   | "fast_path"
-  | "gemini"
+  | "tuturuuu"
   | "extractive_fallback"
   | "no_memory";
 
@@ -16,6 +19,7 @@ export type MemoryIntent =
   | "blocker"
   | "latency"
   | "gmail"
+  | "drive"
   | "google_contacts"
   | "mood"
   | "calendar"
@@ -91,6 +95,7 @@ export interface MemoryDebugTrace {
     similarity: number;
     vectorSimilarity: number;
     lexicalScore: number;
+    entityScore: number;
     distance: number | null;
     quote: string;
   }>;
@@ -122,4 +127,9 @@ export interface AnswerMemoryOptions {
   responseLanguage?: ResponseLanguage;
   answerStrategy?: AnswerStrategy;
   timeZone?: string;
+  embeddingProvider?: {
+    embedQuery(text: string): Promise<number[]>;
+  };
+  generateAnswer?: typeof generateTuturuuuJsonWithMeta<GroundedAnswer>;
+  generateTranslation?: FastTranslationGenerator;
 }

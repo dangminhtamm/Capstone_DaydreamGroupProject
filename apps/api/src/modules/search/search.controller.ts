@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Param, Post, Query, Request, UseGuards }
 import { SearchService } from './search.service';
 import { SearchQueryDto } from './dto/search-query.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import type { AuthenticatedRequestUser } from '../auth/user-role';
 
 @Controller('search')
 @UseGuards(JwtAuthGuard)
@@ -9,8 +10,8 @@ export class SearchController {
   constructor(private readonly searchService: SearchService) {}
 
   @Post()
-  async ask(@Request() req, @Body() queryDto: SearchQueryDto) {
-    return this.searchService.answerQuestion(req.user.userId, queryDto);
+  async ask(@Request() req: { user: AuthenticatedRequestUser }, @Body() queryDto: SearchQueryDto) {
+    return this.searchService.answerQuestion(req.user, queryDto);
   }
 
   @Get('history')
@@ -29,7 +30,7 @@ export class SearchController {
   }
 
   @Get()
-  async find(@Request() req, @Query() queryDto: SearchQueryDto) {
-    return this.searchService.answerQuestion(req.user.userId, queryDto);
+  async find(@Request() req: { user: AuthenticatedRequestUser }, @Query() queryDto: SearchQueryDto) {
+    return this.searchService.answerQuestion(req.user, queryDto);
   }
 }

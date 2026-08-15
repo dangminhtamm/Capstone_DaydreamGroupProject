@@ -5,11 +5,6 @@ import type {
   ResponseLanguage,
 } from "./answer-memory-types.ts";
 import {
-  hasCitationEvidence,
-  hasGmailEvidence,
-  hasLatencyEvidence,
-  includesAny,
-  isGoogleContactsSearchText,
   isStressIntent,
   normalizeForIntent,
 } from "./answer-memory-intents.ts";
@@ -19,7 +14,7 @@ export function formatSingleDayAnswer(
   dateLabel: string,
   lang: ResponseLanguage,
 ): string {
-  const facts = dedupeSimilarFacts(citations.map((citation) => formatSingleDayFact(citation)))
+  const facts = dedupeSimilarFacts(citations.map((citation) => formatSingleDayFact(citation, lang)))
     .slice(0, 4);
 
   if (!facts.length) {
@@ -152,7 +147,15 @@ export function formatLocalizedMemoryBullet(
   lang: ResponseLanguage,
 ): string {
   const fallback = formatMemoryBullet(citation);
-  if (lang !== "vi") return fallback;
+  if (lang !== "vi") {
+    return sentenceCase(
+      trimTrailingPunctuation(
+        citation.sourceType === "diary"
+          ? fallback
+          : formatSourceLabeledMemoryBullet(citation, fallback, lang),
+      ),
+    );
+  }
 
   return sentenceCase(
     trimTrailingPunctuation(
@@ -219,7 +222,12 @@ export function formatIntentEvidenceAnswer(
       case "latency":
         return [`Lý do tách retrieval latency khỏi answer generation là:`, bullets].join("\n");
       case "gmail":
-        return [`Quyết định về Gmail là:`, bullets].join("\n");
+        return [
+          citations.some((citation) => citation.sourceType === "gmail")
+            ? "Email Gmail liên quan là:"
+            : "Quyết định về Gmail là:",
+          bullets,
+        ].join("\n");
       case "google_contacts":
         return [`Kế hoạch Google Contacts là:`, bullets].join("\n");
       case "decision":
@@ -241,7 +249,12 @@ export function formatIntentEvidenceAnswer(
     case "latency":
       return [`The reason for separating retrieval latency from answer generation was:`, bullets].join("\n");
     case "gmail":
-      return [`The Gmail decision was:`, bullets].join("\n");
+      return [
+        citations.some((citation) => citation.sourceType === "gmail")
+          ? "The relevant Gmail email was:"
+          : "The Gmail decision was:",
+        bullets,
+      ].join("\n");
     case "google_contacts":
       return [`The Google Contacts plan was:`, bullets].join("\n");
     case "decision":
@@ -364,6 +377,38 @@ export function buildQuestionAwareFallbackAnswer(
   return [`${lead} The most relevant memories were:`, bullets].join("\n");
 }
 
+export function buildQuestionAwareFallbackAnswerFromSources(
+  lang: ResponseLanguage,
+  question: string,
+  sources: MemoryCitation[],
+  modelError: NonNullable<AnswerMemoryResult["modelError"]>,
+  fallbackTopic: MemoryIntent,
+  options: {
+    broadSynthesis?: boolean;
+    timeZone?: string;
+  } = {},
+): string {
+  const bullets = sources
+    .map((source) => {
+      const date = formatFallbackSourceDate(source.occurredAt, lang, options.timeZone);
+      return `- ${date}: ${formatLocalizedMemoryBullet(source, fallbackTopic, lang)}.`;
+    })
+    .join("\n");
+
+  if (options.broadSynthesis || shouldGroupFallbackSummary(question, fallbackTopic, sources)) {
+    const grouped = buildGroupedSynthesisFallbackAnswer(
+      lang,
+      sources,
+      modelError,
+      fallbackTopic,
+      options.timeZone,
+    );
+    if (grouped) return grouped;
+  }
+
+  return buildQuestionAwareFallbackAnswer(lang, question, bullets, modelError, fallbackTopic);
+}
+
 function formatValidationFallbackLead(message: string, lang: ResponseLanguage): string {
   const normalized = message.toLowerCase();
   const isGroundingIssue =
@@ -373,7 +418,7 @@ function formatValidationFallbackLead(message: string, lang: ResponseLanguage): 
 
   if (lang === "vi") {
     return isGroundingIssue
-      ? "Mình dùng trực tiếp các ký ức có citation chắc nhất."
+      ? "Mình dùng trực tiếp các ký ức có nguồn chắc chắn nhất."
       : "Mình dùng trực tiếp các ký ức liên quan nhất.";
   }
 
@@ -381,6 +426,228 @@ function formatValidationFallbackLead(message: string, lang: ResponseLanguage): 
     ? "I am using the most strongly cited memories directly."
     : "I am using the most relevant memories directly.";
 }
+
+function shouldGroupFallbackSummary(
+  question: string,
+  fallbackTopic: MemoryIntent,
+  sources: MemoryCitation[],
+): boolean {
+  if (sources.length < 2) return false;
+  if (fallbackTopic === "progress") return true;
+
+  const normalized = normalizeForIntent(question);
+  return /\b(summarize|summary|tong hop|tom tat|tóm tắt|weekly|monthly|yearly|week|month|year|tuan|tuần|thang|tháng|nam|năm)\b/u
+    .test(normalized);
+}
+
+function buildGroupedSynthesisFallbackAnswer(
+  lang: ResponseLanguage,
+  sources: MemoryCitation[],
+  modelError: NonNullable<AnswerMemoryResult["modelError"]>,
+  fallbackTopic: MemoryIntent,
+  timeZone = "UTC",
+): string | null {
+  const groups = groupSourcesForSynthesis(sources, fallbackTopic);
+  const sections = [
+    formatSynthesisSection(lang, "mainWork", groups.mainWork, fallbackTopic, timeZone),
+    formatSynthesisSection(lang, "blockers", groups.blockers, fallbackTopic, timeZone),
+    formatSynthesisSection(lang, "decisions", groups.decisions, fallbackTopic, timeZone),
+    formatSynthesisSection(lang, "nextSteps", groups.nextSteps, fallbackTopic, timeZone),
+  ].filter((section): section is string => Boolean(section));
+
+  if (!sections.length) return null;
+
+  const lead = formatValidationFallbackLead(modelError.message, lang);
+  const intro = lang === "vi"
+    ? `${lead} Mình gom lại theo nhóm để dễ đọc:`
+    : `${lead} I grouped the strongest evidence into:`;
+
+  return [intro, ...sections].join("\n\n");
+}
+
+type SynthesisGroupKey = "mainWork" | "blockers" | "decisions" | "nextSteps";
+
+function groupSourcesForSynthesis(
+  sources: MemoryCitation[],
+  fallbackTopic: MemoryIntent,
+): Record<SynthesisGroupKey, MemoryCitation[]> {
+  const groups: Record<SynthesisGroupKey, MemoryCitation[]> = {
+    mainWork: [],
+    blockers: [],
+    decisions: [],
+    nextSteps: [],
+  };
+  const seen = new Set<string>();
+
+  for (const source of sources) {
+    const key = `${source.sourceType}:${source.sourceId}:${source.chunkId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const group = classifySynthesisSource(source, fallbackTopic);
+    groups[group].push(source);
+  }
+
+  return {
+    mainWork: groups.mainWork.slice(0, 6),
+    blockers: groups.blockers.slice(0, 3),
+    decisions: groups.decisions.slice(0, 3),
+    nextSteps: groups.nextSteps.slice(0, 3),
+  };
+}
+
+function classifySynthesisSource(
+  source: MemoryCitation,
+  fallbackTopic: MemoryIntent,
+): SynthesisGroupKey {
+  const normalized = normalizeForIntent(
+    `${source.sourceType} ${source.chunkType} ${source.sourceTitle ?? ""} ${source.claim ?? ""} ${source.quote}`,
+  );
+  const chunkType = source.chunkType.toLowerCase();
+
+  if (
+    fallbackTopic === "blocker" ||
+    chunkType.includes("blocker") ||
+    includesSynthesisCue(normalized, BLOCKER_CUES)
+  ) {
+    return "blockers";
+  }
+
+  if (
+    fallbackTopic === "task" ||
+    chunkType.includes("action") ||
+    chunkType.includes("task") ||
+    chunkType.includes("follow") ||
+    includesSynthesisCue(normalized, NEXT_STEP_CUES)
+  ) {
+    return "nextSteps";
+  }
+
+  if (
+    fallbackTopic === "decision" ||
+    chunkType.includes("decision") ||
+    includesSynthesisCue(normalized, DECISION_CUES)
+  ) {
+    return "decisions";
+  }
+
+  return "mainWork";
+}
+
+function formatSynthesisSection(
+  lang: ResponseLanguage,
+  group: SynthesisGroupKey,
+  sources: MemoryCitation[],
+  fallbackTopic: MemoryIntent,
+  timeZone: string,
+): string | null {
+  if (!sources.length) return null;
+
+  const title = getSynthesisSectionTitle(group, lang);
+  const bullets = sources
+    .map((source) => {
+      const date = formatFallbackSourceDate(source.occurredAt, lang, timeZone);
+      return `- ${date}: ${formatLocalizedMemoryBullet(source, fallbackTopic, lang)}.`;
+    })
+    .join("\n");
+
+  return `${title}\n${bullets}`;
+}
+
+function getSynthesisSectionTitle(group: SynthesisGroupKey, lang: ResponseLanguage): string {
+  if (lang === "vi") {
+    switch (group) {
+      case "mainWork":
+        return "Công việc chính";
+      case "blockers":
+        return "Blockers/rủi ro";
+      case "decisions":
+        return "Quyết định quan trọng";
+      case "nextSteps":
+        return "Next steps";
+    }
+  }
+
+  switch (group) {
+    case "mainWork":
+      return "Main work";
+    case "blockers":
+      return "Blockers/risks";
+    case "decisions":
+      return "Key decisions";
+    case "nextSteps":
+      return "Next steps";
+  }
+}
+
+function includesSynthesisCue(normalized: string, cues: readonly string[]): boolean {
+  return cues.some((cue) => normalized.includes(cue));
+}
+
+const BLOCKER_CUES = [
+  "blocker",
+  "blocked",
+  "risk",
+  "issue",
+  "problem",
+  "failed",
+  "failure",
+  "error",
+  "missing",
+  "stuck",
+  "chua xong",
+  "chưa xong",
+  "loi",
+  "lỗi",
+  "rui ro",
+  "rủi ro",
+  "kẹt",
+  "ket",
+];
+
+const DECISION_CUES = [
+  "decide",
+  "decided",
+  "decision",
+  "agreed",
+  "choose",
+  "chosen",
+  "plan",
+  "planned",
+  "scope",
+  "priority",
+  "prioritize",
+  "quyet dinh",
+  "quyết định",
+  "ke hoach",
+  "kế hoạch",
+  "uu tien",
+  "ưu tiên",
+];
+
+const NEXT_STEP_CUES = [
+  "next step",
+  "next steps",
+  "todo",
+  "to do",
+  "follow up",
+  "follow-up",
+  "need to",
+  "needs to",
+  "remaining",
+  "prepare",
+  "should",
+  "must",
+  "action item",
+  "can lam",
+  "cần làm",
+  "viec tiep theo",
+  "việc tiếp theo",
+  "tiep theo",
+  "tiếp theo",
+  "chuan bi",
+  "chuẩn bị",
+];
 
 export function formatFallbackSourceDate(
   value: string,
@@ -402,125 +669,108 @@ function summarizeCitationInVietnamese(
   citation: MemoryCitation,
   intent: MemoryIntent,
 ): string | null {
-  const searchable = normalizeForIntent(
-    `${citation.sourceTitle ?? ""} ${citation.chunkType} ${citation.quote}`,
-  );
+  const cleaned = formatMemoryBullet(citation, getVietnameseCitationMaxLength(intent));
+  if (!cleaned) return null;
 
-  if (intent === "feedback") {
-    if (hasCitationEvidence(searchable)) {
-      return "Linh nhấn mạnh rằng mỗi câu trả lời AI phải có citation rõ ràng, và citation card cần đủ dễ thấy để evaluator tin tưởng câu trả lời";
-    }
-    if (includesAny(searchable, ["missed the strongest source", "citation support was weak"])) {
-      return "Tam ghi nhận vấn đề search quality: câu trả lời đôi khi đúng chủ đề nhưng bỏ lỡ source mạnh nhất, hoặc quá tự tin khi citation support còn yếu";
-    }
-    if (includesAny(searchable, ["basic journal", "khong chi la mot journal", "không chỉ là một journal"])) {
-      return "Linh góp ý app không nên tạo cảm giác chỉ là một journal cơ bản";
-    }
+  if (citation.sourceType === "diary" && looksVietnameseText(cleaned)) {
+    return naturalizeVietnameseDayFact(cleaned);
   }
 
-  if (intent === "blocker") {
-    if (includesAny(searchable, ["main blocker", "worker is running", "worker running"])) {
-      const quotaRisk = includesAny(searchable, ["gemini quota", "quota during live demo"])
-        ? " Rủi ro khác là Gemini quota trong live demo."
-        : "";
-      return `Blocker chính là phải bảo đảm worker chạy trước final rehearsal; nếu worker tắt, diary và attachment được lưu nhưng memory chunks chưa được tạo.${quotaRisk}`;
-    }
-    if (includesAny(searchable, ["gemini quota", "quota during live demo"])) {
-      return "Rủi ro khác là Gemini quota trong live demo, nên nhóm cần chuẩn bị fast path và fallback evidence card";
-    }
-  }
-
-  if (intent === "latency") {
-    if (includesAny(searchable, ["measure retrieval latency separately", "retrieval latency separately"])) {
-      return "Nhóm tách retrieval latency khỏi Gemini answer generation để đo riêng embedding time, database retrieval, reranking, time to first result, answer generation time và total answer time";
-    }
-    if (includesAny(searchable, ["p95 retrieval latency", "average full answer latency"])) {
-      return "Nhóm quyết định báo cáo p95 retrieval latency thay vì average full answer latency";
-    }
-    if (includesAny(searchable, ["gemini quota", "fast path answers", "fallback evidence cards"])) {
-      return "Gemini quota là rủi ro khi demo live, nên nhóm chuẩn bị fast path answers và fallback evidence cards để search vẫn hoạt động khi generation chậm hoặc lỗi";
-    }
-  }
-
-  if (intent === "gmail") {
-    if (hasGmailEvidence(searchable) && includesAny(searchable, ["future work", "scope decision"])) {
-      return "Nhóm quyết định để Gmail và Google Contacts ở future work trừ khi core demo đã ổn định";
-    }
-    if (includesAny(searchable, ["not add gmail", "warned us not to add gmail"])) {
-      return "Linh cảnh báo không nên thêm Gmail trước khi Diary, Calendar, Attachment và grounded search ổn định";
-    }
-    if (includesAny(searchable, ["scope creep", "avoiding scope creep"])) {
-      return "Quyết định này xuất phát từ feedback của Linh về việc tránh scope creep";
-    }
-  }
-
-  if (intent === "google_contacts") {
-    if (citation.sourceType === "contact") {
-      return citation.quote;
-    }
-    if (isGoogleContactsSearchText(searchable)) {
-      return "Kế hoạch Google Contacts là sync contact names, emails, phone numbers và organizations từ Google People API để memory engine nhận diện người như Linh, Quan hoặc Duc Anh tốt hơn";
-    }
-  }
-
-  if (intent === "mood") {
-    if (includesAny(searchable, ["felt stressed", "stress"]) && includesAny(searchable, ["worker", "quota"])) {
-      return "Bạn cảm thấy stress vì worker và quota có thể làm hỏng live AI memory search demo";
-    }
-    if (includesAny(searchable, ["felt great", "good mood", "in a good mood"])) {
-      return "Bạn ghi nhận tâm trạng tốt trong ký ức này";
-    }
-    if (includesAny(searchable, ["neutral mood", "mood is neutral", "mood was neutral"])) {
-      return "Tâm trạng được ghi lại là neutral";
-    }
-  }
-
-  if (intent === "progress" || intent === "generic") {
-    const progressSummary = summarizeProgressCitationInVietnamese(searchable);
-    if (progressSummary) return progressSummary;
-  }
-
-  if (intent === "decision") {
-    if (hasGmailEvidence(searchable)) {
-      return summarizeCitationInVietnamese(citation, "gmail");
-    }
-    if (isGoogleContactsSearchText(searchable)) {
-      return summarizeCitationInVietnamese(citation, "google_contacts");
-    }
-    if (hasLatencyEvidence(searchable)) {
-      return summarizeCitationInVietnamese(citation, "latency");
-    }
-  }
-
-  return null;
+  return formatSourceLabeledMemoryBullet(citation, cleaned, "vi");
 }
 
-function summarizeProgressCitationInVietnamese(searchable: string): string | null {
-  if (includesAny(searchable, ["edit my capstone paper", "editing my capstone paper"])) {
-    return "Bạn ở nhà chỉnh sửa bài capstone";
-  }
-  if (includesAny(searchable, ["fix cho xong project capstone", "fix project capstone"])) {
-    return "Bạn cố gắng fix cho xong project capstone rồi nghỉ ngơi";
-  }
-  if (
-    includesAny(searchable, ["cafe", "ca phe", "cà phê"]) &&
-    includesAny(searchable, ["project", "capstone", "hoan thanh", "hoàn thành"])
-  ) {
-    return "Bạn ra quán cà phê và tiếp tục cố hoàn thành project";
-  }
-  if (includesAny(searchable, ["ngu tu sang toi toi", "ngủ từ sáng tới tối", "sleeping from morning to night"])) {
-    return "Bạn gần như nghỉ cả ngày, chủ yếu ngủ từ sáng tới tối";
-  }
-  if (includesAny(searchable, ["troi mua nguyen ngay", "trời mưa nguyên ngày", "rained consistently throughout the day"])) {
-    return "Thời tiết hôm đó mưa cả ngày";
-  }
-
-  return null;
+export function formatSourceLabeledMemoryBullet(
+  citation: Pick<MemoryCitation, "sourceType">,
+  text: string,
+  lang: ResponseLanguage,
+): string {
+  const cleaned = trimTrailingPunctuation(text);
+  if (citation.sourceType === "diary") return cleaned;
+  return lang === "vi"
+    ? `${getVietnameseSourceLabel(citation.sourceType)} ghi: ${cleaned}`
+    : `${getEnglishSourceLabel(citation.sourceType)}: ${cleaned}`;
 }
 
 function trimTrailingPunctuation(value: string): string {
   return value.trim().replace(/[.!?。！？]+$/u, "");
 }
+
+function getVietnameseCitationMaxLength(intent: MemoryIntent): number {
+  if (intent === "generic" || intent === "progress") return 280;
+  return 240;
+}
+
+function getVietnameseSourceLabel(sourceType: string): string {
+  switch (sourceType) {
+    case "diary":
+      return "Nhật ký";
+    case "summary":
+      return "Tóm tắt";
+    case "calendar":
+      return "Lịch";
+    case "gmail":
+      return "Email";
+    case "drive":
+      return "Tài liệu";
+    case "attachment":
+      return "Tệp đính kèm";
+    case "contact":
+      return "Danh bạ";
+    default:
+      return "Nguồn";
+  }
+}
+
+function getEnglishSourceLabel(sourceType: string): string {
+  switch (sourceType) {
+    case "diary":
+      return "Diary";
+    case "summary":
+      return "Summary";
+    case "calendar":
+      return "Calendar";
+    case "gmail":
+      return "Email";
+    case "drive":
+      return "Drive file";
+    case "attachment":
+      return "Attachment";
+    case "contact":
+      return "Contact";
+    default:
+      return "Source";
+  }
+}
+
+function looksVietnameseText(value: string): boolean {
+  const normalized = normalizeForIntent(value);
+  const tokens = new Set(normalized.split(/[^a-z0-9]+/).filter(Boolean));
+  return (
+    /[ăâđêôơưáàảãạấầẩẫậắằẳẵặéèẻẽẹếềểễệíìỉĩịóòỏõọốồổỗộớờởỡợúùủũụứừửữựýỳỷỹỵ]/iu.test(value) ||
+    VIETNAMESE_TEXT_SIGNALS.some((signal) =>
+      signal.includes(" ") ? normalized.includes(signal) : tokens.has(signal),
+    )
+  );
+}
+
+const VIETNAMESE_TEXT_SIGNALS = [
+  "ban",
+  "cua ban",
+  "da",
+  "dang",
+  "de",
+  "duoc",
+  "hom nay",
+  "khong",
+  "lam",
+  "minh",
+  "nhat ky",
+  "ngay",
+  "nhom",
+  "toi",
+  "trong",
+  "ve",
+];
 
 function sentenceCase(value: string): string {
   const trimmed = value.trim();
@@ -541,12 +791,19 @@ function stripSourceTitlePrefix(text: string, sourceTitle?: string): string {
   return normalizedText.slice(title.length).trim();
 }
 
-function formatSingleDayFact(citation: MemoryCitation): string {
-  return formatMemoryBullet(citation, 520);
+function formatSingleDayFact(citation: MemoryCitation, lang: ResponseLanguage): string {
+  const cleaned = formatMemoryBullet(citation, 520);
+  if (citation.sourceType !== "diary") {
+    return formatSourceLabeledMemoryBullet(citation, cleaned, lang);
+  }
+
+  return lang === "vi"
+    ? naturalizeVietnameseDayFact(cleaned)
+    : naturalizeEnglishDayFact(cleaned);
 }
 
 function formatVietnameseDayFacts(facts: string[]): string {
-  const normalizedFacts = facts.map(naturalizeVietnameseDayFact).filter(Boolean);
+  const normalizedFacts = facts.map(trimTrailingPunctuation).filter(Boolean);
   if (!normalizedFacts.length) return "mình chưa thấy nội dung đủ rõ trong nhật ký ngày này.";
 
   if (normalizedFacts.length === 1) {
@@ -562,7 +819,7 @@ function formatVietnameseDayFacts(facts: string[]): string {
 }
 
 function formatEnglishDayFacts(facts: string[]): string {
-  const normalizedFacts = facts.map(naturalizeEnglishDayFact).filter(Boolean);
+  const normalizedFacts = facts.map(trimTrailingPunctuation).filter(Boolean);
   if (!normalizedFacts.length) return "the saved memory was not clear enough to summarize.";
 
   if (normalizedFacts.length === 1) {
@@ -589,7 +846,7 @@ function naturalizeVietnameseDayFact(value: string): string {
 }
 
 function naturalizeEnglishDayFact(value: string): string {
-  return naturalizeEnglishWorkFact(trimTrailingPunctuation(value))
+  return trimTrailingPunctuation(value)
     .replace(/\btoday\b/gi, "that day")
     .replace(/\bI am\b/g, "you are")
     .replace(/\bI'm\b/g, "you're")
@@ -599,16 +856,6 @@ function naturalizeEnglishDayFact(value: string): string {
     .replace(/\bme\b/gi, "you")
     .replace(/\s+/g, " ")
     .trim();
-}
-
-function naturalizeEnglishWorkFact(value: string): string {
-  return value
-    .replace(
-      /^the mvp is ready when\b/i,
-      "you worked on the final MVP checklist, checking that",
-    )
-    .replace(/\bwe should rehearse\b/gi, "you planned to rehearse")
-    .replace(/\bwe should\b/gi, "you planned to");
 }
 
 function lowercaseFirst(value: string): string {

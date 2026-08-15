@@ -12,8 +12,11 @@ import { decryptOAuthToken, encryptOAuthToken } from './oauth-token-crypto';
 import { invalidateUserSearchCache } from '../../common/cache/search-answer-cache';
 import {
     GOOGLE_SOURCE_SCOPES,
+    GoogleSource,
     getAllGoogleWorkspaceScopes,
     getGoogleConnectionStatus,
+    isGoogleSource,
+    markGoogleSourcesConnected,
     markGoogleWorkspaceConnected,
     recordGoogleSyncFailure,
     recordGoogleSyncSuccess,
@@ -22,6 +25,7 @@ import {
 type GoogleConnectInput = {
     supabaseId: string;
     email: string;
+    source?: unknown;
 };
 
 type GoogleCallbackInput = {
@@ -33,14 +37,17 @@ type GoogleCallbackInput = {
 type OAuthStatePayload = {
     supabaseId: string;
     iat: number;
+    source?: GoogleConnectSource;
 };
+
+type GoogleConnectSource = GoogleSource | 'all';
 
 @Injectable()
 export class CalendarService {
 
     constructor(private readonly prisma: PrismaService) {}
 
-    private readonly oauthScopes = getAllGoogleWorkspaceScopes();
+    private readonly workspaceScopes = getAllGoogleWorkspaceScopes();
 
     private getFrontendUrl() {
         const configuredUrl = process.env.FRONTEND_URL || process.env.CORS_ORIGIN;
@@ -132,9 +139,12 @@ export class CalendarService {
         return payload;
     }
 
-    private buildFrontendRedirect(status: 'connected' | 'error', reason?: string) {
+    private buildFrontendRedirect(status: 'connected' | 'error', source?: GoogleConnectSource, reason?: string) {
         const url = new URL('/settings', this.getFrontendUrl());
         url.searchParams.set('calendar', status);
+        if (source) {
+            url.searchParams.set('source', source);
+        }
         if (reason) {
             url.searchParams.set('reason', reason);
         }
@@ -158,6 +168,8 @@ export class CalendarService {
     }
 
     async createGoogleConnectUrl(input: GoogleConnectInput) {
+        const source = this.normalizeConnectSource(input.source);
+
         await this.prisma.user.upsert({
             where: { supabaseId: input.supabaseId },
             update: { email: input.email },
@@ -171,23 +183,25 @@ export class CalendarService {
         const state = this.signState({
             supabaseId: input.supabaseId,
             iat: Date.now(),
+            source,
         });
 
         return oauth2Client.generateAuthUrl({
             access_type: 'offline',
             prompt: 'consent',
-            scope: this.oauthScopes,
+            include_granted_scopes: true,
+            scope: this.getScopesForConnectSource(source),
             state,
         });
     }
 
     async handleGoogleOAuthCallback(input: GoogleCallbackInput) {
         if (input.error) {
-            return this.buildFrontendRedirect('error', input.error);
+            return this.buildFrontendRedirect('error', this.readStateSource(input.state), input.error);
         }
 
         if (!input.code) {
-            return this.buildFrontendRedirect('error', 'missing_code');
+            return this.buildFrontendRedirect('error', this.readStateSource(input.state), 'missing_code');
         }
 
         try {
@@ -196,9 +210,10 @@ export class CalendarService {
             const { tokens } = await oauth2Client.getToken(input.code);
 
             if (!tokens.access_token && !tokens.refresh_token) {
-                return this.buildFrontendRedirect('error', 'missing_tokens');
+                return this.buildFrontendRedirect('error', state.source, 'missing_tokens');
             }
 
+            const source = this.normalizeConnectSource(state.source);
             const connectedUser = await this.prisma.user.update({
                 where: { supabaseId: state.supabaseId },
                 data: {
@@ -208,12 +223,16 @@ export class CalendarService {
                 },
                 select: { id: true },
             });
-            await markGoogleWorkspaceConnected(this.prisma, connectedUser.id);
+            if (source === 'all') {
+                await markGoogleWorkspaceConnected(this.prisma, connectedUser.id);
+            } else {
+                await markGoogleSourcesConnected(this.prisma, connectedUser.id, [source]);
+            }
 
-            return this.buildFrontendRedirect('connected');
+            return this.buildFrontendRedirect('connected', source);
         } catch (error) {
             console.error('Google OAuth callback failed:', error);
-            return this.buildFrontendRedirect('error', 'callback_failed');
+            return this.buildFrontendRedirect('error', undefined, 'callback_failed');
         }
     }
 
@@ -253,17 +272,44 @@ export class CalendarService {
 
         return {
             source: 'calendar',
-            oauthMode: 'all_google_sources',
+            oauthMode: this.getOauthMode(connection.scopes),
             connected: connection.connected && fallbackConnected,
             scopes: connection.scopes,
             requestedScopes: GOOGLE_SOURCE_SCOPES.calendar,
-            workspaceScopes: this.oauthScopes,
+            workspaceScopes: this.workspaceScopes,
             eventCount,
             lastSyncedAt: connection.lastSyncAt ?? latestEvent?.updated_at ?? null,
             lastError: connection.lastError,
             lastErrorAt: connection.lastErrorAt,
             syncCursor: connection.syncCursor,
         };
+    }
+
+    private normalizeConnectSource(source: unknown): GoogleConnectSource {
+        if (source === undefined || source === null || source === '') return 'all';
+        if (source === 'all') return 'all';
+        if (isGoogleSource(source)) return source;
+        throw new BadRequestException('Invalid Google source.');
+    }
+
+    private readStateSource(state?: string): GoogleConnectSource | undefined {
+        try {
+            return this.normalizeConnectSource(this.verifyState(state).source);
+        } catch {
+            return undefined;
+        }
+    }
+
+    private getScopesForConnectSource(source: GoogleConnectSource) {
+        return source === 'all'
+            ? this.workspaceScopes
+            : GOOGLE_SOURCE_SCOPES[source];
+    }
+
+    private getOauthMode(scopes: string[]) {
+        const normalizedScopes = new Set(scopes);
+        const hasAllWorkspaceScopes = this.workspaceScopes.every((scope) => normalizedScopes.has(scope));
+        return hasAllWorkspaceScopes ? 'all_google_sources' : 'source_scoped';
     }
 
     async syncGoogleEvents(supabaseId: string, options: { limit?: number } = {}) {
@@ -441,6 +487,7 @@ export class CalendarService {
                 },
                 run_after: new Date(),
                 locked_at: null,
+                locked_by: null,
                 processed_at: null,
             },
             create: {

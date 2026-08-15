@@ -1,6 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import {
+  AUDIO_ATTACHMENT_MAX_BYTES,
+  isAudioAttachmentMimeType,
+  STANDARD_ATTACHMENT_MAX_BYTES,
+} from "@second-brain/shared";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   createDiaryEntry,
@@ -34,6 +39,10 @@ type AttachmentQueueItem = {
   signedUrl?: string;
   memoryChunkCount?: number;
 };
+
+function isAudioFile(file: Pick<File, "type">) {
+  return isAudioAttachmentMimeType(file.type);
+}
 
 function getLocalDateInputValue(date = new Date()) {
   const year = date.getFullYear();
@@ -125,8 +134,6 @@ function normalizeTag(value: string) {
     .replace(/\s+/g, "-")
     .replace(/[^a-z0-9-_]/g, "");
 }
-
-type TemplateLang = "en" | "vi";
 
 interface TemplateItem {
   id: string;
@@ -230,104 +237,6 @@ const TEMPLATES_EN: TemplateItem[] = [
   },
 ];
 
-const TEMPLATES_VI: TemplateItem[] = [
-  {
-    id: "brain-dump",
-    name: "Ghi chép Ý tưởng",
-    icon: "💡",
-    description: "Thu thập kiến thức & ý tưởng",
-    title: "Ghi chép & Thu thập Kiến thức",
-    content: [
-      "🧠 Bài học lớn nhất của tôi hôm nay (tóm gọn trong 1 câu):",
-      "- ",
-      "",
-      "📌 Các sự kiện, trích dẫn hoặc ý tưởng tôi muốn ghi nhớ:",
-      "- ",
-      "",
-      "🔗 Tôi có thể áp dụng kiến thức này vào dự án hoặc mục tiêu hiện tại như thế nào?",
-      "- ",
-      "",
-      "🔍 Chủ đề tôi muốn tìm hiểu sâu hơn trong tương lai:",
-      "- ",
-    ].join("\n"),
-  },
-  {
-    id: "stoic-reflection",
-    name: "Suy ngẫm Nội tâm",
-    icon: "🧘",
-    description: "Giải tỏa cảm xúc & suy nghĩ",
-    title: "Nhật ký Suy ngẫm & Nội tâm",
-    content: [
-      "⛈️ Điều gì đang khiến tôi lo lắng hoặc mất tập trung nhất hôm nay?",
-      "- ",
-      "",
-      "⚖️ Trong chuyện này, điều gì NẰM TRONG và NGOÀI tầm kiểm soát của tôi?",
-      "- Trong tầm kiểm soát: ",
-      "- Ngoài tầm kiểm soát: ",
-      "",
-      "🌟 Một điều tích cực tôi có thể tập trung vào dù có khó khăn:",
-      "- ",
-      "",
-      "🕊️ Nếu nhìn lại chuyện này vào 1 năm sau, tôi sẽ nghĩ gì?",
-      "- ",
-    ].join("\n"),
-  },
-  {
-    id: "five-minute",
-    name: "Nhật ký 5 Phút",
-    icon: "🎯",
-    description: "Bắt đầu & kết thúc ngày có chủ đích",
-    title: "Khởi động & Nhìn lại trong 5 Phút",
-    content: [
-      "☀️ BUỔI SÁNG — Thiết lập Ý định",
-      "",
-      "3 điều tôi cảm thấy biết ơn hôm nay:",
-      "1. ",
-      "2. ",
-      "3. ",
-      "",
-      "Nhiệm vụ DUY NHẤT nếu hoàn thành sẽ khiến hôm nay trở nên tuyệt vời:",
-      "- ",
-      "",
-      "Tư duy hoặc lời khẳng định tôi muốn mang theo hôm nay:",
-      "- ",
-      "",
-      "🌙 BUỔI TỐI — Nhìn lại",
-      "",
-      "Trở ngại lớn nhất hôm nay và cách tôi đã xử lý:",
-      "- ",
-      "",
-      "Một điều tôi có thể làm tốt hơn vào ngày mai:",
-      "- ",
-    ].join("\n"),
-  },
-  {
-    id: "project-review",
-    name: "Nhật ký Dự án",
-    icon: "🚀",
-    description: "Theo dõi tiến độ & trở ngại",
-    title: "Tiến độ & Đánh giá Dự án",
-    content: [
-      "📈 Tiến độ — Hôm nay tôi đã hoàn thành hoặc thúc đẩy được điều gì?",
-      "- ",
-      "",
-      "🚧 Trở ngại — Tôi gặp phải khó khăn hoặc vướng mắc gì?",
-      "- ",
-      "",
-      "💡 Ý tưởng — Có phát hiện mới, giải pháp, hoặc khoảnh khắc 'eureka' nào không?",
-      "- ",
-      "",
-      "📋 Bước tiếp theo — Ưu tiên của tôi cho ngày mai là gì?",
-      "- ",
-    ].join("\n"),
-  },
-];
-
-const TEMPLATES_MAP: Record<TemplateLang, TemplateItem[]> = {
-  en: TEMPLATES_EN,
-  vi: TEMPLATES_VI,
-};
-
 export function DiaryInputForm() {
   const { getAccessToken, isAuthenticated } = useAuth();
   const [draft, setDraft] = useState<DiaryDraft>(initialDraft);
@@ -335,17 +244,10 @@ export function DiaryInputForm() {
   const [errorMessage, setErrorMessage] = useState<string>("");
   const [isCopilotLoading, setIsCopilotLoading] = useState(false);
   const [activeCopilotAction, setActiveCopilotAction] = useState("");
-  const [templateLang, setTemplateLang] = useState<TemplateLang>("vi");
   const [attachmentItems, setAttachmentItems] = useState<AttachmentQueueItem[]>([]);
   const [calendarEvents, setCalendarEvents] = useState<CalendarEventRecord[]>([]);
   const [isCalendarLoading, setIsCalendarLoading] = useState(false);
   const [tagInput, setTagInput] = useState("");
-
-  // Sync template language from system preference on mount
-  useEffect(() => {
-    const saved = localStorage.getItem("dd-response-lang");
-    if (saved === "en" || saved === "vi") setTemplateLang(saved);
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -373,11 +275,7 @@ export function DiaryInputForm() {
     };
   }, [getAccessToken, isAuthenticated]);
 
-  function toggleTemplateLang() {
-    setTemplateLang((prev) => (prev === "en" ? "vi" : "en"));
-  }
-
-  const activeTemplates = TEMPLATES_MAP[templateLang];
+  const activeTemplates = TEMPLATES_EN;
 
   const linkedCalendarEvents = useMemo(() => {
     return calendarEvents
@@ -401,12 +299,22 @@ export function DiaryInputForm() {
     const selectedFiles = Array.from(event.target.files ?? []);
     setAttachmentItems((current) => [
       ...current,
-      ...selectedFiles.map((file) => ({
-        id: `${file.name}-${file.size}-${file.lastModified}-${crypto.randomUUID()}`,
-        file,
-        status: "queued" as const,
-        message: "Ready to attach",
-      })),
+      ...selectedFiles.map((file) => {
+        const audio = isAudioFile(file);
+        const maxBytes = audio ? AUDIO_ATTACHMENT_MAX_BYTES : STANDARD_ATTACHMENT_MAX_BYTES;
+        const tooLarge = file.size > maxBytes;
+
+        return {
+          id: `${file.name}-${file.size}-${file.lastModified}-${crypto.randomUUID()}`,
+          file,
+          status: tooLarge ? "error" as const : "queued" as const,
+          message: tooLarge
+            ? `${audio ? "Audio" : "File"} must be ${maxBytes / (1024 * 1024)} MB or smaller`
+            : audio
+              ? "Ready to upload and transcribe"
+              : "Ready to attach",
+        };
+      }),
     ]);
     event.target.value = "";
   }
@@ -459,12 +367,20 @@ export function DiaryInputForm() {
     }
 
     if (response.memoryIndexingStatus === "queued" || response.memoryIndexingStatus === "pending") {
+      if (response.attachment.fileType.startsWith("audio/")) {
+        return response.extractionStatus === "extracted"
+          ? "Transcript ready; queued for memory indexing"
+          : "Saved; queued for transcription and memory indexing";
+      }
       return response.extractionStatus === "extracted"
         ? "Text extracted; queued for memory indexing"
         : "Saved; queued for text extraction and memory indexing";
     }
 
     if (response.memoryIndexingStatus === "processing") {
+      if (response.attachment.fileType.startsWith("audio/") && response.extractionStatus !== "extracted") {
+        return "Audio transcription in progress";
+      }
       return response.extractionStatus === "extracted"
         ? "Text extracted; indexing in progress"
         : "Text extraction in progress";
@@ -622,7 +538,7 @@ export function DiaryInputForm() {
   }, [draft.content]);
 
   function applyTemplate(template: TemplateItem) {
-    if (draft.content.trim() && !window.confirm(templateLang === "vi" ? "Nội dung hiện tại sẽ bị thay thế. Bạn có chắc không?" : "This will overwrite your current entry. Are you sure?")) {
+    if (draft.content.trim() && !window.confirm("This will overwrite your current entry. Are you sure?")) {
       return;
     }
     setDraft((prev) => ({ ...prev, title: template.title, content: template.content }));
@@ -813,7 +729,7 @@ export function DiaryInputForm() {
           id="attachments"
           type="file"
           multiple
-          accept=".txt,.pdf,.png,.jpg,.jpeg,.doc,.docx,text/plain,application/pdf,image/png,image/jpeg,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          accept=".txt,.pdf,.png,.jpg,.jpeg,.doc,.docx,.mp3,.m4a,.wav,.ogg,.webm,.aac,.flac,text/plain,application/pdf,image/png,image/jpeg,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,audio/mpeg,audio/mp4,audio/wav,audio/ogg,audio/webm,audio/aac,audio/flac"
           className="sr-only"
           onChange={handleAttachmentSelection}
         />
@@ -843,7 +759,7 @@ export function DiaryInputForm() {
           </label>
 
           <span className="text-xs text-slate-400 dark:text-slate-500">
-            PDF, image, Word, or text files
+            PDF, image, Word, text (5 MB) or audio (20 MB)
           </span>
 
           {state === "success" && (
@@ -928,25 +844,13 @@ export function DiaryInputForm() {
 
       <details className="mt-5 enterprise-card p-4">
         <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold text-slate-700 dark:text-slate-200">
-          <span>{templateLang === "vi" ? "Mẫu viết nhanh" : "Quick writing templates"}</span>
-          <button
-            type="button"
-            onClick={(event) => {
-              event.preventDefault();
-              toggleTemplateLang();
-            }}
-            className="inline-flex cursor-pointer items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold transition hover:border-indigo-300 dark:border-slate-700 dark:bg-slate-950 dark:hover:border-indigo-800"
-          >
-            <span className={`rounded-full px-1.5 py-0.5 transition ${templateLang === "en" ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300" : "text-slate-400 dark:text-slate-500"}`}>EN</span>
-            <span className="text-slate-300 dark:text-slate-600">|</span>
-            <span className={`rounded-full px-1.5 py-0.5 transition ${templateLang === "vi" ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300" : "text-slate-400 dark:text-slate-500"}`}>VI</span>
-          </button>
+          <span>Quick writing templates</span>
         </summary>
 
         <div className="mt-4 flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
           {activeTemplates.map((tpl) => (
             <button
-              key={`${templateLang}-${tpl.id}`}
+              key={tpl.id}
               type="button"
               onClick={() => applyTemplate(tpl)}
               className="group flex w-[170px] shrink-0 cursor-pointer flex-col items-start gap-2 rounded-lg border border-slate-200 bg-white p-4 text-left transition hover:border-indigo-300 hover:bg-indigo-50/40 dark:border-slate-800 dark:bg-slate-950 dark:hover:border-indigo-800 dark:hover:bg-indigo-950/20"

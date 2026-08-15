@@ -23,7 +23,7 @@ _Transform unstructured thoughts into structured, retrievable memory with AI-pow
 | **Grounded Memory Retrieval** | Prevents AI hallucination by grounding every answer in actual diary, attachment, Calendar, Contacts, Drive, Gmail, and summary chunks. |
 | **Explainable AI** | Provides exact citation markers (`[S1]`, `[S2]`, …) and confidence scores (`high` / `medium` / `low`) for every retrieved answer. |
 | **AI Observability** | Full transparency with token usage tracking, timing pipeline breakdown, and an interactive analytics panel per query. |
-| **Semantic Search + History** | Vector-based search using Gemini embeddings with persistent search history and cached answers. |
+| **Semantic Search + History** | Vector-based search using Tuturuuu-hosted embeddings with persistent search history and cached answers. |
 | **Timeline Calendar** | Mini calendar sidebar on timeline with date-based filtering and entry statistics. |
 | **Cross-Platform Auth** | Email + Google OAuth with automatic account linking. Avatar upload, password management for all account types. |
 | **Entity Extraction** | Automated detection of people, projects, goals, and habits across memory chunks. |
@@ -97,12 +97,12 @@ Capstone_DaydreamGroupProject/
 ├── packages/
 │   ├── ai/                           # AI Memory Engine (ESM)
 │   │   └── src/
-│   │       ├── embedding.ts          # Gemini embedding provider (768-dim vectors)
+│   │       ├── embedding.ts          # Tuturuuu embedding provider (768-dim vectors)
 │   │       ├── chunker.ts            # Semantic text chunker
 │   │       ├── retrieval.ts          # Hybrid vector + lexical retrieval
 │   │       ├── answer-memory.ts      # Grounded answer generation with citations
 │   │       ├── memory-indexer.ts     # Diary → MemoryChunk indexing pipeline
-│   │       └── gemini-json.ts        # Structured JSON output from Gemini
+│   │       └── tuturuuu-json.ts      # Structured JSON output through Tuturuuu
 │   │
 │   ├── db/                           # Database layer (Prisma ORM)
 │   │   ├── prisma/schema.prisma      # Schema: User, DiaryEntry, MemoryChunk, etc.
@@ -183,8 +183,9 @@ DIRECT_URL="postgresql://user:pass@host:5432/postgres"
 
 # ── Supabase Auth ─────────────────────────────────────────
 SUPABASE_URL="https://YOUR_PROJECT.supabase.co"
-SUPABASE_JWT_SECRET="your-jwt-secret"
-SUPABASE_SERVICE_KEY="your-service-role-key"
+SUPABASE_PROJECT_ID="your-project-id"
+SUPABASE_JWT_SECRET="your-legacy-jwt-secret"          # optional after ES256 migration
+SUPABASE_SERVICE_KEY="your-backend-secret-key"       # prefer sb_secret over legacy service_role
 ADMIN_EMAILS="owner@example.com,teammate@example.com" # optional bootstrap admins
 
 # ── Google OAuth (Calendar, Contacts, Drive, Gmail Sync) ──
@@ -193,11 +194,25 @@ GOOGLE_CLIENT_SECRET="your-google-client-secret"
 GOOGLE_REDIRECT_URI="http://localhost:3001/api/calendar/oauth/callback"
 
 # ── AI / Tuturuuu metered API ──────────────────────────────
+APP_TIMEZONE="Asia/Ho_Chi_Minh"                         # local day/week/month boundaries for AI recall and summaries
 TUTURUUU_AI_API_KEY="ttr_ai_your-one-time-secret"
 TUTURUUU_AI_BASE_URL="https://ai.tuturuuu.com/v1"      # optional, defaults to Tuturuuu production
 TUTURUUU_EMBEDDING_MODEL="google/gemini-embedding-2"   # optional; confirm allowed models with GET /v1/models
-TUTURUUU_ANSWER_MODEL="google/gemini-3.5-flash-lite"  # optional; google/gemini-3.6-flash may require workspace metering support
+TUTURUUU_ANSWER_MODEL="google/gemini-3.5-flash-lite"  # optional; recommended low-cost answer model
+TUTURUUU_TRANSCRIPTION_MODEL="google/gemini-3.5-flash-lite" # optional; audio transcription via Tuturuuu file input
+AUDIO_TRANSCRIPTION_MAX_OUTPUT_TOKENS=6000            # optional; 500-12000
 INDEXING_JOB_DELAY_MS="15000"                          # optional, avoids rate limits during local drain
+INDEXING_WORKER_BATCH_SIZE="2"                         # optional; small claims keep leases fresh
+INDEXING_LEASE_TIMEOUT_MS="300000"                     # optional; stale processing lease timeout
+INDEXING_LEASE_RENEW_INTERVAL_MS="30000"               # optional; must remain below half the timeout
+INDEXING_AUTOMATIC_DRAIN_MAX_BATCHES="20"              # optional; bounds one cron/realtime drain cycle
+INDEXING_LISTENER_RECONNECT_BASE_MS="1000"             # optional; PostgreSQL LISTEN reconnect backoff
+INDEXING_LISTENER_RECONNECT_MAX_MS="60000"             # optional; reconnect backoff cap
+
+# ── Redis rate limit and AI query cache ──────────────────
+REDIS_URL="redis://localhost:6379"
+QUERY_EMBEDDING_REDIS_CACHE_ENABLED="true"              # optional; shared cache across API instances
+QUERY_EMBEDDING_CACHE_TTL_SECONDS="604800"               # optional; seven days
 
 # ── Observability / Production Error Reporting ───────────
 SENTRY_DSN=""                                           # optional; set from Sentry Project Settings > Client Keys
@@ -213,7 +228,7 @@ Create **`apps/web/.env.local`**:
 
 ```env
 NEXT_PUBLIC_SUPABASE_URL="https://YOUR_PROJECT.supabase.co"
-NEXT_PUBLIC_SUPABASE_ANON_KEY="your-anon-key"
+NEXT_PUBLIC_SUPABASE_ANON_KEY="your-publishable-key" # sb_publishable or legacy anon
 NEXT_PUBLIC_API_URL="http://localhost:3001"
 ```
 
@@ -223,8 +238,8 @@ NEXT_PUBLIC_API_URL="http://localhost:3001"
 # Generate the Prisma client
 pnpm --filter @second-brain/db prisma:generate
 
-# Push schema to database (creates/updates tables + pgvector extension)
-npx prisma db push --schema=packages/db/prisma/schema.prisma
+# Apply the reviewed migration history (creates tables + pgvector extension)
+pnpm db:migrate:deploy
 ```
 
 ---
@@ -268,7 +283,7 @@ Docker Compose runs the production builds plus local infrastructure:
 - `web`: Next.js app on `http://localhost:3000`
 
 ```bash
-# Prepare env. Fill in real Supabase, Gemini, and Google values.
+# Prepare env. Fill in real Supabase, Tuturuuu, and Google values.
 cp .env.docker.example .env
 
 # Build and start the stack
@@ -281,7 +296,7 @@ pnpm docker:logs
 pnpm docker:down
 ```
 
-Compose overrides `DATABASE_URL`, `DIRECT_URL`, and `REDIS_URL` to use the local containers, while your Supabase/Gemini/Google secrets still come from `.env`.
+Compose overrides `DATABASE_URL`, `DIRECT_URL`, and `REDIS_URL` to use the local containers, while your Supabase/Tuturuuu/Google secrets still come from `.env`.
 
 ### Useful Scripts
 
@@ -378,4 +393,3 @@ pnpm --filter @second-brain/api test:e2e
 ## 📄 License
 
 This project is **UNLICENSED** — intended for academic capstone use only.
-

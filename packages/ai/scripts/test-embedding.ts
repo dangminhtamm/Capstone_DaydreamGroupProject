@@ -12,7 +12,7 @@ async function run(): Promise<void> {
     throw new Error(aiGatewayEnvHint("running the embedding test"));
   }
 
-  const embedder = createEmbeddingProvider("gemini");
+  const embedder = createEmbeddingProvider("tuturuuu");
   const text = "Hôm nay mình cảm thấy khá áp lực với deadline.";
 
   const embedding = await embedder.embed(text);

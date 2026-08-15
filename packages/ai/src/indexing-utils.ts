@@ -93,6 +93,7 @@ function annotateEmbeddingMetadata(metadata: unknown, dimension: number): unknow
     embeddingModel: TUTURUUU_EMBEDDING_MODEL,
     embeddingDimension: dimension,
     embeddingUpdatedAt: new Date().toISOString(),
+    embeddingStatus: "embedded",
   };
 }
 

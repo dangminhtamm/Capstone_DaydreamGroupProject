@@ -8,7 +8,12 @@ import {
 } from '@nestjs/common';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { PrismaService } from '../../prisma/prisma.service';
-import { isAdminEmail, normalizeUserRole, type AuthenticatedRequestUser } from './user-role';
+import {
+  canUseAdminPrivileges,
+  isAdminEmail,
+  normalizeUserRole,
+  type AuthenticatedRequestUser,
+} from './user-role';
 
 @Controller('auth')
 export class AuthController {
@@ -35,7 +40,7 @@ export class AuthController {
     const supabaseId = req.user.userId;
     const email = req.user.email;
     const { display_name } = body;
-    const bootstrapAdmin = isAdminEmail(email);
+    const bootstrapAdmin = isAdminEmail(email) && canUseAdminPrivileges(req.user);
 
     const user = await this.prisma.user.upsert({
       where: {

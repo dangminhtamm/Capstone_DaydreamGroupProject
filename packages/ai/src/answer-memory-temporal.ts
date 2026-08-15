@@ -1,10 +1,17 @@
 import type { RetrievalFilters } from "./retrieval.ts";
+import type { MemoryIntent } from "./answer-memory-types.ts";
 import {
   detectMemoryIntent,
   hasNormalizedPhrase,
   includesAny,
   normalizeForIntent,
 } from "./answer-memory-intents.ts";
+import {
+  DIARY_RETRIEVAL_PROFILE,
+  DRIVE_RETRIEVAL_PROFILE,
+  PEOPLE_RETRIEVAL_PROFILE,
+  getIntentRetrievalProfile,
+} from "./answer-memory-intent-profiles.ts";
 
 type LocalDateParts = {
   year: number;
@@ -30,138 +37,30 @@ export function inferRetrievalFilters(
   const normalized = normalizeForIntent(question);
   const intent = detectMemoryIntent(normalized);
   const temporalFilters = inferTemporalFilters(normalized, now, resolvedTimeZone);
+  const intentRetrievalProfile = getIntentRetrievalProfile(intent);
 
-  if (intent === "latency") {
-    return {
-      ...temporalFilters,
-      preferredSourceTypes: ["diary", "summary"],
-      preferredChunkTypes: ["decision", "general_note", "general", "action_item"],
-      vectorWeight: 0.55,
-      lexicalWeight: 0.45,
-    };
-  }
-
-  if (intent === "gmail") {
-    return {
-      ...temporalFilters,
-      preferredSourceTypes: ["diary"],
-      preferredChunkTypes: ["decision", "feedback", "general", "general_note"],
-      vectorWeight: 0.55,
-      lexicalWeight: 0.45,
-    };
-  }
-
-  if (intent === "google_contacts") {
-    return {
-      ...temporalFilters,
-      preferredSourceTypes: ["contact", "diary"],
-      preferredChunkTypes: ["general_note", "general", "decision"],
-      vectorWeight: 0.58,
-      lexicalWeight: 0.42,
-    };
-  }
-
-  if (intent === "calendar") {
-    return {
-      ...temporalFilters,
-      preferredSourceTypes: ["calendar"],
-      preferredChunkTypes: ["event", "general"],
-      vectorWeight: 0.6,
-      lexicalWeight: 0.4,
-    };
+  if (isHighPriorityRetrievalIntent(intent) && intentRetrievalProfile) {
+    return { ...temporalFilters, ...intentRetrievalProfile };
   }
 
   if (includesAny(normalized, ["google drive", "drive file", "drive files", "drive", "tệp drive", "tep drive"])) {
-    return {
-      ...temporalFilters,
-      preferredSourceTypes: ["drive"],
-      preferredChunkTypes: ["general_note", "general"],
-      vectorWeight: 0.62,
-      lexicalWeight: 0.38,
-    };
+    return { ...temporalFilters, ...DRIVE_RETRIEVAL_PROFILE };
   }
 
-  if (intent === "attachment") {
-    return {
-      ...temporalFilters,
-      preferredSourceTypes: ["attachment"],
-      preferredChunkTypes: ["general_note", "general"],
-      vectorWeight: 0.62,
-      lexicalWeight: 0.38,
-    };
+  if (isDiaryDateQuestion(normalized, intent, temporalFilters)) {
+    return { ...temporalFilters, ...DIARY_RETRIEVAL_PROFILE };
   }
 
-  if (intent === "feedback") {
-    return {
-      ...temporalFilters,
-      preferredSourceTypes: ["diary"],
-      preferredChunkTypes: ["feedback", "general", "general_note"],
-      vectorWeight: 0.55,
-      lexicalWeight: 0.45,
-    };
-  }
-
-  if (intent === "blocker") {
-    return {
-      ...temporalFilters,
-      sourceTypes: ["diary", "calendar", "summary"],
-      preferredSourceTypes: ["diary", "summary"],
-      preferredChunkTypes: ["reflection", "action_item", "general", "general_note"],
-      vectorWeight: 0.62,
-      lexicalWeight: 0.38,
-    };
-  }
-
-  if (intent === "mood") {
-    return {
-      ...temporalFilters,
-      sourceTypes: ["diary", "summary"],
-      preferredSourceTypes: ["diary", "summary"],
-      preferredChunkTypes: ["reflection", "general", "general_note"],
-      vectorWeight: 0.68,
-      lexicalWeight: 0.32,
-    };
-  }
-
-  if (intent === "progress") {
-    return {
-      ...temporalFilters,
-      sourceTypes: ["diary", "calendar", "summary"],
-      preferredSourceTypes: ["diary", "calendar"],
-      preferredChunkTypes: ["event", "decision", "action_item", "reflection", "general", "general_note"],
-      vectorWeight: 0.64,
-      lexicalWeight: 0.36,
-    };
-  }
-
-  if (intent === "task") {
-    return {
-      ...temporalFilters,
-      preferredSourceTypes: ["diary"],
-      preferredChunkTypes: ["action_item", "task_update", "general", "general_note"],
-      vectorWeight: 0.65,
-      lexicalWeight: 0.35,
-    };
+  if (isStandardPriorityRetrievalIntent(intent) && intentRetrievalProfile) {
+    return { ...temporalFilters, ...intentRetrievalProfile };
   }
 
   if (includesAny(normalized, ["diary", "journal", "nhật ký", "nhat ky"])) {
-    return {
-      ...temporalFilters,
-      preferredSourceTypes: ["diary"],
-      preferredChunkTypes: ["general", "general_note", "reflection", "event"],
-      vectorWeight: 0.65,
-      lexicalWeight: 0.35,
-    };
+    return { ...temporalFilters, ...DIARY_RETRIEVAL_PROFILE };
   }
 
-  if (intent === "decision") {
-    return {
-      ...temporalFilters,
-      preferredSourceTypes: ["diary"],
-      preferredChunkTypes: ["decision", "general", "general_note"],
-      vectorWeight: 0.65,
-      lexicalWeight: 0.35,
-    };
+  if (intent === "decision" && intentRetrievalProfile) {
+    return { ...temporalFilters, ...intentRetrievalProfile };
   }
 
   if (
@@ -183,16 +82,54 @@ export function inferRetrievalFilters(
       "noi chuyen",
     ])
   ) {
-    return {
-      ...temporalFilters,
-      preferredSourceTypes: ["diary", "calendar", "contact"],
-      preferredChunkTypes: ["event", "feedback", "decision", "general", "general_note"],
-      vectorWeight: 0.6,
-      lexicalWeight: 0.4,
-    };
+    return { ...temporalFilters, ...PEOPLE_RETRIEVAL_PROFILE };
   }
 
   return temporalFilters;
+}
+
+function isHighPriorityRetrievalIntent(intent: MemoryIntent): boolean {
+  return ["calendar", "gmail", "drive", "google_contacts", "latency"].includes(intent);
+}
+
+function isStandardPriorityRetrievalIntent(intent: MemoryIntent): boolean {
+  return ["attachment", "blocker", "feedback", "mood", "progress", "task"].includes(intent);
+}
+
+function isDiaryDateQuestion(
+  normalizedQuestion: string,
+  intent: MemoryIntent,
+  temporalFilters: RetrievalFilters,
+): boolean {
+  if (!temporalFilters.startDate || !temporalFilters.endDate) return false;
+  if (!["generic", "progress", "task"].includes(intent)) return false;
+
+  const spanMs = temporalFilters.endDate.getTime() - temporalFilters.startDate.getTime();
+  if (!Number.isFinite(spanMs) || spanMs > 36 * 60 * 60 * 1000) return false;
+
+  return includesAny(normalizedQuestion, [
+    "what did i do",
+    "what did i work on",
+    "what happened",
+    "what was i doing",
+    "my day",
+    "today",
+    "yesterday",
+    "hôm nay",
+    "hom nay",
+    "hôm qua",
+    "hom qua",
+    "ngày",
+    "ngay",
+    "tôi làm gì",
+    "toi lam gi",
+    "mình làm gì",
+    "minh lam gi",
+    "đã làm gì",
+    "da lam gi",
+    "làm gì",
+    "lam gi",
+  ]);
 }
 
 export function resolveMemoryTimeZone(timeZone?: string | null): string {
@@ -264,8 +201,20 @@ function inferTemporalFilters(
 
   const month = detectMonth(normalizedQuestion);
   if (month !== null) {
-    const year = mostRecentPastMonthYear(month, now, timeZone);
+    const year = detectExplicitYear(normalizedQuestion) ??
+      resolveRelativeYear(normalizedQuestion, localToday.year) ??
+      mostRecentPastMonthYear(month, now, timeZone);
     return withTemporalFallback(zonedMonthRange(year, month, timeZone));
+  }
+
+  const relativeYear = resolveRelativeYear(normalizedQuestion, localToday.year);
+  if (relativeYear !== null) {
+    return withTemporalFallback(zonedYearRange(relativeYear, timeZone));
+  }
+
+  const explicitYear = detectExplicitYear(normalizedQuestion);
+  if (explicitYear !== null) {
+    return withTemporalFallback(zonedYearRange(explicitYear, timeZone));
   }
 
   if (
@@ -331,6 +280,31 @@ function zonedMonthRange(year: number, monthIndex: number, timeZone: string): Re
     startDate: start,
     endDate: new Date(nextStart.getTime() - 1),
   };
+}
+
+function zonedYearRange(year: number, timeZone: string): RetrievalFilters {
+  const start = zonedDateTimeToUtc({ year, month: 1, day: 1 }, timeZone);
+  const nextStart = zonedDateTimeToUtc({ year: year + 1, month: 1, day: 1 }, timeZone);
+  return {
+    startDate: start,
+    endDate: new Date(nextStart.getTime() - 1),
+  };
+}
+
+function detectExplicitYear(value: string): number | null {
+  const match = value.match(/\b20\d{2}\b/u);
+  return match ? parseYearToken(match[0]) : null;
+}
+
+function resolveRelativeYear(value: string, currentYear: number): number | null {
+  if (includesAny(value, ["this year", "current year", "năm nay", "nam nay", "năm hiện tại", "nam hien tai"])) {
+    return currentYear;
+  }
+  if (includesAny(value, ["last year", "previous year", "năm trước", "nam truoc", "năm ngoái", "nam ngoai"])) {
+    return currentYear - 1;
+  }
+  if (includesAny(value, ["next year", "năm sau", "nam sau"])) return currentYear + 1;
+  return null;
 }
 
 function normalizeMonthStart(year: number, monthIndex: number): LocalDateParts {

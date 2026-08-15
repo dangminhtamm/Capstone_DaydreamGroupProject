@@ -115,6 +115,55 @@ describe('CalendarService', () => {
     expect(url).toContain('state=');
   });
 
+  it('creates a source-scoped Google OAuth URL when a source is requested', async () => {
+    prisma.user.upsert.mockResolvedValue({ id: 'user-1' });
+
+    await service.createGoogleConnectUrl({
+      supabaseId: 'supabase-user-1',
+      email: 'user@example.com',
+      source: 'gmail',
+    });
+
+    expect(mockGenerateAuthUrl).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include_granted_scopes: true,
+        scope: ['https://www.googleapis.com/auth/gmail.readonly'],
+      }),
+    );
+  });
+
+  it('rejects unknown Google OAuth sources instead of requesting all scopes', async () => {
+    prisma.user.upsert.mockResolvedValue({ id: 'user-1' });
+
+    await expect(
+      service.createGoogleConnectUrl({
+        supabaseId: 'supabase-user-1',
+        email: 'user@example.com',
+        source: 'unknown-source',
+      }),
+    ).rejects.toThrow('Invalid Google source.');
+
+    expect(mockGenerateAuthUrl).not.toHaveBeenCalled();
+    expect(prisma.user.upsert).not.toHaveBeenCalled();
+  });
+
+  it('keeps the source in OAuth error redirects', async () => {
+    prisma.user.upsert.mockResolvedValue({ id: 'user-1' });
+    const connectUrl = await service.createGoogleConnectUrl({
+      supabaseId: 'supabase-user-1',
+      email: 'user@example.com',
+      source: 'drive',
+    });
+    const state = new URL(connectUrl).searchParams.get('state') ?? '';
+
+    const redirectUrl = await service.handleGoogleOAuthCallback({
+      error: 'access_denied',
+      state,
+    });
+
+    expect(redirectUrl).toBe('http://localhost:3000/settings?calendar=error&source=drive&reason=access_denied');
+  });
+
   it('stores Google OAuth tokens on callback and redirects back to settings', async () => {
     prisma.user.upsert.mockResolvedValue({ id: 'user-1' });
     prisma.user.update.mockResolvedValue({ id: 'user-1' });
@@ -141,7 +190,7 @@ describe('CalendarService', () => {
     });
     expect(prisma.user.update.mock.calls[0][0].data.google_access_token).not.toBe('google-access-token');
     expect(prisma.user.update.mock.calls[0][0].data.google_refresh_token).not.toBe('google-refresh-token');
-    expect(redirectUrl).toBe('http://localhost:3000/settings?calendar=connected');
+    expect(redirectUrl).toBe('http://localhost:3000/settings?calendar=connected&source=all');
   });
 
   it('returns calendar connection status without exposing tokens', async () => {
@@ -163,8 +212,8 @@ describe('CalendarService', () => {
 
     expect(status).toEqual(
       expect.objectContaining({
-        source: 'calendar',
-        oauthMode: 'all_google_sources',
+            source: 'calendar',
+            oauthMode: 'source_scoped',
         connected: true,
         scopes: ['https://www.googleapis.com/auth/calendar.readonly'],
         requestedScopes: ['https://www.googleapis.com/auth/calendar.readonly'],

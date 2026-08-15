@@ -13,7 +13,7 @@ async function runTest() {
   }
 
   try {
-    console.log("🤖 Running Semantic Chunker test with Gemini...");
+    console.log("🤖 Running Semantic Chunker test with Tuturuuu...");
     console.log("📝 Input text:");
     console.log(`"${sampleDiaryText}"\n`);
     console.log("Analyzing and chunking...\n");

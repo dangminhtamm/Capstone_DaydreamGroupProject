@@ -20,6 +20,7 @@ jest.mock('googleapis', () => ({
 }));
 
 describe('DriveService', () => {
+  const originalStoreRawPayloads = process.env.GOOGLE_STORE_RAW_PAYLOADS;
   const prisma = {
     user: {
       findUnique: jest.fn(),
@@ -47,7 +48,12 @@ describe('DriveService', () => {
     process.env.GOOGLE_CLIENT_ID = 'google-client-id';
     process.env.GOOGLE_CLIENT_SECRET = 'google-client-secret';
     process.env.GOOGLE_TOKEN_ENCRYPTION_KEY = 'test-token-encryption-key';
+    delete process.env.GOOGLE_STORE_RAW_PAYLOADS;
     service = new DriveService(prisma as any);
+  });
+
+  afterAll(() => {
+    restoreOptionalEnv('GOOGLE_STORE_RAW_PAYLOADS', originalStoreRawPayloads);
   });
 
   it('returns Drive status without exposing Google tokens', async () => {
@@ -67,7 +73,7 @@ describe('DriveService', () => {
     expect(status).toEqual(
       expect.objectContaining({
         source: 'drive',
-        oauthMode: 'all_google_sources',
+        oauthMode: 'source_scoped',
         connected: true,
         scopes: ['https://www.googleapis.com/auth/drive.readonly'],
         requestedScopes: ['https://www.googleapis.com/auth/drive.readonly'],
@@ -137,6 +143,7 @@ describe('DriveService', () => {
           name: 'Capstone Notes.txt',
           mime_type: 'text/plain',
           size: BigInt(1200),
+          raw_json: null,
         }),
       }),
     );
@@ -198,3 +205,12 @@ describe('DriveService', () => {
     expect(prisma.googleDriveFile.findMany).not.toHaveBeenCalled();
   });
 });
+
+function restoreOptionalEnv(name: string, value: string | undefined) {
+  if (value === undefined) {
+    delete process.env[name];
+    return;
+  }
+
+  process.env[name] = value;
+}

@@ -37,7 +37,6 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "@google/generative-ai": "^0.24.1",
     "@second-brain/db": "workspace:*",
     "zod": "^4.4.2"
   }

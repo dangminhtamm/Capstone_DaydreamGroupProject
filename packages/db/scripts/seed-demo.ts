@@ -213,6 +213,7 @@ async function enqueueIndexingJob(
       payload: input.payload ?? {},
       run_after: new Date(),
       locked_at: null,
+      locked_by: null,
       processed_at: null,
     },
     create: {
@@ -428,7 +429,7 @@ async function main() {
       },
       update: {
         content:
-          "This week the team moved the Second Brain MVP from raw diary capture toward a complete memory product. The strongest progress was grounded search with citations, Calendar-linked diary context, attachment ingestion, and a clearer readiness panel. The main demo risk is making sure indexing jobs are drained before rehearsal and Gemini quota does not block live answers.",
+          "This week the team moved the Second Brain MVP from raw diary capture toward a complete memory product. The strongest progress was grounded search with citations, Calendar-linked diary context, attachment ingestion, and a clearer readiness panel. The main demo risk is making sure indexing jobs are drained before rehearsal and Tuturuuu quota does not block live answers.",
       },
       create: {
         user_id: user.id,
@@ -436,7 +437,7 @@ async function main() {
         period_start: weekStart,
         period_end: new Date(weekStart.getTime() + 7 * dayMs - 1),
         content:
-          "This week the team moved the Second Brain MVP from raw diary capture toward a complete memory product. The strongest progress was grounded search with citations, Calendar-linked diary context, attachment ingestion, and a clearer readiness panel. The main demo risk is making sure indexing jobs are drained before rehearsal and Gemini quota does not block live answers.",
+          "This week the team moved the Second Brain MVP from raw diary capture toward a complete memory product. The strongest progress was grounded search with citations, Calendar-linked diary context, attachment ingestion, and a clearer readiness panel. The main demo risk is making sure indexing jobs are drained before rehearsal and Tuturuuu quota does not block live answers.",
       },
     });
 

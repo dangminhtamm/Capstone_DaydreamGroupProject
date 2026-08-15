@@ -18,6 +18,7 @@ export interface TuturuuuGenerateTextOptions {
   maxOutputTokens?: number;
   idempotencyKey?: string;
   requestId?: string;
+  responseInput?: TuturuuuResponseInput;
 }
 
 export interface TuturuuuGenerateTextResult {
@@ -42,6 +43,17 @@ export interface TuturuuuEmbeddingResult {
   model: string;
   requestId?: string;
 }
+
+export type TuturuuuResponseInput =
+  | string
+  | Array<{
+      role: "user" | "system" | "assistant";
+      content: Array<
+        | { type: "input_text"; text: string }
+        | { type: "input_image"; image_url: string }
+        | { type: "input_file"; filename: string; file_data: string }
+      >;
+    }>;
 
 function readEnv(name: string): string | undefined {
   const value = process.env[name]?.trim();
@@ -103,7 +115,7 @@ export async function generateTuturuuuText(
     body: {
       model,
       instructions: options.systemPrompt,
-      input: options.prompt,
+      input: options.responseInput ?? options.prompt,
       max_output_tokens: options.maxOutputTokens,
     },
   });
@@ -120,6 +132,69 @@ export async function generateTuturuuuText(
     model: readString(payload, "model") ?? model,
     requestId: payload.requestId,
   };
+}
+
+export async function generateTuturuuuVisionText(options: {
+  prompt: string;
+  base64Data: string;
+  mimeType: string;
+  model?: string;
+  maxOutputTokens?: number;
+  idempotencyKey?: string;
+  requestId?: string;
+}): Promise<TuturuuuGenerateTextResult> {
+  const dataUrl = `data:${options.mimeType};base64,${options.base64Data}`;
+
+  return generateTuturuuuText({
+    model: options.model,
+    prompt: options.prompt,
+    maxOutputTokens: options.maxOutputTokens,
+    idempotencyKey: options.idempotencyKey,
+    requestId: options.requestId,
+    responseInput: [
+      {
+        role: "user",
+        content: [
+          { type: "input_text", text: options.prompt },
+          { type: "input_image", image_url: dataUrl },
+        ],
+      },
+    ],
+  });
+}
+
+export async function generateTuturuuuAudioTranscript(options: {
+  prompt: string;
+  base64Data: string;
+  mimeType: string;
+  fileName: string;
+  model?: string;
+  maxOutputTokens?: number;
+  idempotencyKey?: string;
+  requestId?: string;
+}): Promise<TuturuuuGenerateTextResult> {
+  const fileData = `data:${options.mimeType};base64,${options.base64Data}`;
+
+  return generateTuturuuuText({
+    model: options.model,
+    prompt: options.prompt,
+    maxOutputTokens: options.maxOutputTokens,
+    idempotencyKey: options.idempotencyKey,
+    requestId: options.requestId,
+    responseInput: [
+      {
+        role: "user",
+        content: [
+          { type: "input_text", text: options.prompt },
+          {
+            type: "input_file",
+            filename: options.fileName,
+            file_data: fileData,
+          },
+        ],
+      },
+    ],
+  });
 }
 
 export async function embedTuturuuu(

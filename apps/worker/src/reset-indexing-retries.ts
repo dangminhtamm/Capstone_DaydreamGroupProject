@@ -10,6 +10,7 @@ async function main() {
           error = NULL,
           run_after = now(),
           locked_at = NULL,
+          locked_by = NULL,
           processed_at = NULL,
           updated_at = now()
       WHERE job_type = 'index_memory'

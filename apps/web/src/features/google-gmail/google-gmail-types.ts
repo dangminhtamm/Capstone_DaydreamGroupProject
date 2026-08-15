@@ -1,6 +1,6 @@
 export type GmailConnectionStatus = {
   source?: 'gmail';
-  oauthMode?: 'all_google_sources';
+  oauthMode?: 'all_google_sources' | 'source_scoped';
   connected: boolean;
   scopes?: string[];
   requestedScopes?: string[];
@@ -23,9 +23,20 @@ export type GmailMessage = {
   updated_at: string;
 };
 
+export type GmailImportCandidate = {
+  id: string;
+  threadId: string | null;
+  sender: string;
+  subject: string;
+  snippet: string | null;
+  receivedAt: string | null;
+  alreadyImported: boolean;
+};
+
 export type GmailSyncResult = {
   message: string;
   syncedCount: number;
+  requestedCount?: number;
   queuedIndexingJobs?: number;
   memoryIndexingStatus?: 'queued' | 'succeeded' | 'failed';
 };

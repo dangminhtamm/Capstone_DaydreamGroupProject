@@ -216,7 +216,7 @@ async function assertEvaluationRuntime(
   } catch (error) {
     throw new Error(
       [
-        "Evaluation report aborted before writing artifacts because Gemini embeddings are unavailable.",
+        "Evaluation report aborted before writing artifacts because Tuturuuu embeddings are unavailable.",
         "Fix TUTURUUU_AI_API_KEY, TUTURUUU_EMBEDDING_MODEL, or Tuturuuu quota, then rerun `pnpm --filter @second-brain/ai eval:report`.",
         `Preflight error: ${toShortError(error)}`,
       ].join(" "),
@@ -645,8 +645,8 @@ function renderMarkdown(report: ReturnType<typeof buildReport>): string {
     "## Notes",
     "",
     "- Retrieval latency is measured after query embedding, matching the sub-500ms memory recall target.",
-    "- Total recall includes Gemini embedding latency and is reported separately.",
-    "- Fast answer strategy avoids live Gemini answer generation; set `MEMORY_REPORT_ANSWER_STRATEGY=deep` for full generation evaluation.",
+    "- Total recall includes Tuturuuu embedding latency and is reported separately.",
+    "- Fast answer strategy avoids live Tuturuuu answer generation; set `MEMORY_REPORT_ANSWER_STRATEGY=deep` for full generation evaluation.",
     "- Runtime-invalid reports are not published unless `MEMORY_REPORT_WRITE_INVALID=1` is set.",
     "- The stable demo artifact is `memory-evaluation-latest-valid.md`.",
     "",

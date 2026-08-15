@@ -92,16 +92,19 @@ pnpm --filter @second-brain/worker dev
 
 ## 4. Verify readiness
 
-API health:
+API liveness and readiness:
 
 ```bash
-curl -i http://localhost:3001/api/health
+curl -i http://localhost:3001/api/health/live
+curl -i http://localhost:3001/api/health/ready
 ```
+
+Detailed diagnostics are available only to signed-in admins at `GET /api/admin/diagnostics`.
 
 In the web app:
 
 - Open `http://localhost:3000/settings`
-- Confirm Health is OK
+- As an admin, confirm Operations Console diagnostics are healthy
 - Confirm Enterprise Controls are visible
 - Confirm Demo readiness is ready or only has non-blocking warnings
 - Confirm indexing has no failed/dead-letter jobs
@@ -132,4 +135,4 @@ pnpm demo:reset-indexing
 pnpm demo:drain
 ```
 
-If Gemini quota is exhausted, Search should still show retrieved sources and an extractive fallback answer for the demo questions.
+If Tuturuuu quota is exhausted, Search should still show retrieved sources and an extractive fallback answer for the demo questions.

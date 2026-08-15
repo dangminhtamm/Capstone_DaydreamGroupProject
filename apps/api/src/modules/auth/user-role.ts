@@ -6,6 +6,7 @@ export type AuthenticatedRequestUser = {
   userId: string;
   email: string;
   role?: UserRole;
+  emailVerified?: boolean;
 };
 
 export function normalizeUserRole(value: unknown): UserRole {
@@ -19,6 +20,23 @@ export function isAdminEmail(email: string | null | undefined): boolean {
   if (!normalizedEmail) return false;
 
   return getConfiguredAdminEmails().has(normalizedEmail);
+}
+
+export function adminEmailVerificationRequired(): boolean {
+  const configured =
+    process.env.ADMIN_REQUIRE_EMAIL_VERIFIED ??
+    process.env.AUTH_REQUIRE_EMAIL_VERIFIED;
+  if (configured !== undefined) {
+    return configured.toLowerCase() !== 'false';
+  }
+
+  return process.env.NODE_ENV === 'production';
+}
+
+export function canUseAdminPrivileges(
+  authUser: Pick<AuthenticatedRequestUser, 'emailVerified'>,
+): boolean {
+  return !adminEmailVerificationRequired() || authUser.emailVerified === true;
 }
 
 function getConfiguredAdminEmails(): Set<string> {

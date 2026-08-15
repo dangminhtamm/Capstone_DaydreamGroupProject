@@ -8,12 +8,12 @@ import { useTheme } from "@/contexts/ThemeContext";
 import {
   getDemoReadiness,
   getIndexingStatus,
-  getSystemHealth,
+  getAdminDiagnostics,
   requeueDeadLetterIndexingJobs,
   requeueIndexingJob,
   type DemoReadiness,
   type IndexingStatus,
-  type SystemHealth,
+  type AdminDiagnostics,
 } from "@/lib/api-client";
 import { GoogleWorkspaceCard } from "@/components/integrations/google-workspace-card";
 import { fetchCalendarStatus } from "@/features/google-calendar/google-calendar-api";
@@ -36,19 +36,38 @@ type GoogleSourceHealth = {
   lastError: string | null;
 };
 
-type SettingsTab = "profile" | "google" | "memory" | "preferences";
+type SettingsTab = "profile" | "google" | "memory" | "preferences" | "admin";
 type HealthTone = "ready" | "working" | "attention" | "idle";
 
-const settingsTabs: Array<{
+const baseSettingsTabs: Array<{
   id: SettingsTab;
   label: string;
   description: string;
 }> = [
   { id: "profile", label: "Profile", description: "Account and password" },
   { id: "google", label: "Google Workspace", description: "Calendar, Contacts, Drive" },
-  { id: "memory", label: "Memory & Indexing", description: "Health, jobs, readiness" },
   { id: "preferences", label: "Preferences", description: "Theme, language, usage" },
 ];
+
+const memorySettingsTab: {
+  id: SettingsTab;
+  label: string;
+  description: string;
+} = {
+  id: "memory",
+  label: "Memory & Indexing",
+  description: "Simple readiness",
+};
+
+const adminSettingsTab: {
+  id: SettingsTab;
+  label: string;
+  description: string;
+} = {
+  id: "admin",
+  label: "Admin",
+  description: "Queue, health, readiness",
+};
 
 function getTokenStats(): TokenStats {
   try {
@@ -275,7 +294,7 @@ export default function SettingsPage() {
   const [isUpdatingName, setIsUpdatingName] = useState(false);
   const [nameUpdateResult, setNameUpdateResult] = useState<"success" | "error" | null>(null);
   const [responseLang, setResponseLang] = useState<"en" | "vi">("en");
-  const [systemHealth, setSystemHealth] = useState<SystemHealth | null>(null);
+  const [systemHealth, setSystemHealth] = useState<AdminDiagnostics | null>(null);
   const [indexingStatus, setIndexingStatus] = useState<IndexingStatus | null>(null);
   const [demoReadiness, setDemoReadiness] = useState<DemoReadiness | null>(null);
   const [googleSourceHealth, setGoogleSourceHealth] = useState<GoogleSourceHealth[] | null>(null);
@@ -283,6 +302,10 @@ export default function SettingsPage() {
   const [isRequeueingIndexing, setIsRequeueingIndexing] = useState(false);
   const [systemStatusMsg, setSystemStatusMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [activeTab, setActiveTab] = useState<SettingsTab>("profile");
+  const visibleSettingsTabs = useMemo(
+    () => (isAdmin ? [...baseSettingsTabs.slice(0, 2), memorySettingsTab, ...baseSettingsTabs.slice(2), adminSettingsTab] : baseSettingsTabs),
+    [isAdmin],
+  );
 
   // Avatar upload
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -315,8 +338,16 @@ export default function SettingsPage() {
       setActiveTab("google");
     } else if (window.location.hash === "#memory-status") {
       setActiveTab("memory");
+    } else if (window.location.hash === "#admin-status") {
+      setActiveTab("admin");
     }
   }, []);
+
+  useEffect(() => {
+    if (!isAdmin && (activeTab === "admin" || activeTab === "memory")) {
+      setActiveTab("profile");
+    }
+  }, [activeTab, isAdmin]);
 
   useEffect(() => {
     setDisplayNameEdit(displayName);
@@ -328,7 +359,7 @@ export default function SettingsPage() {
     try {
       const token = getAccessToken();
       const [health, indexing, readiness, googleHealth] = await Promise.all([
-        isAuthenticated ? getSystemHealth(token) : Promise.resolve(null),
+        isAuthenticated && isAdmin ? getAdminDiagnostics(token) : Promise.resolve(null),
         isAuthenticated ? getIndexingStatus(token) : Promise.resolve(null),
         isAuthenticated ? getDemoReadiness(token) : Promise.resolve(null),
         isAuthenticated ? getGoogleSourceHealth(token) : Promise.resolve(null),
@@ -346,7 +377,7 @@ export default function SettingsPage() {
     } finally {
       setIsLoadingSystemStatus(false);
     }
-  }, [getAccessToken, isAuthenticated]);
+  }, [getAccessToken, isAdmin, isAuthenticated]);
 
   useEffect(() => {
     void refreshSystemStatus();
@@ -521,7 +552,7 @@ export default function SettingsPage() {
     {
       label: "AI gateway",
       detail: "Tuturuuu AI gateway is configured for embedding and answer generation.",
-      ok: systemHealth?.environment.geminiConfigured,
+      ok: systemHealth?.environment.tuturuuuConfigured,
     },
     {
       label: "Google OAuth",
@@ -646,8 +677,8 @@ export default function SettingsPage() {
     >
       <div className="mx-auto max-w-5xl space-y-6">
         <div className="enterprise-card p-1.5">
-          <div className="grid gap-2 md:grid-cols-4">
-            {settingsTabs.map((tab) => {
+          <div className={`grid gap-2 ${isAdmin ? "md:grid-cols-5" : "md:grid-cols-3"}`}>
+            {visibleSettingsTabs.map((tab) => {
               const isActive = activeTab === tab.id;
               return (
                 <button
@@ -865,27 +896,22 @@ export default function SettingsPage() {
 
         {activeTab === "google" ? (
         <Suspense fallback={null}>
-          <GoogleWorkspaceCard indexingStatus={indexingStatus} />
+          <GoogleWorkspaceCard indexingStatus={indexingStatus} variant={isAdmin ? "admin" : "user"} />
         </Suspense>
         ) : null}
 
-        {/* ─── System Health ─── */}
-        {activeTab === "memory" ? (
+        {/* ─── Admin Memory Status ─── */}
+        {isAdmin && activeTab === "memory" ? (
         <section id="memory-status" className="scroll-mt-24 enterprise-card p-5">
           <div className="mb-5 flex items-start justify-between gap-4">
             <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">System</p>
-              <h3 className="mt-1.5 text-xl font-semibold tracking-tight text-slate-950 dark:text-slate-100">Health & Indexing</h3>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">Memory</p>
+              <h3 className="mt-1.5 text-xl font-semibold tracking-tight text-slate-950 dark:text-slate-100">Memory & Indexing Status</h3>
+              <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
+                Simple readiness for diary, attachments, Google imports, and AI Recall.
+              </p>
             </div>
             <div className="flex flex-wrap justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => void handleRequeueDeadLetterJobs()}
-                disabled={!isAuthenticated || isRequeueingIndexing || userFailedJobs === 0}
-                className="action-secondary border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 disabled:cursor-not-allowed dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300 dark:hover:bg-amber-900/40"
-              >
-                {isRequeueingIndexing ? "Requeueing..." : "Requeue failed"}
-              </button>
               <button
                 type="button"
                 onClick={() => void refreshSystemStatus()}
@@ -910,10 +936,10 @@ export default function SettingsPage() {
                   <span className={`h-2.5 w-2.5 rounded-full ${healthDotClass(systemOverallTone)}`} aria-hidden />
                   <p className="text-sm font-bold text-slate-950 dark:text-slate-100">
                     {systemOverallTone === "ready"
-                      ? "System ready for demo"
+                      ? "Memory is ready"
                       : isLoadingSystemStatus
-                        ? "Checking system status"
-                        : "System needs attention"}
+                        ? "Checking memory status"
+                        : "Memory needs attention"}
                   </p>
                   <span className={`status-badge ${healthToneBadgeClass(systemOverallTone)}`}>
                     {systemHealth?.status ?? "unknown"}
@@ -921,8 +947,10 @@ export default function SettingsPage() {
                 </div>
                 <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-400">
                   {systemOverallTone === "ready"
-                    ? "API, database, required environment, and indexing queue look healthy."
-                    : "Review the highlighted checks below before running a demo or importing more memory sources."}
+                    ? "New entries and imports are ready to become searchable AI memory."
+                    : isAdmin
+                      ? "Open the Admin tab for queue details, requeue actions, and readiness checks."
+                      : "Some memory operations need attention. If jobs are stuck, ask an admin to inspect the queue."}
                 </p>
               </div>
               {systemHealth?.checkedAt ? (
@@ -933,7 +961,7 @@ export default function SettingsPage() {
             </div>
           </div>
 
-          <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             <DemoStatusTile
               label="Worker"
               value={workerFriendlyValue}
@@ -959,6 +987,24 @@ export default function SettingsPage() {
               tone={indexingOverallTone}
             />
             <DemoStatusTile
+              label="Search memory"
+              value={
+                embeddingOverallTone === "ready"
+                  ? "Ready"
+                  : embeddingIssueCount > 0
+                    ? "Re-embed needed"
+                    : activeEmbeddingIndex
+                      ? "No chunks yet"
+                      : "Unknown"
+              }
+              detail={
+                activeEmbeddingIndex
+                  ? `${activeEmbeddingIndex.currentEmbeddingModelChunks}/${activeEmbeddingIndex.totalChunks} chunks use ${activeEmbeddingIndex.embeddingModel}.`
+                  : "Refresh after adding diary entries or importing Google data."
+              }
+              tone={embeddingOverallTone}
+            />
+            <DemoStatusTile
               label="Google"
               value={googleFriendlyValue}
               detail={
@@ -971,6 +1017,70 @@ export default function SettingsPage() {
               tone={googleOverallTone}
             />
           </div>
+
+          {indexingOverallTone === "attention" ? (
+            <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/50 dark:bg-amber-950/20">
+              <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">
+                Indexing needs attention
+              </p>
+              <p className="mt-1 text-sm leading-6 text-amber-700 dark:text-amber-300">
+                {userFailedJobs + outboxFailedJobs + staleProcessingJobs} job(s) need review. {isAdmin ? "Use the Admin tab to inspect and requeue failed jobs." : `Signed in as ${role}. An admin can inspect and requeue failed jobs.`}
+              </p>
+            </div>
+          ) : null}
+
+          {isAdmin ? (
+            <div className="mt-4 rounded-2xl border border-blue-200 bg-blue-50 p-4 dark:border-blue-900/50 dark:bg-blue-950/20">
+              <p className="text-sm font-semibold text-blue-800 dark:text-blue-300">
+                Admin operations are separated
+              </p>
+              <p className="mt-1 text-sm leading-6 text-blue-700 dark:text-blue-300">
+                Queue details, schema checks, enterprise controls, demo readiness, and requeue actions are now in the Admin tab.
+              </p>
+            </div>
+          ) : null}
+        </section>
+        ) : null}
+
+        {isAdmin && activeTab === "admin" ? (
+        <section id="admin-status" className="scroll-mt-24 enterprise-card p-5">
+          <div className="mb-5 flex items-start justify-between gap-4">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">Admin</p>
+              <h3 className="mt-1.5 text-xl font-semibold tracking-tight text-slate-950 dark:text-slate-100">Operations Console</h3>
+              <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
+                Worker health, indexing queue, readiness, schema checks, and enterprise controls.
+              </p>
+            </div>
+            <div className="flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => void handleRequeueDeadLetterJobs()}
+                disabled={!isAuthenticated || isRequeueingIndexing || userFailedJobs === 0}
+                className="action-secondary border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 disabled:cursor-not-allowed dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300 dark:hover:bg-amber-900/40"
+              >
+                {isRequeueingIndexing
+                  ? "Requeueing..."
+                  : userFailedJobs > 0
+                    ? `Requeue dead-letter (${userFailedJobs})`
+                    : "No dead-letter jobs"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void refreshSystemStatus()}
+                disabled={isLoadingSystemStatus}
+                className="action-secondary disabled:cursor-not-allowed"
+              >
+                {isLoadingSystemStatus ? "Checking..." : "Refresh"}
+              </button>
+            </div>
+          </div>
+
+          {systemStatusMsg && (
+            <p className={`mb-4 text-sm font-medium ${systemStatusMsg.type === "success" ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+              {systemStatusMsg.text}
+            </p>
+          )}
 
           <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-7">
             <HealthSnapshotCard

@@ -12,6 +12,25 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: second_brain_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d second_brain_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/second_brain_ci
+      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/second_brain_ci
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -32,9 +51,12 @@ jobs:
 
       - name: Generate Prisma Client
         run: pnpm --filter @second-brain/db prisma:generate
-        env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/second_brain_ci
-          DIRECT_URL: postgresql://postgres:postgres@localhost:5432/second_brain_ci
+
+      - name: Migrate blank PostgreSQL database
+        run: pnpm db:migrate:deploy
+
+      - name: Verify migrated schema matches Prisma
+        run: pnpm --filter @second-brain/db prisma:migrate:check
 
       - name: Build
         run: pnpm build

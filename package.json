@@ -12,6 +12,7 @@
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f api worker web",
     "docker:migrate": "docker compose run --rm migrate",
+    "db:migrate:deploy": "pnpm --filter @second-brain/db prisma:migrate:deploy",
     "demo:seed": "node --env-file=.env --experimental-strip-types packages/db/scripts/seed-demo.ts",
     "demo:drain": "pnpm --filter @second-brain/worker indexing:drain",
     "demo:reset-indexing": "pnpm --filter @second-brain/worker indexing:reset-retries",

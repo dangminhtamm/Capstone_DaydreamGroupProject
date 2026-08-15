@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { indexMemoryFromContact } from "./contact-indexer.ts";
 
-test("indexMemoryFromContact creates grounded contact chunks without Gemini generation", async () => {
+test("indexMemoryFromContact creates grounded contact chunks without Tuturuuu generation", async () => {
   const inserted: any[] = [];
   const result = await indexMemoryFromContact({
     userId: "user-1",

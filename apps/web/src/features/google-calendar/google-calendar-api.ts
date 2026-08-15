@@ -99,8 +99,14 @@ export async function fetchCalendarEvents(accessToken: string | null): Promise<C
   }));
 }
 
-export async function fetchCalendarConnectUrl(accessToken: string | null): Promise<string> {
-  const response = await authFetch('/api/calendar/connect', { method: 'GET' }, accessToken);
+export type GoogleConnectSource = 'calendar' | 'contact' | 'drive' | 'gmail' | 'all';
+
+export async function fetchCalendarConnectUrl(
+  accessToken: string | null,
+  source: GoogleConnectSource = 'all',
+): Promise<string> {
+  const query = new URLSearchParams({ source }).toString();
+  const response = await authFetch(`/api/calendar/connect?${query}`, { method: 'GET' }, accessToken);
 
   if (!response.ok) {
     const message = await readApiError(response, 'Failed to start Google Calendar connection');

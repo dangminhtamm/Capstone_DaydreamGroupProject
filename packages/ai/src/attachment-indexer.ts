@@ -116,7 +116,7 @@ export async function indexMemoryFromAttachment(
       text: chunk.text,
       evidence: chunk.evidence ?? "",
       occurredAt: chunk.occurredAt.toISOString(),
-      embeddingDimension: chunk.embedding.length,
+      embeddingDimension: chunk.embedding?.length ?? 0,
     })),
   };
 }

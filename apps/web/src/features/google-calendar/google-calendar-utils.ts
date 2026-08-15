@@ -30,33 +30,48 @@ export function isSafeRedirectUrl(url: string): boolean {
 export function parseCalendarCallbackParams(searchParams: URLSearchParams): {
   result: 'connected' | 'error' | null;
   reason: string | null;
+  source: string | null;
 } {
   const calendar = searchParams.get('calendar');
-  if (!calendar) return { result: null, reason: null };
+  const source = searchParams.get('source');
+  if (!calendar) return { result: null, reason: null, source };
 
   if (calendar === 'connected') {
-    return { result: 'connected', reason: null };
+    return { result: 'connected', reason: null, source };
   }
 
-  return { result: 'error', reason: searchParams.get('reason') };
+  return { result: 'error', reason: searchParams.get('reason'), source };
 }
 
 export function buildCalendarFeedback(
   result: 'connected' | 'error',
   reason: string | null,
+  source?: string | null,
 ): CalendarFeedback {
+  const sourceLabel = googleSourceLabel(source);
   if (result === 'connected') {
-    return { type: 'success', text: 'Google Calendar connected successfully.' };
+    return { type: 'success', text: `${sourceLabel} connected successfully.` };
   }
 
   if (reason === 'access_denied') {
-    return { type: 'error', text: 'Google Calendar connection was cancelled.' };
+    return { type: 'error', text: `${sourceLabel} connection was cancelled.` };
   }
 
-  return { type: 'error', text: 'Google Calendar connection failed.' };
+  return { type: 'error', text: `${sourceLabel} connection failed.` };
 }
 
-function isDemoMode(): boolean {
-  if (typeof window === 'undefined') return false;
-  return process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+function googleSourceLabel(source?: string | null) {
+  switch (source) {
+    case 'gmail':
+      return 'Gmail';
+    case 'drive':
+      return 'Google Drive';
+    case 'contact':
+      return 'Google Contacts';
+    case 'all':
+      return 'Google Workspace';
+    case 'calendar':
+    default:
+      return 'Google Calendar';
+  }
 }

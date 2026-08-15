@@ -7,9 +7,18 @@ import { GmailService } from './gmail.service';
 
 describe('GmailService error handling', () => {
   let service: GmailService;
+  const originalStoreRawPayloads = process.env.GOOGLE_STORE_RAW_PAYLOADS;
+  const originalGmailBodyMaxChars = process.env.GOOGLE_GMAIL_BODY_MAX_CHARS;
 
   beforeEach(() => {
+    delete process.env.GOOGLE_STORE_RAW_PAYLOADS;
+    delete process.env.GOOGLE_GMAIL_BODY_MAX_CHARS;
     service = new GmailService({} as any);
+  });
+
+  afterAll(() => {
+    restoreOptionalEnv('GOOGLE_STORE_RAW_PAYLOADS', originalStoreRawPayloads);
+    restoreOptionalEnv('GOOGLE_GMAIL_BODY_MAX_CHARS', originalGmailBodyMaxChars);
   });
 
   it('maps missing Gmail table errors to a useful migration message', () => {
@@ -68,7 +77,7 @@ describe('GmailService error handling', () => {
     ).toThrow(UnauthorizedException);
   });
 
-  it('normalizes Gmail messages into Postgres-safe text and JSON', () => {
+  it('normalizes Gmail messages into Postgres-safe minimized text by default', () => {
     const bodyWithNullByte = Buffer.from('Hello\u0000Second Brain').toString('base64url');
     const message = {
       id: 'gmail-message-1',
@@ -92,6 +101,50 @@ describe('GmailService error handling', () => {
     expect(normalized.subject).toBe('Citation feedback');
     expect(normalized.snippet).toBe('Snippettext');
     expect(normalized.body).toBe('HelloSecond Brain');
+    expect(normalized.raw_json).toBeNull();
+  });
+
+  it('stores sanitized raw Gmail payloads only when explicitly enabled', () => {
+    process.env.GOOGLE_STORE_RAW_PAYLOADS = 'true';
+    const message = {
+      id: 'gmail-message-1',
+      threadId: 'thread-1',
+      payload: {
+        headers: [],
+        undefinedField: undefined,
+      },
+    };
+
+    const normalized = (service as any).normalizeMessage(message);
+
+    expect(normalized.raw_json).toBeTruthy();
     expect(JSON.stringify(normalized.raw_json)).not.toContain('undefinedField');
   });
+
+  it('caps stored Gmail body text', () => {
+    process.env.GOOGLE_GMAIL_BODY_MAX_CHARS = '5';
+    const body = Buffer.from('Hello Second Brain').toString('base64url');
+    const message = {
+      id: 'gmail-message-1',
+      threadId: 'thread-1',
+      payload: {
+        headers: [],
+        mimeType: 'text/plain',
+        body: { data: body },
+      },
+    };
+
+    const normalized = (service as any).normalizeMessage(message);
+
+    expect(normalized.body).toBe('Hello');
+  });
 });
+
+function restoreOptionalEnv(name: string, value: string | undefined) {
+  if (value === undefined) {
+    delete process.env[name];
+    return;
+  }
+
+  process.env[name] = value;
+}

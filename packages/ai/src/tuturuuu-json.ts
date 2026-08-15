@@ -5,9 +5,10 @@ import {
 
 type ResponseSchema = unknown;
 
-export interface GenerateGeminiJsonOptions<T> {
+export interface GenerateTuturuuuJsonOptions<T> {
   model: string;
   prompt: string;
+  systemPrompt?: string;
   responseSchema: ResponseSchema;
   validator: z.ZodType<T>;
   temperature?: number;
@@ -17,26 +18,26 @@ export interface GenerateGeminiJsonOptions<T> {
   maxRetryDelayMs?: number;
 }
 
-export interface GeminiTokenUsage {
+export interface TuturuuuJsonTokenUsage {
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
   model: string;
 }
 
-export interface GeminiJsonResultWithMeta<T> {
+export interface TuturuuuJsonResultWithMeta<T> {
   data: T;
-  tokenUsage: GeminiTokenUsage;
+  tokenUsage: TuturuuuJsonTokenUsage;
 }
 
 /**
  * Original function — returns only the parsed & validated JSON.
  * Preserved for backward compatibility with existing callers.
  */
-export async function generateGeminiJson<T>(
-  options: GenerateGeminiJsonOptions<T>,
+export async function generateTuturuuuJson<T>(
+  options: GenerateTuturuuuJsonOptions<T>,
 ): Promise<T> {
-  const result = await generateGeminiJsonWithMeta(options);
+  const result = await generateTuturuuuJsonWithMeta(options);
   return result.data;
 }
 
@@ -44,19 +45,27 @@ export async function generateGeminiJson<T>(
  * Enhanced version — returns parsed JSON **plus** token usage metadata
  * from the Tuturuuu API response. Used by answerMemory for observability.
  */
-export async function generateGeminiJsonWithMeta<T>(
-  options: GenerateGeminiJsonOptions<T>,
-): Promise<GeminiJsonResultWithMeta<T>> {
+export async function generateTuturuuuJsonWithMeta<T>(
+  options: GenerateTuturuuuJsonOptions<T>,
+): Promise<TuturuuuJsonResultWithMeta<T>> {
   const modelName = options.model;
   void options.responseSchema;
   void options.temperature;
 
   let lastError: Error | null = null;
-  const configuredRetries = Number(options.maxRetries ?? process.env.GEMINI_JSON_MAX_RETRIES ?? 2);
+  const configuredRetries = Number(
+    options.maxRetries ??
+      process.env.TUTURUUU_JSON_MAX_RETRIES ??
+      2,
+  );
   const maxRetries = Number.isFinite(configuredRetries)
     ? Math.max(0, Math.floor(configuredRetries))
     : 2;
-  const configuredFormatRetries = Number(options.maxFormatRetries ?? process.env.GEMINI_JSON_FORMAT_RETRIES ?? 1);
+  const configuredFormatRetries = Number(
+    options.maxFormatRetries ??
+      process.env.TUTURUUU_JSON_FORMAT_RETRIES ??
+      1,
+  );
   const maxFormatRetries = Number.isFinite(configuredFormatRetries)
     ? Math.max(0, Math.floor(configuredFormatRetries))
     : 1;
@@ -72,6 +81,7 @@ export async function generateGeminiJsonWithMeta<T>(
       const generation = await generateJsonText({
         modelName,
         prompt,
+        systemPrompt: options.systemPrompt,
         maxOutputTokens: options.maxOutputTokens,
       });
       const text = generation.text;
@@ -79,7 +89,7 @@ export async function generateGeminiJsonWithMeta<T>(
       const parsed = parseJsonResponse(text);
       const validated = options.validator.parse(parsed);
 
-      const tokenUsage: GeminiTokenUsage = {
+      const tokenUsage: TuturuuuJsonTokenUsage = {
         promptTokens: generation.tokenUsage.promptTokens,
         completionTokens: generation.tokenUsage.completionTokens,
         totalTokens: generation.tokenUsage.totalTokens,
@@ -117,17 +127,18 @@ export async function generateGeminiJsonWithMeta<T>(
 async function generateJsonText(input: {
   modelName: string;
   prompt: string;
+  systemPrompt?: string;
   maxOutputTokens?: number;
 }): Promise<{
   text: string;
   finishReason?: string;
-  tokenUsage: Omit<GeminiTokenUsage, "model">;
+  tokenUsage: Omit<TuturuuuJsonTokenUsage, "model">;
 }> {
   const result = await generateTuturuuuText({
     model: input.modelName,
     prompt: input.prompt,
     maxOutputTokens: input.maxOutputTokens,
-    systemPrompt:
+    systemPrompt: input.systemPrompt ??
       "Return only valid JSON matching the user's requested schema. Do not include markdown fences or prose outside the JSON.",
   });
   return {
@@ -160,7 +171,6 @@ function isJsonFormatError(error: Error): boolean {
   return (
     error instanceof ZodError ||
     error.message.includes("Tuturuuu returned invalid JSON") ||
-    error.message.includes("Gemini returned invalid JSON") ||
     error.message.includes("could not be repaired") ||
     error.message.includes("truncated") ||
     error.message.includes("finishReason") ||
@@ -201,7 +211,7 @@ function summarizeJsonFormatError(error: Error): string {
 }
 
 function maybeLogInvalidJson(error: Error): void {
-  if (process.env.GEMINI_JSON_LOG_INVALID !== "1") return;
+  if (process.env.TUTURUUU_JSON_LOG_INVALID !== "1") return;
   console.warn(`[TuturuuuJSON] Retrying because JSON output was invalid: ${summarizeJsonFormatError(error)}`);
 }
 
@@ -233,7 +243,11 @@ function getRetryDelayMs(
   attempt: number,
   maxRetryDelayMs?: number,
 ): number {
-  const configuredMax = Number(maxRetryDelayMs ?? process.env.GEMINI_JSON_MAX_RETRY_DELAY_MS ?? 60_000);
+  const configuredMax = Number(
+    maxRetryDelayMs ??
+      process.env.TUTURUUU_JSON_MAX_RETRY_DELAY_MS ??
+      60_000,
+  );
   const maxDelayMs = Number.isFinite(configuredMax) ? configuredMax : 60_000;
   const status = getErrorStatus(error);
   const retryInfoDelay = extractRetryInfoDelayMs(error);

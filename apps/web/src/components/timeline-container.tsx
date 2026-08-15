@@ -116,7 +116,7 @@ function MiniCalendar({
                 ${isSelected
                   ? "bg-indigo-600 text-white shadow-sm"
                   : hasEntry
-                    ? "text-slate-800 hover:bg-indigo-50 hover:text-indigo-700 dark:text-slate-200 dark:hover:bg-indigo-900/30 dark:hover:text-indigo-300"
+                    ? "bg-indigo-50 text-indigo-800 hover:bg-indigo-100 hover:text-indigo-900 dark:bg-indigo-950/30 dark:text-indigo-200 dark:hover:bg-indigo-900/40 dark:hover:text-indigo-100"
                     : "cursor-default text-slate-300 dark:text-slate-600"
                 }
                 ${isToday && !isSelected ? "ring-1 ring-indigo-400 dark:ring-indigo-500" : ""}
@@ -124,7 +124,7 @@ function MiniCalendar({
             >
               {day}
               {hasEntry && !isSelected && (
-                <span className="absolute bottom-0.5 left-1/2 h-1 w-1 -translate-x-1/2 rounded-full bg-indigo-500 dark:bg-indigo-400" />
+                <span className="absolute bottom-0.5 left-1/2 h-1 w-3 -translate-x-1/2 rounded-full bg-indigo-500 dark:bg-indigo-400" />
               )}
             </button>
           );
@@ -146,7 +146,7 @@ function MiniCalendar({
 }
 
 export function TimelineContainer() {
-  const { getAccessToken, isAuthenticated, isLoading: authLoading } = useAuth();
+  const { getAccessToken, isAuthenticated, isLoading: authLoading, isAdmin } = useAuth();
   const [entries, setEntries] = useState<DiaryEntry[]>([]);
   const [state, setState] = useState<LoadState>("idle");
   const [errorMessage, setErrorMessage] = useState<string>("");
@@ -216,6 +216,14 @@ export function TimelineContainer() {
       return counts;
     }, {});
   }, [entries]);
+
+  const dominantMood = useMemo(() => {
+    const mood = (["great", "good", "neutral", "bad"] as const)
+      .map((value) => ({ value, count: moodStats[value] ?? 0 }))
+      .sort((first, second) => second.count - first.count)[0];
+
+    return mood && mood.count > 0 ? mood : null;
+  }, [moodStats]);
 
   const topTags = useMemo(() => {
     const counts = new Map<string, number>();
@@ -310,7 +318,7 @@ export function TimelineContainer() {
             <span className="ml-1 text-xs text-indigo-500 dark:text-indigo-400">({filteredEntries.length})</span>
           </div>
         )}
-        <TimelineList entries={filteredEntries} onUpdate={handleUpdate} onDelete={handleDelete} />
+        <TimelineList entries={filteredEntries} onUpdate={handleUpdate} onDelete={handleDelete} isAdmin={isAdmin} />
       </div>
       <aside className="order-first lg:order-last">
         <div className="sticky top-28">
@@ -321,20 +329,23 @@ export function TimelineContainer() {
           />
           {/* Quick stats */}
           <div className="mt-3 enterprise-card p-4">
-            <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Stats</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Writing snapshot</p>
             <div className="mt-2 grid grid-cols-2 gap-3">
               <div className="text-center">
                 <p className="text-xl font-bold text-slate-900 dark:text-slate-100">{entries.length}</p>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400">Total entries</p>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">Entries</p>
               </div>
               <div className="text-center">
                 <p className="text-xl font-bold text-slate-900 dark:text-slate-100">{entryDates.size}</p>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400">Days written</p>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">Active days</p>
               </div>
             </div>
           </div>
           <div className="mt-3 enterprise-card p-4">
-            <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Mood tracking</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Mood pattern</p>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              {dominantMood ? `Most frequent: ${dominantMood.value[0].toUpperCase()}${dominantMood.value.slice(1)}` : "Add moods in Diary"}
+            </p>
             <div className="mt-3 space-y-2">
               {(["great", "good", "neutral", "bad"] as const).map((mood) => {
                 const count = moodStats[mood] ?? 0;

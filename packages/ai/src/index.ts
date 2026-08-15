@@ -5,10 +5,16 @@ export {
   type SemanticChunk,
   type MemoryChunkMetadata,
 } from "./types.ts";
-export { generateSemanticChunks } from "./chunker.ts";
+export {
+  generateDeterministicDiaryChunks,
+  generateSemanticChunks,
+  type GenerateSemanticChunksOptions,
+} from "./chunker.ts";
 export {
   retrieveMemory,
+  retrieveMemoryLexicalOnly,
   retrieveMemoryWithEmbedding,
+  extractEntityQueryTerms,
   type RetrievalFilters,
 } from "./retrieval.ts";
 export {
@@ -22,6 +28,12 @@ export {
   type QueryAnalytics,
   type ResponseLanguage,
 } from "./answer-memory.ts";
+export {
+  INTENT_PROFILES,
+  getIntentProfile,
+  getIntentRetrievalProfile,
+  type IntentProfile,
+} from "./answer-memory-intent-profiles.ts";
 export { type MemoryCitation } from "./answer-utils.ts";
 export {
   answerMemoryStream,
@@ -37,6 +49,7 @@ export {
   type IndexMemoryFromDiaryResult,
   type PersistedMemoryChunkPayload,
 } from "./memory-indexer.ts";
+export { extractEntityMentionsFromMetadata } from "./indexing-utils.ts";
 export {
   indexMemoryFromCalendar,
   type CalendarEventInput,
@@ -73,12 +86,12 @@ export {
 export {
   DEFAULT_EMBEDDING_DIMENSION,
   DEFAULT_EMBEDDING_PROVIDER,
-  GEMINI_EMBEDDING_MODEL,
-  GeminiEmbeddingProvider,
   TUTURUUU_EMBEDDING_MODEL,
+  TuturuuuEmbeddingProvider,
   createEmbeddingProvider,
   createDefaultEmbeddingProvider,
   getEmbeddingProviderName,
+  type AdvancedEmbeddingProvider,
 } from "./embedding.ts";
 export type {
   ChunkedMemoryChunk,
@@ -87,24 +100,18 @@ export type {
   MemoryChunk,
 } from "./types.ts";
 export {
-  type GeminiTokenUsage,
-  type GeminiJsonResultWithMeta,
-} from "./gemini-json.ts";
-export {
-  DEFAULT_TUTURUUU_GEMINI_BASE_URL,
-  createGeminiCompatibleClient,
-  getGeminiCompatibleApiKey,
-  getGeminiCompatibleBaseUrl,
-  getGeminiRequestOptions,
-  requireGeminiCompatibleApiKey,
-} from "./gemini-client.ts";
+  type TuturuuuJsonTokenUsage,
+  type TuturuuuJsonResultWithMeta,
+} from "./tuturuuu-json.ts";
 export {
   DEFAULT_TUTURUUU_API_BASE_URL,
   DEFAULT_TUTURUUU_EMBEDDING_MODEL,
   DEFAULT_TUTURUUU_RESPONSE_MODEL,
   canUseTuturuuuApi,
   embedTuturuuu,
+  generateTuturuuuAudioTranscript,
   generateTuturuuuText,
+  generateTuturuuuVisionText,
   getTuturuuuApiBaseUrl,
   getTuturuuuApiKey,
   requireTuturuuuApiKey,
@@ -112,6 +119,7 @@ export {
   type TuturuuuGenerateTextResult,
   type TuturuuuEmbeddingOptions,
   type TuturuuuEmbeddingResult,
+  type TuturuuuResponseInput,
   type TuturuuuTokenUsage,
 } from "./tuturuuu-client.ts";
 export {
@@ -119,11 +127,22 @@ export {
   type GenerateAiTextOptions,
 } from "./ai-text.ts";
 export {
-  DEFAULT_GEMINI_ANSWER_MODEL,
-  DEFAULT_GEMINI_CHUNK_MODEL,
-  DEFAULT_GEMINI_VISION_MODEL,
-  getGeminiAnswerModel,
-  getGeminiChunkModel,
-  getGeminiSummaryModel,
-  getGeminiVisionModel,
-} from "./gemini-models.ts";
+  formatSummaryDateTime,
+  formatSummaryPeriodRange,
+  getSummaryPeriod,
+  isLastLocalDayOfMonth,
+  resolveSummaryTimeZone,
+  type SummaryPeriod,
+  type SummaryPeriodType,
+} from "./summary-period.ts";
+export {
+  DEFAULT_TUTURUUU_ANSWER_MODEL,
+  DEFAULT_TUTURUUU_CHUNK_MODEL,
+  DEFAULT_TUTURUUU_TRANSCRIPTION_MODEL,
+  DEFAULT_TUTURUUU_VISION_MODEL,
+  getTuturuuuAnswerModel,
+  getTuturuuuChunkModel,
+  getTuturuuuSummaryModel,
+  getTuturuuuTranscriptionModel,
+  getTuturuuuVisionModel,
+} from "./tuturuuu-models.ts";

@@ -405,8 +405,79 @@ function InsightSnapshot({
   );
 }
 
+function PersonalReflectionCard({
+  latestAiSummary,
+  isGenerating,
+  message,
+  error,
+  onRefresh,
+}: {
+  latestAiSummary?: SummaryRecord;
+  isGenerating: boolean;
+  message: string;
+  error: string;
+  onRefresh: () => void;
+}) {
+  return (
+    <section className="enterprise-card p-5">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
+            Reflection
+          </p>
+          <h3 className="mt-1.5 text-xl font-semibold text-slate-950 dark:text-slate-100">
+            Latest personal summary
+          </h3>
+          <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
+            A short recap of recent diary and calendar context, written for review instead of debugging.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onRefresh}
+          disabled={isGenerating}
+          className="action-secondary disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {isGenerating ? "Refreshing..." : latestAiSummary ? "Refresh reflection" : "Create reflection"}
+        </button>
+      </div>
+
+      {message ? (
+        <p className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300">
+          {message}
+        </p>
+      ) : null}
+      {error ? (
+        <p className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700 dark:border-rose-800 dark:bg-rose-900/30 dark:text-rose-300">
+          {error}
+        </p>
+      ) : null}
+
+      <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-900/60">
+        {latestAiSummary ? (
+          <>
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <span className="status-badge capitalize">{latestAiSummary.type}</span>
+              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                {formatSummaryPeriod(latestAiSummary)}
+              </span>
+            </div>
+            <p className="whitespace-pre-wrap text-sm leading-7 text-slate-700 dark:text-slate-300">
+              {latestAiSummary.content}
+            </p>
+          </>
+        ) : (
+          <p className="text-sm leading-6 text-slate-500 dark:text-slate-400">
+            No reflection yet. Add a few diary entries, then create a weekly reflection to see the main themes and next steps.
+          </p>
+        )}
+      </div>
+    </section>
+  );
+}
+
 export function SummaryDashboard() {
-  const { getAccessToken, isAuthenticated, isLoading: authLoading } = useAuth();
+  const { getAccessToken, isAuthenticated, isLoading: authLoading, isAdmin } = useAuth();
   const [entries, setEntries] = useState<DiaryEntry[]>([]);
   const [aiSummaries, setAiSummaries] = useState<SummaryRecord[]>([]);
   const [state, setState] = useState<LoadState>("idle");
@@ -480,17 +551,25 @@ export function SummaryDashboard() {
     [aiSummaries, summaryType],
   );
 
-  async function handleGenerateSummary() {
+  async function runGenerateSummary({
+    type,
+    date,
+    successMessage,
+  }: {
+    type: SummaryType;
+    date: string;
+    successMessage: (response: Awaited<ReturnType<typeof generateSummary>>) => string;
+  }) {
     setIsGenerating(true);
     setGenerateMessage("");
     setGenerateError("");
 
     try {
       const accessToken = getAccessToken();
-      const selectedDate = new Date(`${summaryDate}T12:00:00`);
+      const selectedDate = new Date(`${date}T12:00:00`);
       const response = await generateSummary(
         {
-          type: summaryType,
+          type,
           date: selectedDate.toISOString(),
           force: true,
         },
@@ -499,13 +578,9 @@ export function SummaryDashboard() {
 
       setAiSummaries((current) => [
         response.summary,
-        ...current.filter((summary) => summary.id !== response.summary.id),
+          ...current.filter((summary) => summary.id !== response.summary.id),
       ]);
-      setGenerateMessage(
-        response.memoryIndexingStatus === "queued"
-          ? `${summaryType[0].toUpperCase()}${summaryType.slice(1)} summary generated and queued for memory indexing.`
-          : `${summaryType[0].toUpperCase()}${summaryType.slice(1)} summary generated.`,
-      );
+      setGenerateMessage(successMessage(response));
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to generate summary";
       setGenerateError(
@@ -516,6 +591,25 @@ export function SummaryDashboard() {
     } finally {
       setIsGenerating(false);
     }
+  }
+
+  async function handleGenerateSummary() {
+    await runGenerateSummary({
+      type: summaryType,
+      date: summaryDate,
+      successMessage: (response) =>
+        response.memoryIndexingStatus === "queued"
+          ? `${summaryType[0].toUpperCase()}${summaryType.slice(1)} summary generated and queued for memory indexing.`
+          : `${summaryType[0].toUpperCase()}${summaryType.slice(1)} summary generated.`,
+    });
+  }
+
+  async function handleRefreshPersonalReflection() {
+    await runGenerateSummary({
+      type: "weekly",
+      date: summaryDate,
+      successMessage: () => "Reflection refreshed.",
+    });
   }
 
   if (authLoading || state === "loading") {
@@ -598,6 +692,16 @@ export function SummaryDashboard() {
         />
       </section>
 
+      {!isAdmin ? (
+        <PersonalReflectionCard
+          latestAiSummary={latestAiSummary}
+          isGenerating={isGenerating}
+          message={generateMessage}
+          error={generateError}
+          onRefresh={() => void handleRefreshPersonalReflection()}
+        />
+      ) : null}
+
       {!sortedEntries.length ? (
         <section className="rounded-lg border border-dashed border-indigo-200 bg-indigo-50/50 p-6 text-center dark:border-indigo-800 dark:bg-indigo-950/20">
           <p className="text-base font-semibold text-indigo-950 dark:text-indigo-200">
@@ -615,6 +719,7 @@ export function SummaryDashboard() {
         </section>
       ) : null}
 
+      {isAdmin ? (
       <section className="enterprise-card p-5">
         <div className="mb-5 flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
           <div>
@@ -667,6 +772,7 @@ export function SummaryDashboard() {
         ) : null}
         <AiSummaryList summaries={visibleAiSummaries} />
       </section>
+      ) : null}
 
       <section className="grid gap-6 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
         <ActivityBars summaries={dailySummaries} />
@@ -749,8 +855,12 @@ export function SummaryDashboard() {
       <section className="enterprise-card p-5">
         <div className="mb-5 flex items-center justify-between gap-3">
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">Data source</p>
-            <h3 className="mt-1.5 text-xl font-semibold text-slate-950 dark:text-slate-100">Recent diary entries used</h3>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
+              {isAdmin ? "Data source" : "Recent memories"}
+            </p>
+            <h3 className="mt-1.5 text-xl font-semibold text-slate-950 dark:text-slate-100">
+              {isAdmin ? "Recent diary entries used" : "Recent diary highlights"}
+            </h3>
           </div>
           <span className="status-badge">
             {sortedEntries.length} entries loaded

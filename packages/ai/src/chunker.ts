@@ -1,7 +1,7 @@
-import { SchemaType, type ResponseSchema } from "@google/generative-ai";
 import { z } from "zod";
-import { generateGeminiJson } from "./gemini-json.ts";
-import { getGeminiChunkModel } from "./gemini-models.ts";
+import { generateTuturuuuJson } from "./tuturuuu-json.ts";
+import { getTuturuuuChunkModel } from "./tuturuuu-models.ts";
+import { splitTextByBoundary } from "./indexing-utils.ts";
 import { withMemoryDate, type MemoryChunkMetadata } from "./types.ts";
 
 const ALLOWED_CHUNK_TYPES = [
@@ -81,38 +81,47 @@ const SemanticChunkSchema = z.object({
   ),
 });
 
-const GeminiSemanticChunkResponseSchema: ResponseSchema = {
-  type: SchemaType.OBJECT,
+type SemanticChunkOutput = z.infer<typeof SemanticChunkSchema>;
+
+export interface GenerateSemanticChunksOptions {
+  generateWithModel?: (prompt: string) => Promise<SemanticChunkOutput>;
+  onFallback?: (error: Error) => void;
+}
+
+const DETERMINISTIC_DIARY_CHUNK_CHARS = 1_000;
+
+const TuturuuuSemanticChunkResponseSchema = {
+  type: "object",
   properties: {
     chunks: {
-      type: SchemaType.ARRAY,
+      type: "array",
       items: {
-        type: SchemaType.OBJECT,
+        type: "object",
         properties: {
           chunkType: {
-            type: SchemaType.STRING,
+            type: "string",
             description:
               "One of feedback, decision, action_item, reflection, event, general.",
           },
-          text: { type: SchemaType.STRING },
+          text: { type: "string" },
           evidence: {
-            type: SchemaType.STRING,
+            type: "string",
             description: "Exact or near-exact source snippet from the diary.",
           },
-          people: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
-          projects: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
+          people: { type: "array", items: { type: "string" } },
+          projects: { type: "array", items: { type: "string" } },
           goals: {
-            type: SchemaType.ARRAY,
-            items: { type: SchemaType.STRING },
+            type: "array",
+            items: { type: "string" },
             description: "Goals, targets, or objectives mentioned (e.g., 'graduate by June', 'lose 5kg').",
           },
           habits: {
-            type: SchemaType.ARRAY,
-            items: { type: SchemaType.STRING },
+            type: "array",
+            items: { type: "string" },
             description: "Recurring habits or routines mentioned (e.g., 'morning jog', 'daily reading').",
           },
-          tags: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
-          importance: { type: SchemaType.INTEGER },
+          tags: { type: "array", items: { type: "string" } },
+          importance: { type: "integer" },
         },
         required: [
           "chunkType",
@@ -137,6 +146,7 @@ export async function generateSemanticChunks(
     MemoryChunkMetadata,
     "date" | "sourceType" | "sourceId" | "sourceTitle"
   >,
+  options: GenerateSemanticChunksOptions = {},
 ) {
   if (!rawText.trim()) return [];
 
@@ -173,12 +183,20 @@ ${rawText}
 </diary>
 `.trim();
 
-  const output = await generateGeminiJson({
-    model: getGeminiChunkModel(),
-    prompt,
-    responseSchema: GeminiSemanticChunkResponseSchema,
-    validator: SemanticChunkSchema,
-  });
+  let output: SemanticChunkOutput;
+  try {
+    output = await (options.generateWithModel ?? generateChunksWithTuturuuu)(prompt);
+  } catch (error) {
+    const fallbackError = error instanceof Error ? error : new Error(String(error));
+    options.onFallback?.(fallbackError);
+    if (!options.onFallback) {
+      console.warn(
+        `[MemoryChunker] Semantic chunking unavailable; using deterministic diary chunks: ${summarizeChunkingError(fallbackError)}`,
+      );
+    }
+
+    return generateDeterministicDiaryChunks(rawText, baseMetadata);
+  }
 
   return output.chunks.map((chunk, index) => ({
     text: chunk.text,
@@ -193,6 +211,50 @@ ${rawText}
       habits: chunk.habits,
       tags: chunk.tags,
       importance: chunk.importance,
+      chunkingMethod: "semantic",
     } satisfies MemoryChunkMetadata),
   }));
+}
+
+export function generateDeterministicDiaryChunks(
+  rawText: string,
+  baseMetadata: Pick<
+    MemoryChunkMetadata,
+    "date" | "sourceType" | "sourceId" | "sourceTitle"
+  >,
+) {
+  if (!rawText.trim()) return [];
+
+  return splitTextByBoundary(rawText, DETERMINISTIC_DIARY_CHUNK_CHARS)
+    .map((text) => text.trim())
+    .filter(Boolean)
+    .map((text, index) => ({
+      text,
+      evidence: text,
+      metadata: withMemoryDate({
+        ...baseMetadata,
+        chunkIndex: index,
+        chunkType: "general",
+        people: [],
+        projects: [],
+        goals: [],
+        habits: [],
+        tags: [],
+        importance: 3,
+        chunkingMethod: "deterministic_fallback",
+      } satisfies MemoryChunkMetadata),
+    }));
+}
+
+async function generateChunksWithTuturuuu(prompt: string): Promise<SemanticChunkOutput> {
+  return generateTuturuuuJson({
+    model: getTuturuuuChunkModel(),
+    prompt,
+    responseSchema: TuturuuuSemanticChunkResponseSchema,
+    validator: SemanticChunkSchema,
+  });
+}
+
+function summarizeChunkingError(error: Error): string {
+  return error.message.replace(/\s+/g, " ").slice(0, 180);
 }

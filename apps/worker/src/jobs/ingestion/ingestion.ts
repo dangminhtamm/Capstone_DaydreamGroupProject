@@ -2,6 +2,8 @@ import { createClient } from '@supabase/supabase-js';
 import { Client as PgClient } from 'pg';
 import * as cron from 'node-cron';
 import { google } from 'googleapis';
+import { randomUUID } from 'node:crypto';
+import { hostname } from 'node:os';
 import { decryptOAuthToken, encryptOAuthToken } from '@second-brain/shared';
 import {
   deleteEntityMentionsForSource,
@@ -12,10 +14,6 @@ import {
   resolveMemoryChunkIds,
 } from '@second-brain/db';
 import {
-  createGeminiCompatibleClient,
-  getGeminiCompatibleApiKey,
-  getGeminiRequestOptions,
-  getGeminiVisionModel,
   indexMemoryFromAttachment,
   indexMemoryFromCalendar,
   indexMemoryFromContact,
@@ -23,8 +21,20 @@ import {
   indexMemoryFromDrive,
   indexMemoryFromGmail,
   indexMemoryFromSummary,
+  extractEntityMentionsFromMetadata,
+  type PersistedMemoryChunkPayload,
 } from '@second-brain/ai';
 import { prisma } from '../../lib/prisma';
+import type { WorkerMetricsSnapshot } from '../../metrics';
+import {
+  extractAttachmentContent,
+  isAudioMimeType,
+} from './attachment-extraction';
+import {
+  calculateFailureTransition,
+  calculateReconnectDelayMs,
+  SingleFlight,
+} from './reliability';
 
 type IndexingJob = {
   id: string;
@@ -39,6 +49,7 @@ type IndexingJob = {
   payload: Record<string, unknown> | null;
   run_after: Date;
   locked_at: Date | null;
+  locked_by: string | null;
   processed_at: Date | null;
   created_at: Date;
   updated_at: Date;
@@ -53,26 +64,20 @@ type DrainResult = {
   metrics: WorkerMetricsSnapshot;
 };
 
-type JobDurationMetric = {
-  count: number;
-  last: number;
-  avg: number;
-  max: number;
-};
-
-type WorkerMetricsSnapshot = {
-  jobs_claimed_total: number;
-  jobs_succeeded_total: number;
-  jobs_failed_total: number;
-  jobs_dead_letter_total: number;
-  job_duration_ms: JobDurationMetric;
-};
-
 const ATTACHMENT_BUCKET = 'attachments-bucket';
 
 export class DataIngestionJob {
-  private static processing = false;
+  private static readonly workerId = (
+    process.env.INDEXING_WORKER_ID ?? `${hostname()}:${process.pid}:${randomUUID().slice(0, 8)}`
+  ).slice(0, 128);
+  private static readonly drainFlight = new SingleFlight<DrainResult>();
+  private static readonly drainCoordinatorFlight = new SingleFlight<void>();
+  private static drainRequested = false;
   private static listenerStarted = false;
+  private static listenerStopping = false;
+  private static listenerClient: PgClient | null = null;
+  private static listenerReconnectTimer: NodeJS.Timeout | null = null;
+  private static listenerReconnectAttempt = 0;
   private static metrics: WorkerMetricsSnapshot = {
     jobs_claimed_total: 0,
     jobs_succeeded_total: 0,
@@ -81,6 +86,7 @@ export class DataIngestionJob {
     job_duration_ms: {
       count: 0,
       last: 0,
+      sum: 0,
       avg: 0,
       max: 0,
     },
@@ -97,44 +103,15 @@ export class DataIngestionJob {
     return createClient(supabaseUrl, supabaseKey);
   }
 
-  private static async extractTextFromBlob(base64Data: string, mimeType: string): Promise<string> {
-    const apiKey = getGeminiCompatibleApiKey();
-    if (!apiKey) throw new Error('TUTURUUU_AI_API_KEY is missing in environment variables.');
-
-    const ai = createGeminiCompatibleClient(apiKey);
-    const model = ai.getGenerativeModel(
-      { model: getGeminiVisionModel() },
-      getGeminiRequestOptions(apiKey)
-    );
-
-    const prompt = `
-You are an extraction engine for a personal Second Brain app.
-Extract all readable text, transcripts, headings, labels, and meaningful textual content from this attachment.
-For images with little or no visible text, provide a concise factual description of what is shown.
-Do not invent names, dates, or claims that are not visible in the file.
-Return only the extracted text or factual description.
-`.trim();
-
-    const result = await model.generateContent([
-      prompt,
-      {
-        inlineData: {
-          data: base64Data,
-          mimeType,
-        },
-      },
-    ]);
-
-    const extractedText = result.response.text().trim();
-    if (!extractedText) throw new Error('Attachment extraction returned empty text.');
-    return extractedText;
-  }
-
   static async processPendingAttachments() {
     return this.processPendingIndexingJobs();
   }
 
-  static async processPendingIndexingJobs(batchSize = 10): Promise<DrainResult> {
+  static processPendingIndexingJobs(batchSize = this.getWorkerBatchSize()): Promise<DrainResult> {
+    return this.drainFlight.run(() => this.processIndexingBatch(batchSize));
+  }
+
+  private static async processIndexingBatch(batchSize: number): Promise<DrainResult> {
     const resetStale = await this.resetStaleJobs();
     const jobs = await this.claimJobs(batchSize);
     const jobDelayMs = this.getInterJobDelayMs();
@@ -147,28 +124,38 @@ Return only the extracted text or factual description.
       metrics: this.getMetrics(),
     };
     this.metrics.jobs_claimed_total += jobs.length;
+    const stopLeaseRenewal = this.startLeaseRenewal(jobs.map((job) => job.id));
 
-    for (const [index, job] of jobs.entries()) {
-      const jobStart = Date.now();
-      try {
-        await this.processJob(job);
-        await this.markSucceeded(job.id);
-        result.succeeded += 1;
-        this.metrics.jobs_succeeded_total += 1;
-      } catch (error) {
-        result.failed += 1;
-        this.metrics.jobs_failed_total += 1;
-        const failedStatus = await this.markFailed(job, error);
-        if (failedStatus === 'dead_letter') {
-          this.metrics.jobs_dead_letter_total += 1;
+    try {
+      for (const [index, job] of jobs.entries()) {
+        const jobStart = Date.now();
+        try {
+          await this.renewLeases([job.id]);
+          await this.processJob(job);
+          const completed = await this.markSucceeded(job.id);
+          if (!completed) {
+            throw new Error(`Indexing lease lost before job ${job.id} could be completed.`);
+          }
+          result.succeeded += 1;
+          this.metrics.jobs_succeeded_total += 1;
+        } catch (error) {
+          result.failed += 1;
+          this.metrics.jobs_failed_total += 1;
+          const failedStatus = await this.markFailed(job, error);
+          if (failedStatus === 'dead_letter') {
+            this.metrics.jobs_dead_letter_total += 1;
+          }
+        } finally {
+          this.recordJobDuration(Date.now() - jobStart);
         }
-      } finally {
-        this.recordJobDuration(Date.now() - jobStart);
-      }
 
-      if (jobDelayMs > 0 && index < jobs.length - 1) {
-        await this.sleep(jobDelayMs);
+        if (jobDelayMs > 0 && index < jobs.length - 1) {
+          await this.sleep(jobDelayMs);
+        }
       }
+    } finally {
+      stopLeaseRenewal();
+      await this.releaseOwnedJobs(jobs.map((job) => job.id));
     }
 
     result.metrics = this.getMetrics();
@@ -185,19 +172,33 @@ Return only the extracted text or factual description.
         WHERE job_type = 'index_memory'
           AND status IN ('pending', 'retry')
           AND run_after <= now()
-        ORDER BY run_after ASC, created_at ASC
+        ORDER BY
+          CASE source_type
+            WHEN 'diary' THEN 0
+            WHEN 'calendar' THEN 1
+            WHEN 'gmail' THEN 2
+            WHEN 'contact' THEN 3
+            WHEN 'summary' THEN 4
+            WHEN 'attachment' THEN 5
+            WHEN 'drive' THEN 6
+            ELSE 7
+          END ASC,
+          run_after ASC,
+          created_at ASC
         LIMIT $1
         FOR UPDATE SKIP LOCKED
       )
       UPDATE indexing_outbox AS job
       SET status = 'processing',
           locked_at = now(),
+          locked_by = $2,
           updated_at = now()
       FROM candidates
       WHERE job.id = candidates.id
       RETURNING job.*
       `,
       safeBatchSize,
+      this.workerId,
     );
   }
 
@@ -208,15 +209,71 @@ Return only the extracted text or factual description.
       SET status = 'retry',
           run_after = now(),
           locked_at = NULL,
+          locked_by = NULL,
           updated_at = now(),
           error = COALESCE(error, 'Job lock expired and was requeued.')
       WHERE status = 'processing'
-        AND locked_at < now() - interval '10 minutes'
+        AND locked_at < now() - ($1 * interval '1 millisecond')
       RETURNING id
       `,
+      this.getLeaseTimeoutMs(),
     );
 
     return rows.length;
+  }
+
+  private static startLeaseRenewal(jobIds: string[]) {
+    if (jobIds.length === 0) return () => undefined;
+
+    const timer = setInterval(() => {
+      void this.renewLeases(jobIds).catch((error) => {
+        console.warn(`[Worker - Ingestion] Could not renew indexing leases: ${this.toErrorMessage(error)}`);
+      });
+    }, this.getLeaseRenewIntervalMs());
+    timer.unref?.();
+
+    return () => clearInterval(timer);
+  }
+
+  private static async renewLeases(jobIds: string[]) {
+    if (jobIds.length === 0) return 0;
+    const rows = await prisma.$queryRawUnsafe<Array<{ id: string }>>(
+      `
+      UPDATE indexing_outbox
+      SET locked_at = now(), updated_at = now()
+      WHERE id = ANY($1::uuid[])
+        AND status = 'processing'
+        AND locked_by = $2
+      RETURNING id
+      `,
+      jobIds,
+      this.workerId,
+    );
+    return rows.length;
+  }
+
+  private static async releaseOwnedJobs(jobIds: string[]) {
+    if (jobIds.length === 0) return;
+    try {
+      await prisma.$executeRawUnsafe(
+        `
+        UPDATE indexing_outbox
+        SET status = 'retry',
+            run_after = now(),
+            locked_at = NULL,
+            locked_by = NULL,
+            updated_at = now(),
+            error = COALESCE(error, 'Worker released an unfinished indexing lease.')
+        WHERE id = ANY($1::uuid[])
+          AND status = 'processing'
+          AND locked_by = $2
+        `,
+        jobIds,
+        this.workerId,
+      );
+    } catch (error) {
+      console.warn(`[Worker - Ingestion] Could not release unfinished leases: ${this.toErrorMessage(error)}`);
+    }
   }
 
   private static async processJob(job: IndexingJob) {
@@ -313,42 +370,11 @@ Return only the extracted text or factual description.
       sourceTitle: title,
       insertChunks: (chunks) =>
         prisma.$transaction(async (tx: any) => {
-          await insertMemoryChunks(tx, chunks);
-          await pruneMemoryChunksForSource(tx, {
-            userId: job.user_id,
-            sourceType: 'diary',
-            sourceId: diary.id,
-            keepChunkCount: chunks.length,
-          });
-        }),
-      insertEntityMentions: (mentions) =>
-        prisma.$transaction(async (tx: any) => {
-          await deleteEntityMentionsForSource(tx, {
+          await this.persistChunksWithEntities(tx, chunks, {
             userId: job.user_id,
             sourceType: 'diary',
             sourceId: diary.id,
           });
-
-          if (!mentions.length) return;
-
-          const chunkIdMap = await resolveMemoryChunkIds(tx, {
-            userId: job.user_id,
-            sourceType: 'diary',
-            sourceId: diary.id,
-          });
-          const mentionRows = mentions
-            .map((mention) => {
-              const chunkId = chunkIdMap.get(mention.chunkIndex);
-              if (!chunkId) return null;
-              return {
-                chunkId,
-                entityType: mention.entityType,
-                entityValue: mention.entityValue,
-              };
-            })
-            .filter((mention): mention is NonNullable<typeof mention> => mention !== null);
-
-          await insertEntityMentionRows(tx, mentionRows);
         }),
     });
 
@@ -403,10 +429,22 @@ Return only the extracted text or factual description.
       }
 
       const base64Data = Buffer.from(await data.arrayBuffer()).toString('base64');
+      const audio = isAudioMimeType(attachment.file_type);
       try {
-        extractedText = await this.extractTextFromBlob(base64Data, attachment.file_type);
+        extractedText = await extractAttachmentContent({
+          attachmentId: attachment.id,
+          base64Data,
+          mimeType: attachment.file_type,
+          fileName: sourceTitle ?? attachment.storage_path,
+          maxOutputTokens: audio
+            ? this.getAudioTranscriptionMaxOutputTokens()
+            : this.getAttachmentExtractionMaxOutputTokens(),
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
+        if (audio) {
+          throw new Error(`Audio transcription failed: ${message}`);
+        }
         console.warn(
           `[Worker - Ingestion] Attachment ${attachment.id} downloaded, but AI extraction failed; indexing metadata fallback: ${message}`,
         );
@@ -434,12 +472,10 @@ Return only the extracted text or factual description.
       fileType: attachment.file_type,
       insertChunks: (chunks) =>
         prisma.$transaction(async (tx: any) => {
-          await insertMemoryChunks(tx, chunks);
-          await pruneMemoryChunksForSource(tx, {
+          await this.persistChunksWithEntities(tx, chunks, {
             userId: job.user_id,
             sourceType: 'attachment',
             sourceId: attachment.id,
-            keepChunkCount: chunks.length,
           });
         }),
     });
@@ -497,12 +533,10 @@ Return only the extracted text or factual description.
       ],
       insertChunks: (chunks) =>
         prisma.$transaction(async (tx: any) => {
-          await insertMemoryChunks(tx, chunks);
-          await pruneMemoryChunksForSource(tx, {
+          await this.persistChunksWithEntities(tx, chunks, {
             userId: job.user_id,
             sourceType: 'calendar',
             sourceId: event.id,
-            keepChunkCount: chunks.length,
           });
         }),
     });
@@ -542,12 +576,10 @@ Return only the extracted text or factual description.
       ],
       insertChunks: (chunks) =>
         prisma.$transaction(async (tx: any) => {
-          await insertMemoryChunks(tx, chunks);
-          await pruneMemoryChunksForSource(tx, {
+          await this.persistChunksWithEntities(tx, chunks, {
             userId: job.user_id,
             sourceType: 'contact',
             sourceId: contact.id,
-            keepChunkCount: chunks.length,
           });
         }),
     });
@@ -600,12 +632,10 @@ Return only the extracted text or factual description.
       modifiedTime: driveFile.modified_time,
       insertChunks: (chunks) =>
         prisma.$transaction(async (tx: any) => {
-          await insertMemoryChunks(tx, chunks);
-          await pruneMemoryChunksForSource(tx, {
+          await this.persistChunksWithEntities(tx, chunks, {
             userId: job.user_id,
             sourceType: 'drive',
             sourceId: driveFile.id,
-            keepChunkCount: chunks.length,
           });
         }),
     });
@@ -647,12 +677,10 @@ Return only the extracted text or factual description.
       },
       insertChunks: (chunks) =>
         prisma.$transaction(async (tx: any) => {
-          await insertMemoryChunks(tx, chunks);
-          await pruneMemoryChunksForSource(tx, {
+          await this.persistChunksWithEntities(tx, chunks, {
             userId: job.user_id,
             sourceType: 'gmail',
             sourceId: message.id,
-            keepChunkCount: chunks.length,
           });
         }),
     });
@@ -728,10 +756,22 @@ Return only the extracted text or factual description.
     }
 
     const base64Data = buffer.toString('base64');
+    const audio = isAudioMimeType(driveFile.mime_type);
     try {
-      return await this.extractTextFromBlob(base64Data, driveFile.mime_type);
+      return await extractAttachmentContent({
+        attachmentId: `drive-${driveFile.external_id}`,
+        base64Data,
+        mimeType: driveFile.mime_type,
+        fileName: driveFile.name,
+        maxOutputTokens: audio
+          ? this.getAudioTranscriptionMaxOutputTokens()
+          : this.getAttachmentExtractionMaxOutputTokens(),
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      if (audio) {
+        throw new Error(`Drive audio transcription failed: ${message}`);
+      }
       console.warn(
         `[Worker - Ingestion] Drive file ${driveFile.external_id} imported, but AI extraction failed; indexing metadata fallback: ${message}`,
       );
@@ -801,12 +841,10 @@ Return only the extracted text or factual description.
       periodEnd: summary.period_end,
       insertChunks: (chunks) =>
         prisma.$transaction(async (tx: any) => {
-          await insertMemoryChunks(tx, chunks);
-          await pruneMemoryChunksForSource(tx, {
+          await this.persistChunksWithEntities(tx, chunks, {
             userId: job.user_id,
             sourceType: 'summary',
             sourceId: summary.id,
-            keepChunkCount: chunks.length,
           });
         }),
     });
@@ -820,46 +858,106 @@ Return only the extracted text or factual description.
     }
   }
 
+  private static async persistChunksWithEntities(
+    tx: any,
+    chunks: PersistedMemoryChunkPayload[],
+    source: { userId: string; sourceType: string; sourceId: string },
+  ) {
+    await insertMemoryChunks(tx, chunks);
+    await pruneMemoryChunksForSource(tx, {
+      ...source,
+      keepChunkCount: chunks.length,
+    });
+    await deleteEntityMentionsForSource(tx, source);
+
+    if (!chunks.length) return;
+
+    const chunkIdMap = await resolveMemoryChunkIds(tx, source);
+    const seen = new Set<string>();
+    const mentionRows = chunks.flatMap((chunk) => {
+      const chunkId = chunkIdMap.get(chunk.chunkIndex);
+      if (!chunkId) return [];
+
+      return extractEntityMentionsFromMetadata(chunk.metadata)
+        .filter((mention) => {
+          const key = `${chunkId}:${mention.entityType}:${mention.entityValue}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        })
+        .map((mention) => ({
+          chunkId,
+          entityType: mention.entityType,
+          entityValue: mention.entityValue,
+        }));
+    });
+
+    await insertEntityMentionRows(tx, mentionRows);
+  }
+
   private static async markSucceeded(jobId: string) {
-    await prisma.indexingOutbox.update({
-      where: { id: jobId },
+    const result = await prisma.indexingOutbox.updateMany({
+      where: {
+        id: jobId,
+        status: 'processing',
+        locked_by: this.workerId,
+      },
       data: {
         status: 'succeeded',
         error: null,
         locked_at: null,
+        locked_by: null,
         processed_at: new Date(),
       },
     });
+    return result.count === 1;
   }
 
-  private static async markFailed(job: IndexingJob, error: unknown): Promise<'retry' | 'dead_letter'> {
+  private static async markFailed(
+    job: IndexingJob,
+    error: unknown,
+  ): Promise<'retry' | 'dead_letter' | 'lost_lease'> {
     const message = this.toErrorMessage(error).slice(0, 4000);
-    const nextRetryCount = job.retry_count + 1;
     const requiresReconnect = this.isGoogleReconnectRequiredError(message);
-    const exhausted = requiresReconnect || nextRetryCount >= job.max_retries;
-    const nextStatus = exhausted ? 'dead_letter' : 'retry';
+    const transition = calculateFailureTransition({
+      retryCount: job.retry_count,
+      maxRetries: job.max_retries,
+      requiresReconnect,
+      baseDelayMs: Number(process.env.INDEXING_RETRY_BASE_MS ?? 30_000),
+      maxDelayMs: Number(process.env.INDEXING_RETRY_MAX_MS ?? 15 * 60_000),
+    });
 
     if (requiresReconnect) {
       await this.markGoogleConnectionReconnectRequired(job, message);
     }
 
-    await prisma.indexingOutbox.update({
-      where: { id: job.id },
+    const result = await prisma.indexingOutbox.updateMany({
+      where: {
+        id: job.id,
+        status: 'processing',
+        locked_by: this.workerId,
+      },
       data: {
-        status: nextStatus,
-        retry_count: nextRetryCount,
+        status: transition.status,
+        retry_count: transition.retryCount,
         error: message,
-        run_after: exhausted ? job.run_after : this.nextRunAfter(nextRetryCount),
+        run_after: transition.runAfter,
         locked_at: null,
-        processed_at: exhausted ? new Date() : null,
+        locked_by: null,
+        processed_at: transition.status === 'dead_letter' ? new Date() : null,
       },
     });
 
+    if (result.count === 0) {
+      console.warn(`[Worker - Ingestion] Job ${job.id} lost its lease; status was not overwritten.`);
+      return 'lost_lease';
+    }
+
     console.error(
-      `[Worker - Ingestion] Job ${job.id} (${job.source_type}/${job.source_id}) ${exhausted ? 'dead-lettered' : 'scheduled for retry'}: ${message}`,
+      `[Worker - Ingestion] Job ${job.id} (${job.source_type}/${job.source_id}) ${transition.status === 'dead_letter' ? 'dead-lettered' : 'scheduled for retry'}: ${message}`,
     );
 
-    return nextStatus;
+    return transition.status;
   }
 
   private static isGoogleReconnectRequiredError(message: string) {
@@ -924,13 +1022,6 @@ Return only the extracted text or factual description.
     return null;
   }
 
-  private static nextRunAfter(retryCount: number) {
-    const baseMs = Number(process.env.INDEXING_RETRY_BASE_MS ?? 30_000);
-    const maxMs = Number(process.env.INDEXING_RETRY_MAX_MS ?? 15 * 60_000);
-    const delay = Math.min(maxMs, Math.max(1_000, baseMs) * 2 ** Math.max(0, retryCount - 1));
-    return new Date(Date.now() + delay);
-  }
-
   private static toErrorMessage(error: unknown) {
     if (error instanceof Error) return error.message;
     return String(error);
@@ -942,13 +1033,45 @@ Return only the extracted text or factual description.
       return Math.max(0, Math.floor(configuredDelay));
     }
 
-    return this.usesLowFreeTierGeminiModel() ? 15_000 : 0;
+    return this.usesKnownLowQuotaModel() ? 15_000 : 0;
   }
 
-  private static usesLowFreeTierGeminiModel() {
+  private static getWorkerBatchSize() {
+    const configured = Number(process.env.INDEXING_WORKER_BATCH_SIZE ?? 2);
+    if (!Number.isFinite(configured)) return 2;
+    return Math.min(Math.max(Math.trunc(configured), 1), 10);
+  }
+
+  private static getLeaseTimeoutMs() {
+    const configured = Number(process.env.INDEXING_LEASE_TIMEOUT_MS ?? 5 * 60_000);
+    if (!Number.isFinite(configured)) return 5 * 60_000;
+    return Math.min(Math.max(Math.trunc(configured), 60_000), 60 * 60_000);
+  }
+
+  private static getLeaseRenewIntervalMs() {
+    const configured = Number(process.env.INDEXING_LEASE_RENEW_INTERVAL_MS ?? 30_000);
+    const timeout = this.getLeaseTimeoutMs();
+    if (!Number.isFinite(configured)) return Math.min(30_000, Math.floor(timeout / 3));
+    return Math.min(Math.max(Math.trunc(configured), 5_000), Math.floor(timeout / 2));
+  }
+
+  private static getAttachmentExtractionMaxOutputTokens() {
+    const configured = Number(process.env.ATTACHMENT_EXTRACTION_MAX_OUTPUT_TOKENS ?? 1200);
+    if (!Number.isFinite(configured)) return 1200;
+    return Math.min(Math.max(Math.trunc(configured), 200), 4000);
+  }
+
+  private static getAudioTranscriptionMaxOutputTokens() {
+    const configured = Number(process.env.AUDIO_TRANSCRIPTION_MAX_OUTPUT_TOKENS ?? 6000);
+    if (!Number.isFinite(configured)) return 6000;
+    return Math.min(Math.max(Math.trunc(configured), 500), 12000);
+  }
+
+  private static usesKnownLowQuotaModel() {
     const configuredModels = [
       process.env.TUTURUUU_CHUNK_MODEL,
       process.env.TUTURUUU_VISION_MODEL,
+      process.env.TUTURUUU_TRANSCRIPTION_MODEL,
       process.env.TUTURUUU_SUMMARY_MODEL,
       process.env.TUTURUUU_ANSWER_MODEL,
     ]
@@ -975,11 +1098,13 @@ Return only the extracted text or factual description.
   private static recordJobDuration(durationMs: number) {
     const current = this.metrics.job_duration_ms;
     const nextCount = current.count + 1;
-    const nextAvg = Math.round(((current.avg * current.count) + durationMs) / nextCount);
+    const nextSum = current.sum + durationMs;
+    const nextAvg = Math.round(nextSum / nextCount);
 
     this.metrics.job_duration_ms = {
       count: nextCount,
       last: durationMs,
+      sum: nextSum,
       avg: nextAvg,
       max: Math.max(current.max, durationMs),
     };
@@ -987,55 +1112,136 @@ Return only the extracted text or factual description.
 
   static startCron() {
     cron.schedule('*/1 * * * *', async () => {
-      if (this.processing) return;
-      this.processing = true;
-      try {
-        const result = await this.processPendingIndexingJobs(
-          Number(process.env.INDEXING_WORKER_BATCH_SIZE ?? 10),
-        );
-        if (result.claimed > 0 || result.resetStale > 0) {
-          console.log(`[Worker - Ingestion] ${JSON.stringify(result)}`);
-        }
-      } catch (error) {
-        console.error('[Worker - Ingestion] Cron processing error:', error);
-      } finally {
-        this.processing = false;
-      }
+      await this.requestDrain('cron');
     });
     console.log('Background Worker for IndexingOutbox ingestion started.');
+  }
+
+  private static requestDrain(trigger: 'cron' | 'realtime') {
+    this.drainRequested = true;
+    const run = this.drainCoordinatorFlight.run(async () => {
+      const maxBatches = this.getAutomaticDrainMaxBatches();
+      let batches = 0;
+
+      while (this.drainRequested && batches < maxBatches) {
+        this.drainRequested = false;
+
+        while (batches < maxBatches) {
+          const result = await this.processPendingIndexingJobs(this.getWorkerBatchSize());
+          batches += 1;
+          if (result.claimed > 0 || result.resetStale > 0) {
+            console.log(`[Worker - Ingestion] ${trigger} ${JSON.stringify(result)}`);
+          }
+          if (result.claimed === 0) break;
+        }
+      }
+
+      if (batches >= maxBatches) this.drainRequested = true;
+    });
+
+    void run.catch((error) => {
+      console.error(`[Worker - Ingestion] ${trigger} drain failed:`, error);
+    }).finally(() => {
+      if (this.drainRequested && !this.listenerStopping) {
+        setImmediate(() => void this.requestDrain(trigger));
+      }
+    });
+
+    return run;
   }
 
   static startRealtimeListener() {
     if (this.listenerStarted) return;
     this.listenerStarted = true;
+    this.listenerStopping = false;
 
-    const connectionString = process.env.DATABASE_URL;
-    if (!connectionString) {
+    if (!process.env.DATABASE_URL) {
       console.warn('[Worker - Ingestion] DATABASE_URL missing; realtime listener disabled.');
+      this.listenerStarted = false;
       return;
     }
 
-    const client = new PgClient({ connectionString });
-    client
-      .connect()
-      .then(async () => {
-        await client.query('LISTEN indexing_outbox_jobs');
-        console.log('[Worker - Ingestion] Listening for indexing_outbox_jobs notifications.');
-      })
-      .catch((error) => {
-        console.warn('[Worker - Ingestion] Could not start realtime listener:', error.message);
-      });
+    void this.connectRealtimeListener();
+  }
+
+  static async stopRealtimeListener() {
+    this.listenerStopping = true;
+    this.listenerStarted = false;
+    if (this.listenerReconnectTimer) clearTimeout(this.listenerReconnectTimer);
+    this.listenerReconnectTimer = null;
+    const client = this.listenerClient;
+    this.listenerClient = null;
+    if (!client) return;
+
+    client.removeAllListeners();
+    try {
+      await client.query('UNLISTEN indexing_outbox_jobs');
+    } catch {
+      // The connection may already be closed during shutdown.
+    }
+    await client.end().catch(() => undefined);
+  }
+
+  private static async connectRealtimeListener() {
+    if (this.listenerStopping || this.listenerClient) return;
+    const connectionString = process.env.DATABASE_URL;
+    if (!connectionString) return;
+
+    const client = new PgClient({
+      connectionString,
+      application_name: `${this.workerId}:indexing-listener`,
+      keepAlive: true,
+    });
+    this.listenerClient = client;
 
     client.on('notification', () => {
-      void this.processPendingIndexingJobs(
-        Number(process.env.INDEXING_WORKER_BATCH_SIZE ?? 10),
-      ).catch((error) => {
-        console.error('[Worker - Ingestion] Realtime drain failed:', error);
-      });
+      void this.requestDrain('realtime');
+    });
+    client.on('error', (error) => {
+      this.handleListenerDisconnect(client, error);
+    });
+    client.on('end', () => {
+      this.handleListenerDisconnect(client, new Error('PostgreSQL LISTEN connection ended.'));
     });
 
-    client.on('error', (error) => {
-      console.warn('[Worker - Ingestion] Realtime listener error:', error.message);
+    try {
+      await client.connect();
+      await client.query('LISTEN indexing_outbox_jobs');
+      this.listenerReconnectAttempt = 0;
+      console.log('[Worker - Ingestion] Listening for indexing_outbox_jobs notifications.');
+      await this.requestDrain('realtime');
+    } catch (error) {
+      this.handleListenerDisconnect(client, error);
+    }
+  }
+
+  private static handleListenerDisconnect(client: PgClient, error: unknown) {
+    if (this.listenerClient !== client) return;
+    this.listenerClient = null;
+    client.removeAllListeners();
+    void client.end().catch(() => undefined);
+
+    if (this.listenerStopping) return;
+    const delayMs = calculateReconnectDelayMs(this.listenerReconnectAttempt, {
+      baseDelayMs: Number(process.env.INDEXING_LISTENER_RECONNECT_BASE_MS ?? 1_000),
+      maxDelayMs: Number(process.env.INDEXING_LISTENER_RECONNECT_MAX_MS ?? 60_000),
     });
+    this.listenerReconnectAttempt += 1;
+    console.warn(
+      `[Worker - Ingestion] Realtime listener disconnected; reconnecting in ${delayMs}ms: ${this.toErrorMessage(error)}`,
+    );
+
+    if (this.listenerReconnectTimer) clearTimeout(this.listenerReconnectTimer);
+    this.listenerReconnectTimer = setTimeout(() => {
+      this.listenerReconnectTimer = null;
+      void this.connectRealtimeListener();
+    }, delayMs);
+    this.listenerReconnectTimer.unref?.();
+  }
+
+  private static getAutomaticDrainMaxBatches() {
+    const configured = Number(process.env.INDEXING_AUTOMATIC_DRAIN_MAX_BATCHES ?? 20);
+    if (!Number.isFinite(configured)) return 20;
+    return Math.min(Math.max(Math.trunc(configured), 1), 100);
   }
 }

@@ -1,10 +1,9 @@
-import { SchemaType, type ResponseSchema } from "@google/generative-ai";
 import { z } from "zod";
 import {
-  generateGeminiJsonWithMeta,
-  type GeminiJsonResultWithMeta,
-} from "./gemini-json.ts";
-import { getGeminiAnswerModel } from "./gemini-models.ts";
+  generateTuturuuuJsonWithMeta,
+  type TuturuuuJsonResultWithMeta,
+} from "./tuturuuu-json.ts";
+import { getTuturuuuAnswerModel } from "./tuturuuu-models.ts";
 import type {
   AnswerMemoryResult,
   ResponseLanguage,
@@ -16,11 +15,11 @@ const FastTranslatedAnswerSchema = z.object({
 
 type FastTranslatedAnswer = z.infer<typeof FastTranslatedAnswerSchema>;
 
-const GeminiFastTranslatedAnswerResponseSchema: ResponseSchema = {
-  type: SchemaType.OBJECT,
+const TuturuuuFastTranslatedAnswerResponseSchema = {
+  type: "object",
   properties: {
     answer: {
-      type: SchemaType.STRING,
+      type: "string",
       description: "The translated or lightly polished answer.",
     },
   },
@@ -28,8 +27,8 @@ const GeminiFastTranslatedAnswerResponseSchema: ResponseSchema = {
 };
 
 export type FastTranslationGenerator = (
-  options: Parameters<typeof generateGeminiJsonWithMeta<FastTranslatedAnswer>>[0],
-) => Promise<GeminiJsonResultWithMeta<FastTranslatedAnswer>>;
+  options: Parameters<typeof generateTuturuuuJsonWithMeta<FastTranslatedAnswer>>[0],
+) => Promise<TuturuuuJsonResultWithMeta<FastTranslatedAnswer>>;
 
 export async function translateFastAnswerIfUseful(
   result: AnswerMemoryResult,
@@ -45,22 +44,23 @@ export async function translateFastAnswerIfUseful(
 
   const generateStart = performance.now();
   try {
-    const geminiResult = await (options.generateTranslation ?? generateGeminiJsonWithMeta)({
-      model: getGeminiAnswerModel(),
+    const tuturuuuResult = await (options.generateTranslation ?? generateTuturuuuJsonWithMeta)({
+      model: getTuturuuuAnswerModel(),
       prompt: buildFastTranslationPrompt({
         question: options.question,
         answer: result.answer,
+        answerMode: result.answerMode,
         responseLanguage: options.responseLanguage,
       }),
-      responseSchema: GeminiFastTranslatedAnswerResponseSchema,
+      responseSchema: TuturuuuFastTranslatedAnswerResponseSchema,
       validator: FastTranslatedAnswerSchema,
       temperature: 0,
-      maxOutputTokens: getFastTranslationMaxTokens(),
+      maxOutputTokens: getFastTranslationMaxTokens(result.answerMode),
       maxRetries: 0,
       maxFormatRetries: 0,
     });
     const generateMs = Math.round(performance.now() - generateStart);
-    const translatedAnswer = sanitizeTranslatedAnswer(geminiResult.data.answer);
+    const translatedAnswer = sanitizeTranslatedAnswer(tuturuuuResult.data.answer);
     if (!translatedAnswer) return result;
 
     return {
@@ -69,7 +69,7 @@ export async function translateFastAnswerIfUseful(
       analytics: result.analytics
         ? {
             ...result.analytics,
-            tokenUsage: geminiResult.tokenUsage,
+            tokenUsage: tuturuuuResult.tokenUsage,
             timing: {
               ...result.analytics.timing,
               generateMs,
@@ -89,24 +89,42 @@ export function shouldTranslateFastAnswer(
   responseLanguage: ResponseLanguage,
 ): boolean {
   if (process.env.MEMORY_FAST_TRANSLATION_ENABLED === "false") return false;
-  if (result.answerMode !== "fast_path") return false;
+  if (
+    result.answerMode !== "fast_path" &&
+    result.answerMode !== "extractive_fallback" &&
+    result.answerMode !== "tuturuuu"
+  ) {
+    return false;
+  }
   if (!result.citations.length) return false;
-  if (result.analytics?.tokenUsage.totalTokens) return false;
+
+  if (answerLanguageNeedsPolish(result.answer, responseLanguage)) return true;
+
+  if (result.answerMode === "tuturuuu") return false;
+  if (result.answerMode === "fast_path" && result.analytics?.tokenUsage.totalTokens) return false;
 
   return responseLanguage === "vi"
-    ? hasEnglishDominantSegment(result.answer)
-    : hasVietnameseDominantSegment(result.answer);
+    ? result.citations.some((citation) => citationSourceLanguage(citation) === "en")
+    : result.citations.some((citation) => citationSourceLanguage(citation) === "vi");
 }
 
 function buildFastTranslationPrompt(input: {
   question: string;
   answer: string;
+  answerMode: AnswerMemoryResult["answerMode"];
   responseLanguage: ResponseLanguage;
 }): string {
   const targetLanguage = input.responseLanguage === "vi" ? "Vietnamese" : "English";
   const styleInstruction = input.responseLanguage === "vi"
-    ? 'Viết tiếng Việt tự nhiên, dùng "mình" cho assistant và "bạn" cho user.'
-    : "Write natural English.";
+    ? [
+        'Viết tiếng Việt tự nhiên, dùng "mình" cho assistant và "bạn" cho user.',
+        "Dịch toàn bộ câu/cụm tiếng Anh thông thường sang tiếng Việt; không để sót câu tiếng Anh trong phần trả lời.",
+        "Chỉ giữ nguyên tên riêng, ngày tháng, tên sản phẩm/kỹ thuật như API, Redis, Calendar, Gmail, Drive, worker, indexing outbox, source cards.",
+      ].join(" ")
+    : "Write natural English; translate ordinary Vietnamese sentences into English while preserving names, dates, products, and technical terms.";
+  const structureInstruction = input.answerMode === "extractive_fallback"
+    ? "Preserve paragraph breaks, section headings, and bullet list structure. Keep one bullet per source line."
+    : "Preserve useful paragraph breaks when present.";
 
   return `
 You are a tiny translation/polishing layer for a personal memory search system.
@@ -114,31 +132,43 @@ You are a tiny translation/polishing layer for a personal memory search system.
 Question:
 ${input.question}
 
-Existing fast answer:
+Existing answer:
 ${input.answer}
 
 Task:
-- Translate or lightly polish the existing fast answer into ${targetLanguage}.
+- Translate or lightly polish the existing retrieved answer into ${targetLanguage}.
 - ${styleInstruction}
+- ${structureInstruction}
 - Do not add, remove, or infer facts.
 - Preserve all dates, names, project names, and technical terms exactly when appropriate.
 - Keep the answer concise and natural.
-- Do not mention citations, source ids, Gemini, retrieval, or implementation details.
+- Do not mention citations, source ids, Tuturuuu, retrieval, or implementation details.
 - Return ONLY a compact JSON object with exactly this shape: {"answer":"..."}.
 `.trim();
 }
 
-function getFastTranslationMaxTokens(): number {
-  const configured = Number(process.env.MEMORY_FAST_TRANSLATION_MAX_TOKENS ?? 180);
-  if (!Number.isFinite(configured)) return 180;
-  return Math.min(Math.max(Math.trunc(configured), 80), 320);
+function getFastTranslationMaxTokens(answerMode: AnswerMemoryResult["answerMode"]): number {
+  const defaultTokens = answerMode === "extractive_fallback" ? 360 : 180;
+  const configured = Number(process.env.MEMORY_FAST_TRANSLATION_MAX_TOKENS ?? defaultTokens);
+  if (!Number.isFinite(configured)) return defaultTokens;
+  return Math.min(Math.max(Math.trunc(configured), 80), 520);
 }
 
 function sanitizeTranslatedAnswer(answer: string): string {
-  return answer
+  return normalizeBulletLineBreaks(answer)
     .replace(/\*\*/g, "")
-    .replace(/\s+/g, " ")
+    .replace(/\r\n/g, "\n")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+function normalizeBulletLineBreaks(answer: string): string {
+  return answer
+    .replace(/([^\n])\s+(Công việc chính|Blockers\/rủi ro|Quyết định quan trọng|Next steps|Main work|Blockers\/risks|Key decisions)\s*\n?/g, "$1\n\n$2\n")
+    .replace(/([^\n])\s+-\s+/g, "$1\n- ")
+    .replace(/([^\n])\s+-\s+(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4}:)/g, "$1\n- $2")
+    .replace(/([^\n])\s+-\s+(\d{4}-\d{2}-\d{2}:)/g, "$1\n- $2");
 }
 
 function normalizeTranslatedAnswer(value: unknown): unknown {
@@ -172,6 +202,39 @@ function hasVietnameseDominantSegment(text: string): boolean {
     const english = countEnglishSignals(segment);
     return vietnamese >= 3 && vietnamese > english;
   });
+}
+
+function answerLanguageNeedsPolish(
+  answer: string,
+  responseLanguage: ResponseLanguage,
+): boolean {
+  const normalized = answer.trim();
+  if (!normalized) return false;
+
+  return responseLanguage === "vi"
+    ? hasEnglishDominantSegment(normalized)
+    : hasVietnameseDominantSegment(normalized);
+}
+
+function citationSourceLanguage(
+  citation: AnswerMemoryResult["citations"][number],
+): ResponseLanguage | "unknown" {
+  const sourceText = [
+    citation.quote,
+    citation.claim,
+  ]
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .join("\n");
+
+  if (!sourceText.trim()) return "unknown";
+  const vietnamese = countVietnameseSignals(sourceText);
+  const english = countEnglishSignals(sourceText);
+
+  if (vietnamese >= 2 && vietnamese >= english) return "vi";
+  if (english >= 2 && english > vietnamese * 1.5) return "en";
+  if (hasVietnameseDominantSegment(sourceText)) return "vi";
+  if (hasEnglishDominantSegment(sourceText)) return "en";
+  return "unknown";
 }
 
 function splitAnswerSegments(text: string): string[] {
@@ -252,14 +315,22 @@ const VIETNAMESE_COMMON_WORDS = new Set([
 const TECHNICAL_TOKENS = new Set([
   "api",
   "app",
+  "attachment",
   "cache",
+  "calendar",
   "chunk",
   "chunks",
   "ci",
   "debug",
   "demo",
+  "diary",
+  "drive",
   "fast",
-  "gemini",
+  "gmail",
+  "google",
+  "indexing",
+  "outbox",
+  "tuturuuu",
   "json",
   "latency",
   "memory",

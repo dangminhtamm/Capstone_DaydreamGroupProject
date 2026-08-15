@@ -95,13 +95,13 @@ export function useGoogleCalendarIntegration(auth: AuthContextValue) {
   }, [isAuthenticated, loadCalendar]);
 
   useEffect(() => {
-    const { result, reason } = parseCalendarCallbackParams(searchParams);
+    const { result, reason, source } = parseCalendarCallbackParams(searchParams);
     if (!result) return;
 
     let cancelled = false;
     Promise.resolve().then(() => {
       if (cancelled || !mountedRef.current) return;
-      setFeedback(buildCalendarFeedback(result, reason));
+      setFeedback(buildCalendarFeedback(result, reason, source));
       if (result === 'connected') {
         void loadCalendar();
       }
@@ -109,6 +109,7 @@ export function useGoogleCalendarIntegration(auth: AuthContextValue) {
 
     const params = new URLSearchParams(searchParams.toString());
     params.delete('calendar');
+    params.delete('source');
     params.delete('reason');
     const remaining = params.toString();
     router.replace(remaining ? `${pathname}?${remaining}` : pathname);
@@ -121,7 +122,7 @@ export function useGoogleCalendarIntegration(auth: AuthContextValue) {
     setError(null);
     try {
       const token = getAccessToken();
-      const url = await fetchCalendarConnectUrl(token);
+      const url = await fetchCalendarConnectUrl(token, 'calendar');
       if (!isSafeRedirectUrl(url)) {
         throw new Error('Received an invalid redirect URL from the server.');
       }

@@ -2,7 +2,7 @@
  * End-to-end test for answerMemory() (grounded AI memory pipeline).
  *
  * This script wires together:
- *   - answerMemory from @second-brain/ai  (embedding → hybrid retrieval → Gemini answer)
+ *   - answerMemory from @second-brain/ai  (embedding → hybrid retrieval → Tuturuuu answer)
  *   - Prisma from @second-brain/db        (memory_chunks access)
  *
  * Prerequisites:

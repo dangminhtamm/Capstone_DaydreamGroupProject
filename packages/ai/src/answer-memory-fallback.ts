@@ -1,4 +1,4 @@
-import type { GeminiTokenUsage } from "./gemini-json.ts";
+import type { TuturuuuJsonTokenUsage } from "./tuturuuu-json.ts";
 import type { MemoryCitation } from "./answer-utils.ts";
 import type {
   AnswerMemoryResult,
@@ -7,11 +7,9 @@ import type {
 } from "./answer-memory-types.ts";
 import {
   buildIntentNoMemoryMessage,
-  buildQuestionAwareFallbackAnswer,
+  buildQuestionAwareFallbackAnswerFromSources,
   buildReadableClaim,
   dedupeCitationsBySource,
-  formatFallbackSourceDate,
-  formatLocalizedMemoryBullet,
 } from "./answer-memory-format.ts";
 import {
   detectMemoryIntent,
@@ -34,6 +32,7 @@ import {
   isIncompleteGeneratedAnswer,
   isInsufficientAnswer,
 } from "./answer-memory-validation.ts";
+import { getIntentFallbackProfile } from "./answer-memory-intent-profiles.ts";
 
 export function canUseExtractiveFallback(
   modelError: NonNullable<AnswerMemoryResult["modelError"]>,
@@ -108,7 +107,7 @@ export function buildExtractiveFallbackAnswer(
   modelError: NonNullable<AnswerMemoryResult["modelError"]>,
   meta: {
     generateMs?: number;
-    tokenUsage?: GeminiTokenUsage;
+    tokenUsage?: TuturuuuJsonTokenUsage;
   } = {},
   question = "",
   timeZone = "UTC",
@@ -136,14 +135,18 @@ export function buildExtractiveFallbackAnswer(
     return result;
   }
 
-  const bullets = fallbackSources
-    .map((source) => {
-      const date = formatFallbackSourceDate(source.occurredAt, lang, timeZone);
-      return `- ${date}: ${formatLocalizedMemoryBullet(source, fallbackTopic, lang)}.`;
-    })
-    .join("\n");
-
-  const answer = buildQuestionAwareFallbackAnswer(lang, question, bullets, modelError, fallbackTopic);
+  const broadSynthesis = isBroadTemporalSynthesisQuestion(question, fallbackTopic);
+  const answer = buildQuestionAwareFallbackAnswerFromSources(
+    lang,
+    question,
+    fallbackSources,
+    modelError,
+    fallbackTopic,
+    {
+      broadSynthesis,
+      timeZone,
+    },
+  );
 
   return {
     answer,
@@ -169,7 +172,7 @@ export function buildValidationFallbackAnswer(
   message: string,
   meta: {
     generateMs?: number;
-    tokenUsage?: GeminiTokenUsage;
+    tokenUsage?: TuturuuuJsonTokenUsage;
   },
   question = "",
   timeZone = "UTC",
@@ -194,7 +197,7 @@ export function buildInsufficientModelAnswer(
   chunksRetrieved: number,
   meta: {
     generateMs: number;
-    tokenUsage: GeminiTokenUsage;
+    tokenUsage: TuturuuuJsonTokenUsage;
   },
 ): AnswerMemoryResult {
   return {
@@ -202,14 +205,14 @@ export function buildInsufficientModelAnswer(
     confidence: "low",
     citations: [],
     noMemory: true,
-    answerMode: "gemini",
+    answerMode: "tuturuuu",
     analytics: buildQueryAnalytics({
       model: meta.tokenUsage.model,
       tokenUsage: meta.tokenUsage,
       timing: { generateMs: meta.generateMs },
       chunksRetrieved,
       status: "no_memory",
-      answerMode: "gemini",
+      answerMode: "tuturuuu",
     }),
   };
 }
@@ -234,7 +237,10 @@ function selectFallbackSources(
   const normalizedQuestion = normalizeForIntent(question);
   const deduped = dedupeCitationsBySource(sources);
   const broadSynthesis = isBroadTemporalSynthesisQuestion(question, fallbackTopic);
-  const maxSources = broadSynthesis || fallbackTopic === "progress" ? 6 : 4;
+  const fallbackProfile = getIntentFallbackProfile(fallbackTopic);
+  const maxSources = broadSynthesis
+    ? fallbackProfile.broadMaxSources
+    : fallbackProfile.maxSources;
   const scored = deduped
     .map((source) => ({
       source,
@@ -243,8 +249,8 @@ function selectFallbackSources(
     .sort((a, b) => b.score - a.score || b.source.similarity - a.source.similarity);
 
   const topScore = scored[0]?.score ?? 0;
-  const minimumScore = getFallbackMinimumScore(fallbackTopic);
-  const maxDrop = getFallbackMaxScoreDrop(fallbackTopic);
+  const minimumScore = fallbackProfile.minimumScore;
+  const maxDrop = fallbackProfile.maxScoreDrop;
   const stronglyRelevant = scored.filter(
     (item) => item.score >= minimumScore && item.score >= topScore - maxDrop,
   );
@@ -306,34 +312,4 @@ function diversifySourcesByDay(
   }
 
   return selected;
-}
-
-function getFallbackMinimumScore(fallbackTopic: FallbackTopic): number {
-  switch (fallbackTopic) {
-    case "feedback":
-    case "blocker":
-    case "latency":
-    case "gmail":
-    case "google_contacts":
-    case "decision":
-      return 0.5;
-    case "mood":
-      return 0.45;
-    default:
-      return 0.38;
-  }
-}
-
-function getFallbackMaxScoreDrop(fallbackTopic: FallbackTopic): number {
-  switch (fallbackTopic) {
-    case "feedback":
-    case "blocker":
-    case "latency":
-    case "gmail":
-    case "google_contacts":
-    case "decision":
-      return 0.22;
-    default:
-      return 0.28;
-  }
 }

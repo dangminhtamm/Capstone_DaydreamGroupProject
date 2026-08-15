@@ -1,6 +1,7 @@
-import { generateGeminiJsonWithMeta } from "./gemini-json.ts";
-import { getGeminiAnswerModel } from "./gemini-models.ts";
+import { generateTuturuuuJsonWithMeta } from "./tuturuuu-json.ts";
+import { getTuturuuuAnswerModel } from "./tuturuuu-models.ts";
 import {
+  retrieveMemoryLexicalOnly,
   retrieveMemoryWithEmbedding,
   type MemorySearchHit,
 } from "./retrieval.ts";
@@ -22,12 +23,17 @@ import {
   trimPromptQuote,
 } from "./answer-memory-format.ts";
 import {
+  buildGroundedSourceContext,
+  GROUNDED_ANSWER_SYSTEM_PROMPT,
+  MEMORY_SOURCE_SECURITY_RULES,
+} from "./answer-memory-prompt.ts";
+import {
   inferRetrievalFilters,
   resolveMemoryTimeZone,
 } from "./answer-memory-temporal.ts";
 import { translateFastAnswerIfUseful } from "./answer-memory-translation.ts";
 import {
-  GeminiGroundedAnswerResponseSchema,
+  TuturuuuGroundedAnswerResponseSchema,
   GroundedAnswerSchema,
   type GroundedAnswer,
 } from "./answer-memory-schema.ts";
@@ -186,6 +192,7 @@ export async function answerMemory(
       {
         question: normalizedQuestion,
         responseLanguage: lang,
+        generateTranslation: options.generateTranslation,
       },
     );
 
@@ -222,11 +229,29 @@ export async function answerMemory(
   const embedStart = performance.now();
   let embedding: number[];
   try {
-    embedding = await createDefaultEmbeddingProvider().embedQuery(normalizedQuestion);
+    embedding = await (options.embeddingProvider ?? createDefaultEmbeddingProvider())
+      .embedQuery(normalizedQuestion);
   } catch (error) {
     const embedMs = performance.now() - embedStart;
     const modelError = classifyModelError(error);
-    const fallbackSources = buildCitations(unindexedDiaryChunks);
+    const lexicalRetrieveStart = performance.now();
+    let lexicalChunks: MemorySearchHit[] = [];
+    try {
+      lexicalChunks = await retrieveMemoryLexicalOnly(
+        normalizedQuestion,
+        userId,
+        dbClient,
+        appliedFilters,
+      );
+    } catch (lexicalError) {
+      console.warn("[AnswerMemory] Lexical fallback retrieval failed:", lexicalError);
+    }
+    const retrieveMs = preRetrieveMs + (performance.now() - lexicalRetrieveStart);
+    const fallbackChunks = rerankMemoryHits(
+      normalizedQuestion,
+      dedupeMemoryHits([...unindexedDiaryChunks, ...lexicalChunks]),
+      appliedFilters,
+    );
     const unavailableMessage = modelError.kind === "quota"
       ? lang === "vi"
         ? "Tuturuuu AI đang bị giới hạn quota/rate limit nên mình chưa thể tìm kiếm AI lúc này."
@@ -234,52 +259,55 @@ export async function answerMemory(
       : lang === "vi"
         ? "Tuturuuu AI hiện không khả dụng, nên mình chưa thể tìm kiếm AI lúc này."
         : "Tuturuuu AI is currently unavailable, so AI search is unavailable right now.";
-    const result = fallbackSources.length
-      ? buildExtractiveFallbackAnswer(
-          lang,
-          fallbackSources,
-          unindexedDiaryChunks.length,
-          modelError,
-          {},
-          normalizedQuestion,
+    const beforeTranslation = fallbackChunks.length
+      ? await answerFromChunks(normalizedQuestion, fallbackChunks, {
+          minTopSimilarity: options.minTopSimilarity ?? MIN_TOP_SIMILARITY,
+          responseLanguage: lang,
+          answerStrategy: "fast",
           timeZone,
-        )
-      : noMemoryResult(
-          unavailableMessage,
-          lang,
-        );
+        })
+      : noMemoryResult(unavailableMessage, lang);
+    const result = await translateFastAnswerIfUseful(beforeTranslation, {
+      question: normalizedQuestion,
+      responseLanguage: lang,
+      generateTranslation: options.generateTranslation,
+    });
 
     result.modelError = modelError;
     result.analytics = result.analytics ?? buildQueryAnalytics({
       model: "n/a",
-      chunksRetrieved: unindexedDiaryChunks.length,
+      chunksRetrieved: fallbackChunks.length,
       status: "error",
       answerMode: result.answerMode,
     });
     result.analytics.timing.embedMs = Math.round(embedMs);
-    result.analytics.timing.retrieveMs = Math.round(preRetrieveMs);
+    result.analytics.timing.retrieveMs = Math.round(retrieveMs);
     result.analytics.timing.totalMs = Math.round(performance.now() - totalStart);
-    result.analytics.status = "error";
+    if (!fallbackChunks.length) {
+      result.analytics.status = "error";
+    }
 
     result.debugTrace = buildDebugTrace({
       question: normalizedQuestion,
       inferredFilters,
       appliedFilters,
-      chunks: unindexedDiaryChunks,
+      chunks: fallbackChunks,
       result,
       routingTrace: {
         ...baseRoutingTrace,
         selectedPath: "embedding_error_fallback",
-        reason: "Embedding failed before indexed memory retrieval, so only available unindexed diary fallback evidence could be used.",
+        reason: fallbackChunks.length
+          ? "Embedding failed, so indexed memory retrieval used lexical/date fallback and skipped full generation."
+          : "Embedding failed before any supported lexical/date fallback evidence could be found.",
         usedUnindexedDiary: unindexedDiaryChunks.length > 0,
-        translationRan: false,
+        translationRan: didTranslationRun(beforeTranslation, result),
       },
       diagnostics: await maybeGetMemoryIndexDiagnostics(
         dbClient,
         userId,
         appliedFilters,
         result,
-        unindexedDiaryChunks.length,
+        fallbackChunks.length,
       ),
     });
 
@@ -412,6 +440,7 @@ export async function answerMemory(
           responseLanguage: lang,
           answerStrategy,
           timeZone,
+          generateAnswer: options.generateAnswer,
         }));
   if (result.answerMode === "extractive_fallback") {
     selectedPath = result.modelError?.kind === "validation"
@@ -419,7 +448,7 @@ export async function answerMemory(
       : "deep_model_error_fallback";
   } else if (result.answerMode === "no_memory") {
     selectedPath = "no_memory";
-  } else if (result.answerMode === "gemini") {
+  } else if (result.answerMode === "tuturuuu") {
     selectedPath = "deep_generation";
   } else if (result.answerMode === "fast_path") {
     selectedPath = "indexed_fast_path";
@@ -429,6 +458,7 @@ export async function answerMemory(
   result = await translateFastAnswerIfUseful(result, {
     question: normalizedQuestion,
     responseLanguage: lang,
+    generateTranslation: options.generateTranslation,
   });
 
   if (result.analytics) {
@@ -470,7 +500,7 @@ export async function answerFromChunks(
     responseLanguage?: ResponseLanguage;
     answerStrategy?: AnswerStrategy;
     timeZone?: string;
-    generateAnswer?: typeof generateGeminiJsonWithMeta<GroundedAnswer>;
+    generateAnswer?: typeof generateTuturuuuJsonWithMeta<GroundedAnswer>;
   } = {},
 ): Promise<AnswerMemoryResult> {
   const minTopSimilarity = options.minTopSimilarity ?? MIN_TOP_SIMILARITY;
@@ -550,21 +580,29 @@ export async function answerFromChunks(
 
   const promptSourceLimit = selectPromptSourceLimit(question, intent);
   const promptSources = sources.slice(0, promptSourceLimit);
-  const sourceContext = promptSources
-    .map((source) => {
-      return [
-        `[${source.marker}]`,
-        `date: ${source.occurredAt}`,
-        `type: ${source.sourceType}/${source.chunkType}`,
-        `memory: ${trimPromptQuote(source.quote)}`,
-      ].join("\n");
-    })
-    .join("\n\n");
+  const sourceContext = buildGroundedSourceContext(promptSources);
 
+  const broadSynthesisQuestion = isBroadTemporalSynthesisQuestion(question, intent);
   const languageInstruction = lang === "vi"
     ? '- PHẢI trả lời bằng tiếng Việt tự nhiên. Dùng "mình" cho assistant và "bạn" cho user.'
     : "- You MUST answer in natural English.";
   const intentInstruction = buildIntentInstruction(intent, lang);
+  const synthesisInstruction = broadSynthesisQuestion
+    ? lang === "vi"
+      ? [
+          '- Vì đây là câu hỏi tóm tắt theo tuần/tháng/khoảng thời gian, hãy tổng hợp theo các mục ngắn: "Công việc chính", "Blockers/rủi ro", "Quyết định quan trọng", "Next steps".',
+          "- Chỉ hiện mục nào có bằng chứng trong sources; không cần đủ cả 4 mục nếu nguồn không có.",
+          "- Không copy nguyên raw chunks dài. Hãy gom ý trùng nhau và diễn đạt tự nhiên bằng tiếng Việt.",
+        ].join("\n")
+      : [
+          '- Because this is a weekly/monthly/range summary question, synthesize with short sections: "Main work", "Blockers/risks", "Key decisions", "Next steps".',
+          "- Only include sections supported by the retrieved sources; do not force all four sections.",
+          "- Do not copy long raw chunks. Merge duplicate ideas and write naturally in English.",
+        ].join("\n")
+    : "- Do not copy long raw chunks. Summarize the relevant facts naturally.";
+  const lengthInstruction = broadSynthesisQuestion
+    ? "- Keep the answer compact: up to 180 words or 8 short bullets."
+    : "- Keep answer concise: at most 120 words or 5 short bullets.";
 
   const prompt = `
 You are the grounded answer generator for a personal Second Brain memory system.
@@ -576,6 +614,7 @@ Retrieved memory sources:
 ${sourceContext}
 
 Rules:
+${MEMORY_SOURCE_SECURITY_RULES}
 - Answer ONLY using the retrieved memory sources.
 - Do not invent dates, people, events, decisions, emotions, or outcomes.
 - Answer naturally without adding any citation markers (like [S1]) in your text.
@@ -583,34 +622,36 @@ Rules:
 - Each citations.claim MUST be a short exact quote or near-exact phrase copied from the source memory. Do not translate citation claims.
 - If the sources do not answer the question, say that the memory is insufficient and set confidence to "low".
 - Prefer a warm, concise answer over a fluent but unsupported answer.
-- Keep answer concise: at most 120 words or 5 short bullets.
+${lengthInstruction}
 - Include at most 4 citation objects unless more are absolutely necessary.
 - For "what did I do" timeline/range questions, summarize the main activities first, then use short bullets only when helpful.
-- Do not mention Gemini, model errors, retrieval, debug trace, or implementation details.
+- Do not mention Tuturuuu, model errors, retrieval, debug trace, or implementation details.
 - Return a compact JSON object with exactly these top-level fields: answer, confidence, citations.
 - Return ONLY JSON. Do not wrap it in markdown.
 - Required JSON shape:
   {"answer":"...","confidence":"high|medium|low","citations":[{"marker":"S1","claim":"..."}]}
 - Use citation markers exactly as S1, S2, S3, etc. Do not include square brackets in marker values.
 - It is okay to answer in Vietnamese while citation claims remain in the source language.
+${synthesisInstruction}
 - ${intentInstruction}
 ${languageInstruction}
 `.trim();
 
   try {
     const generateStart = performance.now();
-    const geminiResult = await (options.generateAnswer ?? generateGeminiJsonWithMeta)({
-      model: getGeminiAnswerModel(),
+    const tuturuuuResult = await (options.generateAnswer ?? generateTuturuuuJsonWithMeta)({
+      model: getTuturuuuAnswerModel(),
       prompt,
-      responseSchema: GeminiGroundedAnswerResponseSchema,
+      systemPrompt: GROUNDED_ANSWER_SYSTEM_PROMPT,
+      responseSchema: TuturuuuGroundedAnswerResponseSchema,
       validator: GroundedAnswerSchema,
       temperature: 0.1,
       maxOutputTokens: selectMaxAnswerTokens(question),
     });
     const generateMs = performance.now() - generateStart;
 
-    const output = geminiResult.data;
-    const tokenUsage = geminiResult.tokenUsage;
+    const output = tuturuuuResult.data;
+    const tokenUsage = tuturuuuResult.tokenUsage;
 
     if (isIncompleteGeneratedAnswer(output.answer)) {
       return buildValidationFallbackAnswer(
@@ -672,14 +713,14 @@ ${languageInstruction}
             false,
           ),
           citations: recoveredCitations,
-          answerMode: "gemini",
+          answerMode: "tuturuuu",
           analytics: buildQueryAnalytics({
             model: tokenUsage.model,
             tokenUsage,
             timing: { generateMs: Math.round(generateMs) },
             chunksRetrieved: chunks.length,
             status: "success",
-            answerMode: "gemini",
+            answerMode: "tuturuuu",
           }),
         };
       }
@@ -698,13 +739,6 @@ ${languageInstruction}
       );
     }
 
-    const answerGrounded = isAnswerGroundedByCitations(
-      output.answer,
-      supportedModelCitations,
-      sourceByMarker,
-      lang,
-    );
-
     const citedMarkerToClaim = new Map(
       supportedModelCitations.map((citation) => [citation.marker, citation.claim]),
     );
@@ -718,6 +752,15 @@ ${languageInstruction}
     const augmentedCitations = mergeRecoveredCitations(
       citations,
       recoverCitationsForAnswer(output.answer, promptSources, question, intent),
+    );
+    const answerGrounded = isAnswerGroundedByCitations(
+      output.answer,
+      augmentedCitations.map((citation) => ({
+        marker: citation.marker,
+        claim: citation.claim ?? citation.quote,
+      })),
+      sourceByMarker,
+      lang,
     );
 
     const retrievalConfidence = classifyRetrievalConfidence(
@@ -765,14 +808,14 @@ ${languageInstruction}
       answer: output.answer,
       confidence: finalConfidence,
       citations: augmentedCitations,
-      answerMode: "gemini",
+      answerMode: "tuturuuu",
       analytics: buildQueryAnalytics({
         model: tokenUsage.model,
         tokenUsage,
         timing: { generateMs: Math.round(generateMs) },
         chunksRetrieved: chunks.length,
         status: "success",
-        answerMode: "gemini",
+        answerMode: "tuturuuu",
       }),
     };
   } catch (error) {
@@ -947,7 +990,7 @@ function didTranslationRun(
   before: AnswerMemoryResult,
   after: AnswerMemoryResult,
 ): boolean {
-  if (before.answerMode !== "fast_path" || after.answerMode !== "fast_path") return false;
+  if (before.answerMode !== after.answerMode) return false;
   return (
     before.answer !== after.answer ||
     (after.analytics?.tokenUsage.totalTokens ?? 0) > (before.analytics?.tokenUsage.totalTokens ?? 0)
@@ -977,7 +1020,7 @@ function describeSelectedPath(
     case "unindexed_fast_path":
       return "A direct date/range question matched unindexed diary evidence.";
     case "embedding_error_fallback":
-      return "Embedding failed before indexed retrieval, so fallback evidence was used.";
+      return "Embedding failed, so indexed retrieval used lexical/date fallback and skipped full generation.";
     case "created_date_mismatch":
       return "The requested created date did not match stored memory dates.";
     default:

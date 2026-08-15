@@ -1,6 +1,11 @@
 import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { AuthenticatedRequestUser, isAdminEmail, normalizeUserRole } from './user-role';
+import {
+  AuthenticatedRequestUser,
+  canUseAdminPrivileges,
+  isAdminEmail,
+  normalizeUserRole,
+} from './user-role';
 
 @Injectable()
 export class AdminGuard implements CanActivate {
@@ -17,6 +22,10 @@ export class AdminGuard implements CanActivate {
     }
 
     if (isAdminEmail(authUser.email)) {
+      if (!canUseAdminPrivileges(authUser)) {
+        throw new ForbiddenException('Verified admin email is required.');
+      }
+
       authUser.role = 'admin';
       return true;
     }
@@ -31,6 +40,10 @@ export class AdminGuard implements CanActivate {
 
     if (role !== 'admin') {
       throw new ForbiddenException('Admin role is required.');
+    }
+
+    if (!canUseAdminPrivileges(authUser)) {
+      throw new ForbiddenException('Verified admin email is required.');
     }
 
     return true;

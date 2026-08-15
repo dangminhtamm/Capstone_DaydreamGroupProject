@@ -147,7 +147,7 @@ if (!hasAiGatewayKey()) {
         delayMs: evalDelayMs,
         limit: evalLimit ?? null,
         note:
-          "Answer evaluation calls Gemini answer generation. Use eval:retrieval to evaluate source matching without answer generation.",
+          "Answer evaluation calls Tuturuuu answer generation. Use eval:retrieval to evaluate source matching without answer generation.",
       };
 
       console.log(JSON.stringify({ summary, results }, null, 2));

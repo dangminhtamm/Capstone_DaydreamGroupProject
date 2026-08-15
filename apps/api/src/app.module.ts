@@ -18,6 +18,7 @@ import { PrismaService } from './prisma/prisma.service';
 import { SearchController } from './modules/search/search.controller';
 import { SearchService } from './modules/search/search.service';
 import { HealthController } from './modules/health/health.controller';
+import { AdminDiagnosticsController } from './modules/health/admin-diagnostics.controller';
 import { HealthService } from './modules/health/health.service';
 import { IndexingController } from './modules/indexing/indexing.controller';
 import { IndexingService } from './modules/indexing/indexing.service';
@@ -49,6 +50,7 @@ import { GoogleConnectionsModule } from './modules/google-connections/google-con
     SummaryController,
     SearchController,
     HealthController,
+    AdminDiagnosticsController,
     IndexingController,
   ],
   providers: [

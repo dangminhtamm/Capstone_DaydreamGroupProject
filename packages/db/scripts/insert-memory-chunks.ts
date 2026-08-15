@@ -1,5 +1,5 @@
 import {
-  GeminiEmbeddingProvider,
+  TuturuuuEmbeddingProvider,
   indexMemoryFromDiary,
 } from "../../ai/src/index.ts";
 import {
@@ -24,7 +24,7 @@ async function main(): Promise<void> {
     throw new Error("TUTURUUU_AI_API_KEY is required to generate embeddings.");
   }
 
-  const embeddingProvider = new GeminiEmbeddingProvider(apiKey);
+  const embeddingProvider = new TuturuuuEmbeddingProvider(apiKey);
 
   const sampleDiaryText = `
 I met with the mobile team this morning and we agreed to postpone the notification redesign until next sprint.

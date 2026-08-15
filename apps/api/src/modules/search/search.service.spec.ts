@@ -4,7 +4,13 @@ import { findCachedAnswer, saveSearchHistory } from '@second-brain/db';
 import { SearchService } from './search.service';
 
 jest.mock('@second-brain/ai', () => ({
+  DEFAULT_TUTURUUU_EMBEDDING_MODEL: 'google/gemini-embedding-2',
+  TUTURUUU_EMBEDDING_MODEL: 'google/gemini-embedding-2',
+  createDefaultEmbeddingProvider: jest.fn(() => ({
+    embedQuery: jest.fn(),
+  })),
   answerMemory: jest.fn(),
+  getTuturuuuAnswerModel: jest.fn(() => 'google/gemini-3.5-flash-lite'),
 }));
 
 jest.mock('@second-brain/db', () => ({
@@ -72,7 +78,7 @@ describe('SearchService', () => {
     );
     expect(result.confidence).toBe('high');
     expect(result.sources).toHaveLength(1);
-    expect(result.debugTrace).toMatchObject({ status: 'success', reason: 'mock trace' });
+    expect(result.debugTrace).toBeNull();
     expect(result.cached).toBe(false);
     expect(saveSearchHistory).toHaveBeenCalledWith(
       prisma,
@@ -82,6 +88,45 @@ describe('SearchService', () => {
         tokenCount: 42,
       }),
     );
+  });
+
+  it('returns debug trace only for admin users when enabled', async () => {
+    process.env.MEMORY_DEBUG_TRACE = 'true';
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'user-1',
+      email: 'admin@example.com',
+      role: 'admin',
+    });
+    (answerMemory as jest.Mock).mockResolvedValue({
+      answer: 'Admin debug answer',
+      confidence: 'high',
+      citations: [],
+      analytics: { tokenUsage: { totalTokens: 7 } },
+      debugTrace: {
+        status: 'success',
+        reason: 'admin trace',
+        chunksRetrieved: 2,
+        inferredFilters: {},
+        appliedFilters: {},
+        topChunks: [],
+      },
+    });
+
+    const result = await service.answerQuestion(
+      {
+        userId: 'supabase-user-1',
+        email: 'admin@example.com',
+        role: 'admin',
+        emailVerified: true,
+      },
+      {
+        question: 'What did I work on?',
+        responseLanguage: 'en',
+      },
+    );
+
+    expect(result.debugTrace).toMatchObject({ status: 'success', reason: 'admin trace' });
+    expect(result.cached).toBe(false);
   });
 
   it('returns cached answers for unfiltered repeat questions', async () => {
@@ -95,7 +140,7 @@ describe('SearchService', () => {
       analytics_json: JSON.stringify({
         tokenUsage: { totalTokens: 99 },
         status: 'success',
-        answerMode: 'gemini',
+        answerMode: 'tuturuuu',
         cacheVersion,
       }),
     });
@@ -132,7 +177,7 @@ describe('SearchService', () => {
       analytics_json: JSON.stringify({
         tokenUsage: { totalTokens: 41 },
         status: 'success',
-        answerMode: 'gemini',
+        answerMode: 'tuturuuu',
         cacheVersion: 'ai-recall-v0',
       }),
     });
@@ -143,9 +188,9 @@ describe('SearchService', () => {
       analytics: {
         tokenUsage: { totalTokens: 33 },
         status: 'success',
-        answerMode: 'gemini',
+        answerMode: 'tuturuuu',
       },
-      answerMode: 'gemini',
+      answerMode: 'tuturuuu',
     });
 
     const result = await service.answerQuestion('supabase-user-1', {
@@ -175,15 +220,15 @@ describe('SearchService', () => {
       }),
     });
     (answerMemory as jest.Mock).mockResolvedValue({
-      answer: 'Fresh Gemini answer',
+      answer: 'Fresh Tuturuuu answer',
       confidence: 'high',
       citations: [{ marker: 'S1', quote: 'fresh source' }],
       analytics: {
         tokenUsage: { totalTokens: 31 },
         status: 'success',
-        answerMode: 'gemini',
+        answerMode: 'tuturuuu',
       },
-      answerMode: 'gemini',
+      answerMode: 'tuturuuu',
     });
 
     const result = await service.answerQuestion('supabase-user-1', {
@@ -194,8 +239,8 @@ describe('SearchService', () => {
 
     expect(answerMemory).toHaveBeenCalled();
     expect(result).toMatchObject({
-      answer: 'Fresh Gemini answer',
-      answerMode: 'gemini',
+      answer: 'Fresh Tuturuuu answer',
+      answerMode: 'tuturuuu',
       cached: false,
     });
   });
@@ -210,7 +255,7 @@ describe('SearchService', () => {
       analytics_json: JSON.stringify({
         tokenUsage: { totalTokens: 721 },
         status: 'success',
-        answerMode: 'gemini',
+        answerMode: 'tuturuuu',
       }),
     });
     (answerMemory as jest.Mock).mockResolvedValue({
@@ -220,9 +265,9 @@ describe('SearchService', () => {
       analytics: {
         tokenUsage: { totalTokens: 44 },
         status: 'success',
-        answerMode: 'gemini',
+        answerMode: 'tuturuuu',
       },
-      answerMode: 'gemini',
+      answerMode: 'tuturuuu',
     });
 
     const result = await service.answerQuestion('supabase-user-1', {
@@ -240,7 +285,11 @@ describe('SearchService', () => {
 
   it('bypasses the answer cache when debug trace is enabled', async () => {
     process.env.MEMORY_DEBUG_TRACE = 'true';
-    prisma.user.findUnique.mockResolvedValue({ id: 'user-1' });
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'user-1',
+      email: 'admin@example.com',
+      role: 'admin',
+    });
     (findCachedAnswer as jest.Mock).mockResolvedValue({
       answer: 'Cached answer',
       confidence: 'medium',
@@ -260,10 +309,18 @@ describe('SearchService', () => {
       },
     });
 
-    const result = await service.answerQuestion('supabase-user-1', {
-      question: 'What did I work on?',
-      responseLanguage: 'en',
-    });
+    const result = await service.answerQuestion(
+      {
+        userId: 'supabase-user-1',
+        email: 'admin@example.com',
+        role: 'admin',
+        emailVerified: true,
+      },
+      {
+        question: 'What did I work on?',
+        responseLanguage: 'en',
+      },
+    );
 
     expect(findCachedAnswer).not.toHaveBeenCalled();
     expect(answerMemory).toHaveBeenCalled();
@@ -374,7 +431,7 @@ describe('SearchService', () => {
       confidence: 'high',
       citations: [],
       analytics: { tokenUsage: { totalTokens: 21 } },
-      answerMode: 'gemini',
+      answerMode: 'tuturuuu',
     });
 
     const result = await service.answerQuestion('supabase-user-1', {
@@ -392,14 +449,14 @@ describe('SearchService', () => {
     );
     expect(result).toMatchObject({
       answer: 'Fresh deep answer',
-      answerMode: 'gemini',
+      answerMode: 'tuturuuu',
       cached: false,
     });
   });
 
   it('throws a stable HTTP error when AI search fails', async () => {
     prisma.user.findUnique.mockResolvedValue({ id: 'user-1' });
-    (answerMemory as jest.Mock).mockRejectedValue(new Error('Gemini failed'));
+    (answerMemory as jest.Mock).mockRejectedValue(new Error('Tuturuuu failed'));
 
     await expect(
       service.answerQuestion('supabase-user-1', {

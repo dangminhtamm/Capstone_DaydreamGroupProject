@@ -1,10 +1,12 @@
 import type { MemoryIntent } from "./answer-memory-types.ts";
+import { getIntentProfile } from "./answer-memory-intent-profiles.ts";
 
 export function detectMemoryIntent(question: string): MemoryIntent {
   const normalizedQuestion = normalizeForIntent(question);
 
   if (isGoogleContactsIntent(normalizedQuestion)) return "google_contacts";
   if (isGmailIntent(normalizedQuestion)) return "gmail";
+  if (isDriveIntent(normalizedQuestion)) return "drive";
   if (isLatencyIntent(normalizedQuestion)) return "latency";
   if (isBlockerIntent(normalizedQuestion)) return "blocker";
   if (isFeedbackIntent(normalizedQuestion)) return "feedback";
@@ -25,23 +27,15 @@ export function isFeedbackIntent(normalizedQuestion: string): boolean {
     "review",
     "comment",
     "comments",
-    "citation",
-    "citations",
-    "cite",
-    "source",
-    "sources",
-    "linh",
     "góp ý",
     "gop y",
     "nhận xét",
     "nhan xet",
-    "trích dẫn",
-    "trich dan",
   ]);
 }
 
 export function isLatencyIntent(normalizedQuestion: string): boolean {
-  return includesAny(normalizedQuestion, [
+  if (includesAny(normalizedQuestion, [
     "retrieval latency",
     "answer generation",
     "generation latency",
@@ -51,21 +45,48 @@ export function isLatencyIntent(normalizedQuestion: string): boolean {
     "500 millisecond",
     "latency",
     "separate retrieval",
-    "separate",
-    "separately",
     "embedding time",
     "database retrieval",
-    "index",
-    "indexes",
-    "hnsw",
-    "gin",
-    "performance",
+    "indexing performance",
+    "index performance",
     "reranking",
     "time to first result",
     "độ trễ",
     "do tre",
+  ])) {
+    return true;
+  }
+
+  const hasBroadLatencyCue = includesAny(normalizedQuestion, [
+    "separate",
+    "separately",
     "tách",
     "tach",
+    "performance",
+    "hnsw",
+    "gin index",
+  ]);
+
+  return hasBroadLatencyCue && includesAny(normalizedQuestion, [
+    "retrieval",
+    "generation",
+    "embedding",
+    "database",
+    "reranking",
+    "latency",
+    "p95",
+    "metric",
+    "metrics",
+    "timing",
+    "response time",
+    "query time",
+    "speed",
+    "slow",
+    "fast",
+    "vector",
+    "semantic search",
+    "độ trễ",
+    "do tre",
   ]);
 }
 
@@ -74,13 +95,35 @@ function isCalendarIntent(normalizedQuestion: string): boolean {
     "calendar",
     "google calendar",
     "scheduled",
+    "schedule",
     "appointment",
     "meeting",
-    "event",
     "lịch",
     "lich",
-    "sự kiện",
-    "su kien",
+    "có sự kiện",
+    "co su kien",
+    "sự kiện gì",
+    "su kien gi",
+  ]);
+}
+
+function isDriveIntent(normalizedQuestion: string): boolean {
+  return includesAny(normalizedQuestion, [
+    "google drive",
+    "drive file",
+    "drive files",
+    "drive document",
+    "drive documents",
+    "drive folder",
+    "drive",
+    "google docs",
+    "google slides",
+    "google sheets",
+    "tệp drive",
+    "tep drive",
+    "file drive",
+    "tài liệu drive",
+    "tai lieu drive",
   ]);
 }
 
@@ -153,21 +196,54 @@ function isTaskIntent(normalizedQuestion: string): boolean {
 }
 
 function isDecisionIntent(normalizedQuestion: string): boolean {
-  return includesAny(normalizedQuestion, [
+  if (includesAny(normalizedQuestion, [
     "decide",
     "decision",
     "agreed",
     "scope decision",
-    "plan",
-    "planned",
     "future plan",
     "roadmap",
     "quyết định",
     "quyet dinh",
-    "kế hoạch",
-    "ke hoach",
     "thống nhất",
     "thong nhat",
+  ])) {
+    return true;
+  }
+
+  if (includesAny(normalizedQuestion, [
+    "plan for",
+    "planned to",
+    "planning to",
+    "kế hoạch cho",
+    "ke hoach cho",
+  ])) {
+    return true;
+  }
+
+  const hasPlanCue = includesAny(normalizedQuestion, [
+    "plan",
+    "planned",
+    "planning",
+    "kế hoạch",
+    "ke hoach",
+  ]);
+
+  return hasPlanCue && includesAny(normalizedQuestion, [
+    "future",
+    "scope",
+    "roadmap",
+    "strategy",
+    "prioritize",
+    "priority",
+    "next step",
+    "next steps",
+    "mvp",
+    "demo",
+    "project",
+    "capstone",
+    "triển khai",
+    "trien khai",
   ]);
 }
 
@@ -225,10 +301,84 @@ export function isGoogleContactsIntent(normalizedQuestion: string): boolean {
 }
 
 export function isGmailIntent(normalizedQuestion: string): boolean {
-  return includesAny(normalizedQuestion, [
+  if (includesAny(normalizedQuestion, [
+    "google mail",
+    "email",
+    "e-mail",
+    "inbox",
+    "mail thread",
+    "mail message",
+    "email thread",
+    "email message",
+    "subject",
+    "sender",
+    "người gửi",
+    "nguoi gui",
+    "email gửi",
+    "email gui",
+    "thư gửi",
+    "thu gui",
+    "hộp thư",
+    "hop thu",
+  ])) {
+    return true;
+  }
+
+  const asksAboutSentOrReceivedFeedback = includesAny(normalizedQuestion, [
+    "send",
+    "sent",
+    "wrote",
+    "emailed",
+    "from",
+    "gửi",
+    "gui",
+  ]) && includesAny(normalizedQuestion, [
+    "feedback",
+    "comment",
+    "comments",
+    "review",
+    "mentor",
+    "góp ý",
+    "gop y",
+    "nhận xét",
+    "nhan xet",
+    "phản hồi",
+    "phan hoi",
+  ]);
+
+  const namesGmailAsSource = includesAny(normalizedQuestion, [
     "gmail",
     "google mail",
+  ]) && includesAny(normalizedQuestion, [
+    "feedback",
+    "comment",
+    "comments",
+    "review",
+    "mentor",
+    "message",
+    "messages",
+    "thread",
+    "inbox",
+    "email",
+    "sender",
+    "sent",
+    "send",
+    "from",
+    "góp ý",
+    "gop y",
+    "nhận xét",
+    "nhan xet",
+    "phản hồi",
+    "phan hoi",
+    "tin nhắn",
+    "tin nhan",
+    "người gửi",
+    "nguoi gui",
+    "hộp thư",
+    "hop thu",
   ]);
+
+  return asksAboutSentOrReceivedFeedback || namesGmailAsSource;
 }
 
 export function isCitationQuestion(normalizedQuestion: string): boolean {
@@ -261,52 +411,30 @@ export function hasCitationEvidence(searchable: string): boolean {
 }
 
 export function hasBlockerEvidence(searchable: string): boolean {
-  return includesAny(searchable, [
-    "main blocker",
-    "main risk",
-    "another risk",
-    "risk is",
-    "risk was",
-    "blocked by",
-    "blocked on",
-    "challenge is",
-    "challenge was",
-    "stuck",
-    "quota",
-    "worker",
-    "indexing",
-    "worker is off",
-    "worker is running",
-    "not created yet",
-    "slow or unavailable",
-    "trở ngại chính",
-    "rủi ro chính",
-    "rủi ro là",
-    "khó khăn là",
-    "bị kẹt",
-    "bi ket",
-  ]);
+  return includesAny(searchable, getEvidenceKeywords("blocker"));
 }
 
 export function hasLatencyEvidence(searchable: string): boolean {
-  return includesAny(searchable, [
-    "retrieval latency",
-    "answer generation",
-    "generation latency",
-    "embedding time",
-    "database retrieval",
-    "reranking",
-    "time to first result",
-    "total answer time",
-    "p95 retrieval latency",
-    "average full answer latency",
-    "500 millisecond",
-    "500 ms",
-  ]);
+  return includesAny(searchable, getEvidenceKeywords("latency"));
 }
 
 export function hasGmailEvidence(searchable: string): boolean {
-  return (
+  const hasIndexedGmailMessage = includesAny(searchable, [
+    "gmail email from",
+    "gmail message",
+    "email from",
+    "mail.google.com",
+    "subject",
+    "snippet",
+    "sender",
+    "inbox",
+  ]) && includesAny(searchable, [
+    "gmail",
+    "email",
+    "mail",
+  ]);
+
+  const hasGmailScopeDecision =
     includesAny(searchable, ["gmail", "google mail"]) &&
     includesAny(searchable, [
       "future work",
@@ -314,25 +442,13 @@ export function hasGmailEvidence(searchable: string): boolean {
       "scope creep",
       "not add gmail",
       "stay as future work",
-    ])
-  );
+    ]);
+
+  return hasIndexedGmailMessage || hasGmailScopeDecision;
 }
 
 export function hasDecisionEvidence(searchable: string): boolean {
-  return includesAny(searchable, [
-    "decided",
-    "decision",
-    "agreed",
-    "scope decision",
-    "future plan",
-    "plan for",
-    "will stay",
-    "will not",
-    "should prioritize",
-    "quyết định",
-    "thống nhất",
-    "kế hoạch",
-  ]);
+  return includesAny(searchable, getEvidenceKeywords("decision"));
 }
 
 export function matchesDecisionSubject(normalizedQuestion: string, searchable: string): boolean {
@@ -347,22 +463,7 @@ export function hasMoodEvidenceForQuestion(normalizedQuestion: string, searchabl
     return hasStressEvidence(searchable) && !hasOnlyQuestionListEvidence(searchable);
   }
 
-  return includesAny(searchable, [
-    "mood",
-    "felt",
-    "feel",
-    "emotion",
-    "stressed",
-    "stress",
-    "relieved",
-    "worried",
-    "great",
-    "good mood",
-    "neutral",
-    "tâm trạng",
-    "cảm xúc",
-    "căng thẳng",
-  ]);
+  return includesAny(searchable, getEvidenceKeywords("mood"));
 }
 
 export function isStressIntent(normalizedQuestion: string): boolean {
@@ -458,4 +559,9 @@ export function normalizeForIntent(value: string): string {
 
 export function includesAny(value: string, needles: string[]): boolean {
   return needles.some((needle) => value.includes(normalizeForIntent(needle)));
+}
+
+function getEvidenceKeywords(intent: MemoryIntent): string[] {
+  const profile = getIntentProfile(intent).score;
+  return profile?.directEvidenceKeywords ?? profile?.evidenceKeywords ?? [];
 }

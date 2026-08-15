@@ -450,7 +450,7 @@ export async function syncGoogleCalendar(
 }
 
 // System health and indexing status
-export type SystemHealth = {
+export type AdminDiagnostics = {
   status: 'ok' | 'degraded';
   checkedAt: string;
   database: {
@@ -460,7 +460,7 @@ export type SystemHealth = {
   environment: {
     databaseConfigured: boolean;
     supabaseConfigured: boolean;
-    geminiConfigured: boolean;
+    tuturuuuConfigured: boolean;
     googleOAuthConfigured: boolean;
     redisConfigured?: boolean;
     redisReachable?: boolean;
@@ -637,13 +637,13 @@ export type DemoReadiness = {
   nextActions: string[];
 };
 
-export async function getSystemHealth(accessToken: string | null): Promise<SystemHealth> {
-  const response = await authFetch('/api/health', {
+export async function getAdminDiagnostics(accessToken: string | null): Promise<AdminDiagnostics> {
+  const response = await authFetch('/api/admin/diagnostics', {
     method: 'GET',
   }, accessToken);
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Failed to fetch system health' }));
+    const error = await response.json().catch(() => ({ message: 'Failed to fetch admin diagnostics' }));
     throw new Error(error.message || `HTTP ${response.status}`);
   }
 

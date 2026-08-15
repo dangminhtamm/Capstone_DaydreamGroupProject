@@ -35,6 +35,10 @@ import {
   buildQueryAnalytics,
   noMemoryResult,
 } from "./answer-memory-result.ts";
+import {
+  getIntentEvidenceSelection,
+  getIntentProfile,
+} from "./answer-memory-intent-profiles.ts";
 
 export function answerIntentEvidenceFastPath(
   question: string,
@@ -96,15 +100,7 @@ export function buildUnsupportedIntentNoMemoryResult(
 }
 
 export function isEvidenceFirstIntent(intent: MemoryIntent): boolean {
-  return [
-    "feedback",
-    "blocker",
-    "latency",
-    "gmail",
-    "google_contacts",
-    "decision",
-    "mood",
-  ].includes(intent);
+  return getIntentEvidenceSelection(intent).evidenceFirst;
 }
 
 export function selectIntentEvidenceSources(
@@ -123,9 +119,10 @@ export function selectIntentEvidenceSources(
   if (!groups.length) return [];
 
   const topScore = groups[0]?.score ?? 0;
-  const maxGroupDrop = getIntentEvidenceGroupMaxDrop(intent);
-  const maxGroups = getIntentEvidenceMaxGroups(intent);
-  const maxCitations = getIntentEvidenceMaxCitations(intent);
+  const evidenceSelection = getIntentEvidenceSelection(intent);
+  const maxGroupDrop = evidenceSelection.groupMaxDrop;
+  const maxGroups = evidenceSelection.maxGroups;
+  const maxCitations = evidenceSelection.maxCitations;
 
   const selectedGroups = groups
     .filter((group) => group.score >= topScore - maxGroupDrop)
@@ -194,7 +191,7 @@ function scoreCitationGroup(
     score:
       bestCitationScore +
       overlapRatio * 0.35 +
-      (directSupport ? getDirectSupportBoost(intent) : -0.6),
+      (directSupport ? getIntentEvidenceSelection(intent).directSupportBoost : -0.6),
     directSupport,
   };
 }
@@ -209,7 +206,7 @@ function groupDirectlySupportsIntent(
   switch (intent) {
     case "feedback":
       return (
-        includesAny(searchable, ["feedback", "mentor", "review", "linh", "gop y", "nhan xet"]) &&
+        includesAny(searchable, getFeedbackEvidenceKeywords()) &&
         (!isCitationQuestion(normalizedQuestion) || hasCitationEvidence(searchable))
       );
     case "blocker":
@@ -217,7 +214,8 @@ function groupDirectlySupportsIntent(
     case "latency":
       return hasLatencyEvidence(searchable) && !hasOnlyQuestionListEvidence(searchable);
     case "gmail":
-      return hasGmailEvidence(searchable);
+      return group.citations.some((citation) => citation.sourceType === "gmail") ||
+        hasGmailEvidence(searchable);
     case "google_contacts":
       return isGoogleContactsSearchText(searchable);
     case "decision":
@@ -234,7 +232,7 @@ function selectRepresentativeCitationsFromGroup(
   group: ScoredCitationGroup,
   intent: MemoryIntent,
 ): MemoryCitation[] {
-  const perGroupLimit = getIntentPerGroupCitationLimit(intent);
+  const perGroupLimit = getIntentEvidenceSelection(intent).perGroupCitationLimit;
   const scored = group.citations
     .map((citation) => {
       const searchable = normalizeForIntent(
@@ -242,7 +240,7 @@ function selectRepresentativeCitationsFromGroup(
       );
       const relevance =
         scoreSourceForIntent(normalizedQuestion, citation, intent) +
-        (citationDirectlySupportsIntent(normalizedQuestion, searchable, intent) ? 0.45 : 0);
+        (citationDirectlySupportsIntent(normalizedQuestion, searchable, intent, citation.sourceType) ? 0.45 : 0);
 
       return { citation, relevance };
     })
@@ -255,6 +253,7 @@ function selectRepresentativeCitationsFromGroup(
         normalizedQuestion,
         normalizeForIntent(`${item.citation.sourceTitle ?? ""} ${item.citation.chunkType} ${item.citation.quote}`),
         intent,
+        item.citation.sourceType,
       );
     })
     .slice(0, perGroupLimit)
@@ -265,11 +264,12 @@ function citationDirectlySupportsIntent(
   normalizedQuestion: string,
   searchable: string,
   intent: MemoryIntent,
+  sourceType?: string,
 ): boolean {
   switch (intent) {
     case "feedback":
       return (
-        includesAny(searchable, ["feedback", "mentor", "review", "linh", "gop y", "nhan xet"]) ||
+        includesAny(searchable, getFeedbackEvidenceKeywords()) ||
         (isCitationQuestion(normalizedQuestion) && hasCitationEvidence(searchable))
       );
     case "blocker":
@@ -277,7 +277,7 @@ function citationDirectlySupportsIntent(
     case "latency":
       return hasLatencyEvidence(searchable) && !hasOnlyQuestionListEvidence(searchable);
     case "gmail":
-      return hasGmailEvidence(searchable);
+      return sourceType === "gmail" || hasGmailEvidence(searchable);
     case "google_contacts":
       return isGoogleContactsSearchText(searchable);
     case "decision":
@@ -302,65 +302,12 @@ function dedupeCitationsByChunk(citations: MemoryCitation[]): MemoryCitation[] {
   return deduped;
 }
 
-function getDirectSupportBoost(intent: MemoryIntent): number {
-  switch (intent) {
-    case "feedback":
-    case "blocker":
-    case "latency":
-    case "gmail":
-    case "google_contacts":
-      return 0.7;
-    case "mood":
-      return 0.65;
-    default:
-      return 0.5;
-  }
-}
-
-function getIntentEvidenceGroupMaxDrop(intent: MemoryIntent): number {
-  switch (intent) {
-    case "gmail":
-    case "google_contacts":
-    case "blocker":
-    case "mood":
-      return 0.2;
-    case "feedback":
-    case "latency":
-      return 0.28;
-    default:
-      return 0.22;
-  }
-}
-
-function getIntentEvidenceMaxGroups(intent: MemoryIntent): number {
-  switch (intent) {
-    case "feedback":
-    case "latency":
-      return 2;
-    default:
-      return 1;
-  }
-}
-
-function getIntentEvidenceMaxCitations(intent: MemoryIntent): number {
-  switch (intent) {
-    case "latency":
-      return 4;
-    case "feedback":
-      return 3;
-    default:
-      return 2;
-  }
-}
-
-function getIntentPerGroupCitationLimit(intent: MemoryIntent): number {
-  switch (intent) {
-    case "latency":
-      return 3;
-    case "feedback":
-    case "gmail":
-      return 2;
-    default:
-      return 2;
-  }
+function getFeedbackEvidenceKeywords(): string[] {
+  return getIntentProfile("feedback").score?.evidenceKeywords ?? [
+    "feedback",
+    "mentor",
+    "review",
+    "gop y",
+    "nhan xet",
+  ];
 }

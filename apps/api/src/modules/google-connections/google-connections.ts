@@ -35,9 +35,35 @@ export function getAllGoogleWorkspaceScopes() {
   return [...new Set(GOOGLE_WORKSPACE_SOURCES.flatMap((source) => GOOGLE_SOURCE_SCOPES[source]))];
 }
 
+export function isGoogleSource(value: unknown): value is GoogleSource {
+  return (
+    typeof value === 'string' &&
+    (GOOGLE_WORKSPACE_SOURCES as string[]).includes(value)
+  );
+}
+
 export async function markGoogleWorkspaceConnected(prisma: PrismaService, userId: string) {
+  const workspaceScopes = getAllGoogleWorkspaceScopes();
   await Promise.all(
     GOOGLE_WORKSPACE_SOURCES.map((source) =>
+      upsertGoogleConnection(prisma, {
+        userId,
+        source,
+        connected: true,
+        scopes: workspaceScopes,
+        lastError: null,
+      }),
+    ),
+  );
+}
+
+export async function markGoogleSourcesConnected(
+  prisma: PrismaService,
+  userId: string,
+  sources: GoogleSource[],
+) {
+  await Promise.all(
+    sources.map((source) =>
       upsertGoogleConnection(prisma, {
         userId,
         source,
@@ -90,7 +116,12 @@ export async function getGoogleConnectionStatus(
   const row = rows[0];
 
   if (!row) {
-    return fallback;
+    if (!fallbackConnected) return fallback;
+
+    const hasConnectionRows = await hasAnyGoogleConnectionRows(prisma, userId);
+    return hasConnectionRows
+      ? { ...fallback, connected: false, scopes: [] }
+      : fallback;
   }
 
   const reconnectRequired = row.last_error
@@ -108,6 +139,10 @@ export async function getGoogleConnectionStatus(
     lastErrorAt: row.last_error_at,
     syncCursor: row.sync_cursor,
   };
+}
+
+export function shouldStoreGoogleRawPayloads() {
+  return process.env.GOOGLE_STORE_RAW_PAYLOADS === 'true';
 }
 
 export async function recordGoogleSyncSuccess(
@@ -205,7 +240,12 @@ async function upsertGoogleConnection(
       VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $6 IS NULL THEN NULL ELSE now() END, CASE WHEN $7::jsonb IS NULL THEN NULL ELSE $7::jsonb END)
       ON CONFLICT (user_id, source) DO UPDATE SET
         connected = EXCLUDED.connected,
-        scopes = EXCLUDED.scopes,
+        scopes = CASE
+          WHEN google_connections.connected = TRUE
+            AND cardinality(google_connections.scopes) > cardinality(EXCLUDED.scopes)
+            THEN google_connections.scopes
+          ELSE EXCLUDED.scopes
+        END,
         last_sync_at = COALESCE(EXCLUDED.last_sync_at, google_connections.last_sync_at),
         last_error = EXCLUDED.last_error,
         last_error_at = CASE WHEN EXCLUDED.last_error IS NULL THEN NULL ELSE now() END,
@@ -223,6 +263,23 @@ async function upsertGoogleConnection(
   } catch {
     // The table is migration-backed. Google sync should still work in partially
     // migrated local/demo environments; health/readiness will report the gap.
+  }
+}
+
+async function hasAnyGoogleConnectionRows(prisma: PrismaService, userId: string) {
+  try {
+    const rows = await prisma.$queryRawUnsafe<Array<{ count: string | number | bigint }>>(
+      `
+      SELECT COUNT(*)::text AS count
+      FROM google_connections
+      WHERE user_id = $1
+      `,
+      userId,
+    );
+    const value = rows[0]?.count;
+    return Number(value ?? 0) > 0;
+  } catch {
+    return false;
   }
 }
 

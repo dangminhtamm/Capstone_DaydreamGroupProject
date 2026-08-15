@@ -57,8 +57,8 @@ Retrieval limit: 8
 ## Notes
 
 - Retrieval latency is measured after query embedding, matching the sub-500ms memory recall target.
-- Total recall includes Gemini embedding latency and is reported separately.
-- Fast answer strategy avoids live Gemini answer generation; set `MEMORY_REPORT_ANSWER_STRATEGY=deep` for full generation evaluation.
+- Total recall includes Tuturuuu embedding latency and is reported separately.
+- Fast answer strategy avoids live Tuturuuu answer generation; set `MEMORY_REPORT_ANSWER_STRATEGY=deep` for full generation evaluation.
 - Runtime-invalid reports are not published unless `MEMORY_REPORT_WRITE_INVALID=1` is set.
 - The stable demo artifact is `memory-evaluation-latest-valid.md`.
 

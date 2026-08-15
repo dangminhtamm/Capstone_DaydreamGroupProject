@@ -127,10 +127,11 @@ model Summary {
 }
 
 model EntityMention {
-  id           String @id @default(uuid())
-  chunk_id     String
-  entity_type  String // e.g., 'person', 'project', 'goal', 'habit'
-  entity_value String
+  id                      String @id @default(uuid())
+  chunk_id                String
+  entity_type             String // e.g., 'person', 'project', 'goal', 'habit'
+  entity_value            String
+  entity_value_normalized String?
 
   created_at DateTime @default(now())
 
@@ -139,6 +140,7 @@ model EntityMention {
 
   @@unique([chunk_id, entity_type, entity_value], map: "entity_mentions_chunk_type_value_key")
   @@index([entity_type, entity_value], map: "entity_mentions_type_value_idx")
+  @@index([entity_type, entity_value_normalized], map: "entity_mentions_type_normalized_value_idx")
   @@index([chunk_id], map: "entity_mentions_chunk_id_idx")
   @@map("entity_mentions")
 }
@@ -268,6 +270,7 @@ model IndexingOutbox {
   payload     Json?
   run_after   DateTime @default(now())
   locked_at   DateTime?
+  locked_by   String?  @db.VarChar(128)
   processed_at DateTime?
 
   created_at DateTime @default(now())

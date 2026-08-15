@@ -1,5 +1,6 @@
-import { Controller, Get, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { ImportGmailMessagesDto } from './dto/import-gmail-messages.dto';
 import { GmailService } from './gmail.service';
 
 @Controller('gmail')
@@ -10,6 +11,25 @@ export class GmailController {
   @Get('status')
   async getStatus(@Req() req) {
     return this.gmailService.getConnectionStatus(req.user.userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('candidates')
+  async getImportCandidates(
+    @Req() req,
+    @Query('limit') limit?: string,
+    @Query('q') query?: string,
+  ) {
+    return this.gmailService.listImportCandidates(req.user.userId, {
+      limit: this.parseMessageLimit(limit),
+      query,
+    });
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('import')
+  async importSelectedMessages(@Req() req, @Body() body: ImportGmailMessagesDto) {
+    return this.gmailService.importSelectedMessages(req.user.userId, body.messageIds);
   }
 
   @UseGuards(JwtAuthGuard)

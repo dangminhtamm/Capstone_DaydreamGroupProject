@@ -9,10 +9,11 @@ export class CalendarController {
 
     @UseGuards(JwtAuthGuard)
     @Get('connect')
-    async connect(@Req() req) {
+    async connect(@Req() req, @Query('source') source?: string) {
         const url = await this.calendarService.createGoogleConnectUrl({
             supabaseId: req.user.userId,
             email: req.user.email,
+            source,
         });
 
         return { url };

@@ -3,6 +3,8 @@ import { google, calendar_v3 } from 'googleapis';
 import * as cron from 'node-cron';
 import { encryptOAuthToken, decryptOAuthToken } from '@second-brain/shared';
 
+type GoogleSource = 'calendar' | 'gmail' | 'drive' | 'contact';
+
 export class SyncCalendarJob {
   private static getApiBaseUrl() {
     return process.env.API_PUBLIC_URL || process.env.API_URL || 'http://localhost:3001';
@@ -137,9 +139,11 @@ export class SyncCalendarJob {
       console.log(
         `[Worker - Calendar Sync] Success: Synced ${rawEvents.length} events and queued ${syncedEvents.length} indexing jobs for User ${user.id}`,
       );
+      await this.recordGoogleSyncSuccess(user.id, 'calendar');
 
     } catch (error: any) {
-      console.error(`[Worker - Calendar Sync] Error for User ${user.id}: ${error.message}`);
+      await this.recordGoogleSyncFailure(user.id, 'calendar', error);
+      console.error(`[Worker - Calendar Sync] Error for User ${user.id}: ${this.toErrorMessage(error)}`);
     }
   }
 
@@ -197,6 +201,7 @@ export class SyncCalendarJob {
         },
         run_after: new Date(),
         locked_at: null,
+        locked_by: null,
         processed_at: null,
       },
       create: {
@@ -211,5 +216,127 @@ export class SyncCalendarJob {
         },
       },
     });
+  }
+
+  private static async recordGoogleSyncSuccess(userId: string, source: GoogleSource) {
+    await this.upsertGoogleConnection({
+      userId,
+      source,
+      connected: true,
+      lastSyncAt: new Date(),
+      lastError: null,
+    });
+  }
+
+  private static async recordGoogleSyncFailure(userId: string, source: GoogleSource, error: unknown) {
+    const message = this.toErrorMessage(error);
+    const reconnectRequired = this.isGoogleReconnectRequiredError(message);
+
+    await this.upsertGoogleConnection({
+      userId,
+      source,
+      connected: !reconnectRequired,
+      lastSyncAt: null,
+      lastError: reconnectRequired ? `Needs reconnect: ${message}` : message,
+    });
+  }
+
+  private static async upsertGoogleConnection(input: {
+    userId: string;
+    source: GoogleSource;
+    connected: boolean;
+    lastSyncAt: Date | null;
+    lastError: string | null;
+  }) {
+    try {
+      await prisma.$executeRawUnsafe(
+        `
+        INSERT INTO google_connections (
+          user_id,
+          source,
+          connected,
+          scopes,
+          last_sync_at,
+          last_error,
+          last_error_at
+        )
+        VALUES (
+          $1,
+          $2,
+          $3,
+          $4,
+          $5,
+          $6,
+          CASE WHEN $6 IS NULL THEN NULL ELSE now() END
+        )
+        ON CONFLICT (user_id, source) DO UPDATE SET
+          connected = EXCLUDED.connected,
+          scopes = EXCLUDED.scopes,
+          last_sync_at = COALESCE(EXCLUDED.last_sync_at, google_connections.last_sync_at),
+          last_error = EXCLUDED.last_error,
+          last_error_at = CASE WHEN EXCLUDED.last_error IS NULL THEN NULL ELSE now() END,
+          updated_at = now()
+        `,
+        input.userId,
+        input.source,
+        input.connected,
+        this.getGoogleSourceScopes(input.source),
+        input.lastSyncAt,
+        input.lastError?.slice(0, 1000) ?? null,
+      );
+    } catch (error) {
+      console.warn(`[Worker - Calendar Sync] Could not update google_connections for ${input.source}: ${this.toErrorMessage(error)}`);
+    }
+  }
+
+  private static getGoogleSourceScopes(source: GoogleSource) {
+    const scopes: Record<GoogleSource, string[]> = {
+      calendar: ['https://www.googleapis.com/auth/calendar.readonly'],
+      gmail: ['https://www.googleapis.com/auth/gmail.readonly'],
+      drive: ['https://www.googleapis.com/auth/drive.readonly'],
+      contact: ['https://www.googleapis.com/auth/contacts.readonly'],
+    };
+
+    return scopes[source];
+  }
+
+  private static isGoogleReconnectRequiredError(message: string) {
+    const normalized = message.toLowerCase();
+
+    return (
+      /\binvalid_grant\b/i.test(message) ||
+      /\binvalid_credentials\b/i.test(message) ||
+      normalized.includes('invalid credentials') ||
+      normalized.includes('token has been expired') ||
+      normalized.includes('token has been revoked') ||
+      normalized.includes('token expired') ||
+      normalized.includes('unauthorized') ||
+      normalized.includes('401') ||
+      normalized.includes('insufficient authentication scopes') ||
+      normalized.includes('insufficient permission') ||
+      normalized.includes('insufficient permissions') ||
+      normalized.includes('insufficient scope') ||
+      normalized.includes('insufficient_scope') ||
+      normalized.includes('forbidden') && (
+        normalized.includes('scope') ||
+        normalized.includes('permission')
+      )
+    );
+  }
+
+  private static toErrorMessage(error: unknown) {
+    if (error instanceof Error) return error.message;
+    if (typeof error === 'object' && error) {
+      const record = error as Record<string, unknown>;
+      return [
+        record.code,
+        record.status,
+        record.message,
+        record.response ? JSON.stringify(record.response) : null,
+        record.errors ? JSON.stringify(record.errors) : null,
+      ].filter(Boolean).join(' ') || 'Unknown Google Calendar sync error';
+    }
+
+    return String(error);
   }
 }

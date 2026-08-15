@@ -24,7 +24,7 @@ type SearchCitation = {
   claim?: string;
 };
 
-type AnswerMode = "cache" | "fast_path" | "gemini" | "extractive_fallback" | "no_memory";
+type AnswerMode = "cache" | "fast_path" | "tuturuuu" | "extractive_fallback" | "no_memory";
 type AnswerStrategy = "auto" | "fast" | "deep";
 
 type QueryAnalytics = {
@@ -93,6 +93,7 @@ type MemoryDebugTrace = {
     similarity: number;
     vectorSimilarity: number;
     lexicalScore: number;
+    entityScore?: number;
     distance: number | null;
     quote: string;
   }>;
@@ -188,7 +189,7 @@ function formatAnswerMode(value?: AnswerMode) {
       return "Cache";
     case "fast_path":
       return "Fast path";
-    case "gemini":
+    case "tuturuuu":
       return "Tuturuuu AI";
     case "extractive_fallback":
       return "Extractive fallback";
@@ -404,6 +405,137 @@ function formatIndexAction(issue: MemoryIndexDiagnostics["issue"], model: string
   }
 }
 
+type SimpleMemoryTone = "ready" | "attention" | "empty";
+
+function simpleMemoryToneClass(tone: SimpleMemoryTone) {
+  switch (tone) {
+    case "ready":
+      return "border-emerald-100 bg-emerald-50 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/25 dark:text-emerald-300";
+    case "attention":
+      return "border-amber-100 bg-amber-50 text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/25 dark:text-amber-300";
+    case "empty":
+      return "border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-800 dark:bg-slate-900/70 dark:text-slate-300";
+  }
+}
+
+function simpleIndexLabel(issue: MemoryIndexDiagnostics["issue"] | undefined, lang: ResponseLanguage) {
+  if (!issue || issue === "none") {
+    return lang === "vi" ? "Sẵn sàng" : "Ready";
+  }
+
+  if (issue === "empty_index") {
+    return lang === "vi" ? "Chưa có memory" : "No memory yet";
+  }
+
+  if (issue === "mixed_embeddings" || issue === "stale_embeddings") {
+    return lang === "vi" ? "Cần cập nhật index" : "Index needs refresh";
+  }
+
+  return lang === "vi" ? "Cần xử lý index" : "Index needs attention";
+}
+
+function latestMemoryDate(result: SearchResponse) {
+  const diagnosticsDate = result.debugTrace?.diagnostics?.latestOccurredAt;
+  if (diagnosticsDate) return diagnosticsDate;
+
+  const latestSource = result.sources
+    .map((source) => source.occurredAt)
+    .filter(Boolean)
+    .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
+
+  return latestSource ?? null;
+}
+
+function simpleMemoryStatus(result: SearchResponse, lang: ResponseLanguage) {
+  const diagnostics = result.debugTrace?.diagnostics;
+  const issue = diagnostics?.issue;
+  const sourceCount = result.sources.length;
+  const answerMode = result.answerMode ?? result.analytics?.answerMode;
+  const date = latestMemoryDate(result);
+  const hasIndexIssue = Boolean(issue && issue !== "none");
+  const tone: SimpleMemoryTone = result.noMemory
+    ? "empty"
+    : result.modelError || hasIndexIssue
+      ? "attention"
+      : "ready";
+
+  if (lang === "vi") {
+    return {
+      tone,
+      title: result.noMemory
+        ? "Chưa tìm thấy memory phù hợp"
+        : result.modelError
+          ? "Đang trả lời bằng nguồn đã lưu"
+          : hasIndexIssue
+            ? "Memory cần cập nhật"
+            : "Memory sẵn sàng",
+      detail: result.noMemory
+        ? "Hệ thống đã tìm trong memory nhưng chưa có nguồn đủ liên quan cho câu hỏi này."
+        : result.modelError
+          ? "AI generation không hoàn tất, nên câu trả lời dùng các citation mạnh nhất đã tìm được."
+          : hasIndexIssue
+            ? "Một phần memory index cần được cập nhật để tìm kiếm ổn định hơn."
+            : "Câu trả lời đã được nối với các nguồn liên quan trong memory của bạn.",
+      items: [
+        { label: "Nguồn dùng", value: `${sourceCount}` },
+        { label: "Trạng thái index", value: simpleIndexLabel(issue, lang) },
+        { label: "Cách trả lời", value: formatAnswerMode(answerMode) },
+        { label: "Memory mới nhất", value: date ? formatSourceDate(date) : "Chưa có" },
+      ],
+    };
+  }
+
+  return {
+    tone,
+    title: result.noMemory
+      ? "No matching memory found"
+      : result.modelError
+        ? "Answer uses saved sources"
+        : hasIndexIssue
+          ? "Memory needs refresh"
+          : "Memory is ready",
+    detail: result.noMemory
+      ? "Second Brain searched your memory but did not find enough relevant sources for this question."
+      : result.modelError
+        ? "AI generation did not fully complete, so the answer uses the strongest cited memories."
+        : hasIndexIssue
+          ? "Part of the memory index should be refreshed for more reliable search."
+          : "The answer is connected to relevant sources from your saved memory.",
+    items: [
+      { label: "Sources used", value: `${sourceCount}` },
+      { label: "Index status", value: simpleIndexLabel(issue, lang) },
+      { label: "Answer mode", value: formatAnswerMode(answerMode) },
+      { label: "Latest memory", value: date ? formatSourceDate(date) : "None yet" },
+    ],
+  };
+}
+
+function SimpleMemoryStatusPanel({ result, lang }: { result: SearchResponse; lang: ResponseLanguage }) {
+  const status = simpleMemoryStatus(result, lang);
+
+  return (
+    <div className={`mt-4 rounded-xl border px-4 py-3 ${simpleMemoryToneClass(status.tone)}`}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] opacity-75">
+            {lang === "vi" ? "Trạng thái memory" : "Memory status"}
+          </p>
+          <h4 className="mt-1 text-sm font-semibold">{status.title}</h4>
+          <p className="mt-1 text-sm leading-6 opacity-90">{status.detail}</p>
+        </div>
+        <div className="grid min-w-full gap-2 sm:min-w-[28rem] sm:grid-cols-4">
+          {status.items.map((item) => (
+            <div key={item.label} className="rounded-lg border border-current/10 bg-white/60 px-3 py-2 dark:bg-slate-950/40">
+              <p className="text-[10px] font-bold uppercase tracking-wide opacity-70">{item.label}</p>
+              <p className="mt-1 truncate text-xs font-semibold">{item.value}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function formatRoutingPath(value: NonNullable<MemoryDebugTrace["routingTrace"]>["selectedPath"]) {
   switch (value) {
     case "unindexed_fast_path":
@@ -436,6 +568,7 @@ function traceMissingMessage(result: SearchResponse) {
 }
 
 function AiDebugPanel({ result }: { result: SearchResponse }) {
+  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
   const analytics = result.analytics ?? null;
   const trace = result.debugTrace ?? null;
   const diagnostics = trace?.diagnostics ?? null;
@@ -497,9 +630,43 @@ function AiDebugPanel({ result }: { result: SearchResponse }) {
         similarity: source.similarity,
         vectorSimilarity: source.similarity,
         lexicalScore: 0,
+        entityScore: 0,
         distance: null,
         quote: source.quote,
       }));
+
+  async function handleCopyDebugTrace() {
+    const report = {
+      copiedAt: new Date().toISOString(),
+      answerMode,
+      confidence: result.confidence,
+      cached: result.cached ?? false,
+      cacheStorage: result.cacheStorage ?? null,
+      analytics,
+      modelError: result.modelError ?? null,
+      debugTrace: trace,
+      citations: result.sources.map((source) => ({
+        marker: source.marker,
+        chunkId: source.chunkId,
+        sourceType: source.sourceType,
+        sourceId: source.sourceId,
+        sourceTitle: source.sourceTitle ?? null,
+        occurredAt: source.occurredAt,
+        chunkType: source.chunkType,
+        similarity: source.similarity,
+        claim: source.claim ?? null,
+      })),
+    };
+
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(report, null, 2));
+      setCopyStatus("copied");
+      window.setTimeout(() => setCopyStatus("idle"), 2000);
+    } catch {
+      setCopyStatus("failed");
+      window.setTimeout(() => setCopyStatus("idle"), 2500);
+    }
+  }
 
   return (
     <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50/80 p-4 dark:border-slate-800 dark:bg-slate-900/70">
@@ -513,6 +680,20 @@ function AiDebugPanel({ result }: { result: SearchResponse }) {
           </h4>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void handleCopyDebugTrace()}
+            className="status-badge cursor-pointer transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 dark:hover:border-indigo-800 dark:hover:bg-indigo-950/40 dark:hover:text-indigo-300"
+          >
+            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v2m-6 12h8a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-8a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2z" />
+            </svg>
+            {copyStatus === "copied"
+              ? "Copied trace"
+              : copyStatus === "failed"
+                ? "Copy failed"
+                : "Copy debug trace"}
+          </button>
           <span className={`status-badge ${debugStateClass(traceState)}`}>
             Trace: {trace ? "returned" : "missing"}
           </span>
@@ -680,6 +861,9 @@ function AiDebugPanel({ result }: { result: SearchResponse }) {
                   <span className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">sim: {formatPercent(chunk.similarity)}</span>
                   <span className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">vector: {formatPercent(chunk.vectorSimilarity)}</span>
                   <span className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">lexical: {formatPercent(chunk.lexicalScore)}</span>
+                  {(chunk.entityScore ?? 0) > 0 ? (
+                    <span className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">entity: {formatPercent(chunk.entityScore ?? 0)}</span>
+                  ) : null}
                 </div>
                 <blockquote className="mt-2 line-clamp-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
                   {chunk.quote}
@@ -777,7 +961,7 @@ function EvidenceSourceCard({ source }: { source: SearchCitation }) {
 }
 
 export default function SearchPage() {
-  const { isAuthenticated, isLoading: isAuthLoading, getAccessToken } = useAuth();
+  const { isAuthenticated, isLoading: isAuthLoading, getAccessToken, isAdmin } = useAuth();
   const [question, setQuestion] = useState("");
   const [result, setResult] = useState<SearchResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -787,6 +971,7 @@ export default function SearchPage() {
   const [showAuthPrompt, setShowAuthPrompt] = useState(false);
   const [searchHistory, setSearchHistory] = useState<SearchHistoryEntry[]>([]);
   const [showHistory, setShowHistory] = useState(true);
+  const [showAiDebug, setShowAiDebug] = useState(false);
 
   // Load language preference on mount
   useEffect(() => {
@@ -803,6 +988,8 @@ export default function SearchPage() {
       if (savedStrategy === "auto" || savedStrategy === "fast" || savedStrategy === "deep") {
         setAnswerStrategy(savedStrategy);
       }
+
+      setShowAiDebug(localStorage.getItem("dd-show-ai-debug") === "true");
 
       const initialQuestion = new URLSearchParams(window.location.search).get("q");
       if (initialQuestion?.trim()) {
@@ -1105,6 +1292,21 @@ export default function SearchPage() {
                 <span className={`status-badge ${confidenceStyles[result.confidence]}`}>
                   {result.confidence} confidence
                 </span>
+                {isAdmin ? (
+                  <label className="status-badge cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={showAiDebug}
+                      onChange={(event) => {
+                        const enabled = event.target.checked;
+                        setShowAiDebug(enabled);
+                        localStorage.setItem("dd-show-ai-debug", enabled ? "true" : "false");
+                      }}
+                      className="h-3.5 w-3.5 accent-indigo-600"
+                    />
+                    Show AI debug
+                  </label>
+                ) : null}
               </div>
             ) : null}
           </div>
@@ -1234,7 +1436,9 @@ export default function SearchPage() {
             </div>
           )}
 
-          {result ? <AiDebugPanel result={result} /> : null}
+          {result ? <SimpleMemoryStatusPanel result={result} lang={displayLanguage} /> : null}
+
+          {result && isAdmin && showAiDebug ? <AiDebugPanel result={result} /> : null}
         </section>
       </div>
 

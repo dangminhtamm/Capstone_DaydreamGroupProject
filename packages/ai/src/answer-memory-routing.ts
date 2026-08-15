@@ -110,7 +110,7 @@ export function shouldUseIntentEvidenceFastPath(
   if (answerStrategy === "fast") return true;
   if (!isEvidenceFirstIntent(intent)) return false;
 
-  // Auto should stay cheap for direct lookup questions, but use Gemini when the
+  // Auto should stay cheap for direct lookup questions, but use Tuturuuu when the
   // user explicitly asks for synthesis, causality, comparison, or analysis.
   return !hasAutoDeepReasoningCue(question);
 }
@@ -150,6 +150,10 @@ export function isBroadTemporalSynthesisQuestion(
     "last week",
     "this month",
     "last month",
+    "this year",
+    "current year",
+    "last year",
+    "next year",
     "gần đây",
     "gan day",
     "gần nhất",
@@ -164,8 +168,17 @@ export function isBroadTemporalSynthesisQuestion(
     "thang nay",
     "tháng trước",
     "thang truoc",
+    "năm nay",
+    "nam nay",
+    "năm trước",
+    "nam truoc",
+    "năm ngoái",
+    "nam ngoai",
+    "năm sau",
+    "nam sau",
   ]);
   const explicitMonthRangeCue = hasExplicitMonthRangeCue(normalized);
+  const explicitYearRangeCue = hasExplicitYearRangeCue(normalized);
   const workOrSynthesisCue = intent === "progress" || includesAny(normalized, [
     "work on",
     "worked on",
@@ -174,6 +187,7 @@ export function isBroadTemporalSynthesisQuestion(
     "what have i worked",
     "what did i do",
     "what have i done",
+    "what happened",
     "summarize",
     "summary",
     "progress",
@@ -185,6 +199,8 @@ export function isBroadTemporalSynthesisQuestion(
     "lam duoc gi",
     "đã làm gì",
     "da lam gi",
+    "xảy ra",
+    "xay ra",
     "tóm tắt",
     "tom tat",
     "tiến độ",
@@ -195,7 +211,12 @@ export function isBroadTemporalSynthesisQuestion(
     : 0;
   const broadFilter = temporalSpanMs > 2 * 24 * 60 * 60 * 1000;
 
-  return workOrSynthesisCue && (broadTemporalCue || explicitMonthRangeCue || broadFilter);
+  return workOrSynthesisCue && (
+    broadTemporalCue ||
+    explicitMonthRangeCue ||
+    explicitYearRangeCue ||
+    broadFilter
+  );
 }
 
 function hasExplicitMonthRangeCue(normalizedQuestion: string): boolean {
@@ -203,6 +224,10 @@ function hasExplicitMonthRangeCue(normalizedQuestion: string): boolean {
     /\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\b/u.test(normalizedQuestion) ||
     /\bthang\s+(?:1[0-2]|[1-9])\b/u.test(normalizedQuestion)
   );
+}
+
+function hasExplicitYearRangeCue(normalizedQuestion: string): boolean {
+  return /\b20\d{2}\b/u.test(normalizedQuestion) && !hasExplicitDateCue(normalizedQuestion);
 }
 
 export function buildIntentInstruction(intent: MemoryIntent, lang: "en" | "vi"): string {
@@ -223,8 +248,8 @@ export function buildIntentInstruction(intent: MemoryIntent, lang: "en" | "vi"):
         : "Focus on why retrieval latency is measured separately from answer generation and on the related timing metrics.";
     case "gmail":
       return vi
-        ? "Tập trung vào quyết định/phạm vi liên quan đến Gmail. Bỏ qua nguồn chỉ nói về latency, benchmark, hoặc câu hỏi demo."
-        : "Focus on the decision or scope related to Gmail. Ignore sources that only discuss latency, benchmarks, or demo questions.";
+        ? "Tập trung vào email Gmail thật nếu câu hỏi hỏi người gửi/nội dung email; nếu không có email thì dùng quyết định/phạm vi liên quan đến Gmail. Bỏ qua nguồn chỉ nói về latency, benchmark, hoặc câu hỏi demo."
+        : "Focus on real Gmail email content when the question asks about a sender or email content; otherwise use Gmail scope decisions. Ignore sources that only discuss latency, benchmarks, or demo questions.";
     case "google_contacts":
       return vi
         ? "Tập trung vào kế hoạch Google Contacts/People API, không lẫn với Calendar hoặc Diary chung."

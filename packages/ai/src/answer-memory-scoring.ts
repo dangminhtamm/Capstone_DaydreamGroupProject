@@ -9,8 +9,13 @@ import {
   isGoogleContactsSearchText,
   normalizeForIntent,
 } from "./answer-memory-intents.ts";
+import {
+  getIntentProfile,
+  type IntentProfile,
+} from "./answer-memory-intent-profiles.ts";
 
 export type FallbackTopic = MemoryIntent;
+type ScoreProfile = NonNullable<IntentProfile["score"]>;
 
 export function countOverlap(first: Set<string>, second: Set<string>): number {
   let hits = 0;
@@ -115,126 +120,71 @@ export function scoreSourceForIntent(
   if (source.sourceType === "summary") score -= 0.04;
   if (isNoisyFallbackSource(source)) score -= 0.4;
 
+  const scoreProfile = getIntentProfile(fallbackTopic).score;
+
   if (fallbackTopic === "google_contacts") {
-    return score + (isGoogleContactsSource(source) ? 0.6 : -0.45);
+    return score + (isGoogleContactsSource(source)
+      ? (scoreProfile?.evidenceBoost ?? 0.6)
+      : -(scoreProfile?.noDirectSupportPenalty ?? 0.45));
   }
 
   if (fallbackTopic === "blocker") {
-    if (includesAny(searchable, [
-      "blocker",
-      "risk",
-      "challenge",
-      "stuck",
-      "quota",
-      "worker",
-      "indexing",
-      "fallback",
-      "blocked",
-      "trở ngại",
-      "rủi ro",
-      "khó khăn",
-    ])) score += 0.45;
-    if (source.chunkType === "action_item" || source.chunkType === "reflection") score += 0.08;
+    score = applyConfiguredScoreProfile(score, scoreProfile, normalizedQuestion, searchable, source);
     if (hasOnlyQuestionListEvidence(searchable)) {
-      score -= 0.5;
+      score -= scoreProfile?.onlyQuestionListPenalty ?? 0.5;
     }
     return score;
   }
 
   if (fallbackTopic === "feedback") {
-    if (includesAny(searchable, ["feedback", "mentor", "review", "linh", "gop y", "góp ý", "nhan xet", "nhận xét"])) {
-      score += 0.35;
+    score = applyConfiguredScoreProfile(score, scoreProfile, normalizedQuestion, searchable, source);
+    if (isGoogleContactsSource(source) && !isGoogleContactsIntent(normalizedQuestion)) {
+      score -= scoreProfile?.googleContactsOffIntentPenalty ?? 0.55;
     }
-    if (
-      includesAny(normalizedQuestion, ["citation", "citations", "trich dan", "trích dẫn"]) &&
-      includesAny(searchable, ["citation", "citations", "cite", "source", "trust", "ui", "trich dan", "trích dẫn"])
-    ) {
-      score += 0.28;
-    }
-    if (source.chunkType === "feedback") score += 0.12;
-    if (isGoogleContactsSource(source) && !isGoogleContactsIntent(normalizedQuestion)) score -= 0.55;
     return score;
   }
 
   if (fallbackTopic === "latency") {
-    if (includesAny(searchable, [
-      "retrieval latency",
-      "answer generation",
-      "generation latency",
-      "embedding time",
-      "database retrieval",
-      "reranking",
-      "p95",
-      "500 millisecond",
-      "500 ms",
-      "time to first result",
-      "separate",
-      "separately",
-    ])) {
-      score += 0.55;
+    score = applyConfiguredScoreProfile(score, scoreProfile, normalizedQuestion, searchable, source);
+    if (hasOnlyQuestionListEvidence(searchable)) {
+      score -= scoreProfile?.onlyQuestionListPenalty ?? 0.45;
     }
-    if (hasOnlyQuestionListEvidence(searchable)) score -= 0.45;
-    if (source.chunkType === "decision" || source.chunkType === "general_note") score += 0.06;
     return score;
   }
 
   if (fallbackTopic === "gmail") {
-    if (hasGmailEvidence(searchable)) {
-      score += 0.65;
+    const isGmailSource = source.sourceType === "gmail";
+    const hasEmailEvidence = hasGmailEvidence(searchable);
+
+    if (isGmailSource) {
+      score += scoreProfile?.sourceTypeBoosts?.gmail ?? 0.75;
+    } else if (hasEmailEvidence) {
+      score += scoreProfile?.evidenceBoost ?? 0.35;
     } else {
-      score -= 0.45;
+      score -= scoreProfile?.noDirectSupportPenalty ?? 0.45;
     }
-    if (source.chunkType === "decision" || source.chunkType === "feedback") score += 0.08;
-    if (hasLatencyEvidence(searchable) && !hasGmailEvidence(searchable)) score -= 0.35;
+
+    if (isGmailSource) score += getQuestionMatchBoost(scoreProfile, normalizedQuestion);
+
+    score += scoreProfile?.chunkTypeBoosts?.[source.chunkType] ?? 0;
+    score += scoreProfile?.sourceChunkTypeBoosts?.[source.sourceType]?.[source.chunkType] ?? 0;
+    if (hasLatencyEvidence(searchable) && !hasEmailEvidence) {
+      score -= scoreProfile?.latencyWithoutEvidencePenalty ?? 0.35;
+    }
     return score;
   }
 
   if (fallbackTopic === "mood") {
-    if (includesAny(searchable, [
-      "stress",
-      "stressed",
-      "worried",
-      "confident",
-      "relieved",
-      "mood",
-      "emotion",
-      "căng thẳng",
-      "tâm trạng",
-      "cảm xúc",
-    ])) score += 0.38;
-    if (source.chunkType === "reflection") score += 0.08;
+    score = applyConfiguredScoreProfile(score, scoreProfile, normalizedQuestion, searchable, source);
     return score;
   }
 
   if (fallbackTopic === "decision") {
-    if (includesAny(searchable, ["decide", "decision", "agreed", "scope decision", "quyet dinh", "quyết định", "thong nhat", "thống nhất"])) {
-      score += 0.32;
-    }
-    if (source.chunkType === "decision") score += 0.1;
+    score = applyConfiguredScoreProfile(score, scoreProfile, normalizedQuestion, searchable, source);
   }
 
   if (fallbackTopic === "progress") {
-    if (source.sourceType === "diary" || source.sourceType === "calendar") {
-      score += 0.14;
-    }
-    if (source.sourceType === "summary") {
-      score -= 0.16;
-    }
-    if (source.sourceType === "drive" || source.sourceType === "attachment") {
-      score -= 0.22;
-    }
-    if (
-      includesAny(normalizedQuestion, ["frontend", "duc anh", "nhan"]) &&
-      includesAny(searchable, ["diary input", "loading", "empty states", "timeline", "search page", "frontend flow"])
-    ) {
-      score += 0.28;
-    }
-    if (
-      includesAny(normalizedQuestion, ["progress", "week", "across"]) &&
-      includesAny(searchable, ["ai memory", "backend", "frontend", "calendar", "search", "citation"])
-    ) {
-      score += 0.18;
-    }
+    score = applyConfiguredScoreProfile(score, scoreProfile, normalizedQuestion, searchable, source);
   }
 
   if (isGoogleContactsSource(source)) {
@@ -242,6 +192,52 @@ export function scoreSourceForIntent(
   }
 
   return score;
+}
+
+function applyConfiguredScoreProfile(
+  score: number,
+  profile: ScoreProfile | undefined,
+  normalizedQuestion: string,
+  searchable: string,
+  source: MemoryCitation,
+): number {
+  if (!profile) return score;
+
+  let nextScore = score;
+  if (profile.evidenceKeywords && includesAny(searchable, profile.evidenceKeywords)) {
+    nextScore += profile.evidenceBoost ?? 0;
+  }
+
+  nextScore += getQuestionEvidenceMatchBoost(profile, normalizedQuestion, searchable);
+  nextScore += profile.chunkTypeBoosts?.[source.chunkType] ?? 0;
+  nextScore += profile.sourceTypeBoosts?.[source.sourceType] ?? 0;
+  nextScore += profile.sourceChunkTypeBoosts?.[source.sourceType]?.[source.chunkType] ?? 0;
+  nextScore -= profile.sourceTypePenalties?.[source.sourceType] ?? 0;
+
+  return nextScore;
+}
+
+function getQuestionEvidenceMatchBoost(
+  profile: ScoreProfile | undefined,
+  normalizedQuestion: string,
+  searchable: string,
+): number {
+  return profile?.queryEvidenceMatches
+    ?.filter(
+      (match) =>
+        includesAny(normalizedQuestion, match.questionKeywords) &&
+        includesAny(searchable, match.evidenceKeywords),
+    )
+    .reduce((total, match) => total + match.boost, 0) ?? 0;
+}
+
+function getQuestionMatchBoost(
+  profile: ScoreProfile | undefined,
+  normalizedQuestion: string,
+): number {
+  return profile?.queryEvidenceMatches
+    ?.filter((match) => includesAny(normalizedQuestion, match.questionKeywords))
+    .reduce((total, match) => total + match.boost, 0) ?? 0;
 }
 
 export function classifyFallbackConfidence(citations: MemoryCitation[]): "high" | "medium" | "low" {

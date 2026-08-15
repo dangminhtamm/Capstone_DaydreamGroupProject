@@ -38,6 +38,8 @@ export interface MemoryChunkMetadata {
   embeddingModel?: string;
   embeddingDimension?: number;
   embeddingUpdatedAt?: string;
+  embeddingStatus?: "embedded" | "pending";
+  chunkingMethod?: "semantic" | "deterministic_fallback";
 }
 
 export function withMemoryDate<T extends MemoryChunkMetadata>(

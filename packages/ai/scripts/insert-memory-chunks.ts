@@ -23,12 +23,12 @@ async function main(): Promise<void> {
       pruneMemoryChunksForSource,
       resolveMemoryChunkIds,
     },
-    { GeminiEmbeddingProvider, indexMemoryFromDiary },
+    { TuturuuuEmbeddingProvider, indexMemoryFromDiary },
   ] =
     await Promise.all([import("@second-brain/db"), import("../src/index.ts")]);
   const prisma = createPrismaClient();
 
-  const embeddingProvider = new GeminiEmbeddingProvider(apiKey);
+  const embeddingProvider = new TuturuuuEmbeddingProvider(apiKey);
   const sampleDiaryText = ` I met with the mobile team this morning and we agreed to postpone the notification redesign until next sprint. Customer support said users are confused by the onboarding copy, so we should simplify the first two screens. I finished the draft API contract for diary uploads and sent it to the team for review. Tomorrow I need to follow up with Minh about the analytics event naming. I felt calmer today because the plan is finally getting more concrete.`.trim();
 
   const result = await indexMemoryFromDiary({

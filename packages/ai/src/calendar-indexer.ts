@@ -3,7 +3,7 @@
 // Transforms Google Calendar events into memory chunks for AI retrieval.
 // Unlike diary entries which need LLM-based semantic chunking, calendar events
 // are already structured, so we directly create chunks from their fields.
-// This avoids unnecessary Gemini API calls and keeps indexing fast + cheap.
+// This avoids unnecessary generative AI calls and keeps indexing fast + cheap.
 
 import { insertMemoryChunks } from "@second-brain/db";
 import {

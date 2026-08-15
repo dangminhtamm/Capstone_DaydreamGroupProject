@@ -1,7 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { fetchCalendarConnectUrl } from '@/features/google-calendar/google-calendar-api';
 import { isSafeRedirectUrl } from '@/features/google-calendar/google-calendar-utils';
@@ -14,6 +15,7 @@ import type { IndexingJobStatus, IndexingStatus } from '@/lib/api-client';
 
 type GoogleWorkspaceCardProps = {
   indexingStatus?: IndexingStatus | null;
+  variant?: 'user' | 'admin';
 };
 
 type WorkspaceSource = 'calendar' | 'contact' | 'drive' | 'gmail';
@@ -45,6 +47,7 @@ type WorkspaceRow = {
   feedback?: SourceFeedback | null;
   examples: string[];
   onImport: () => void;
+  selectiveImport?: SelectiveImportControl;
 };
 
 type IndexingInfo = {
@@ -63,6 +66,34 @@ type SourcePresentation = {
   buttonKind: 'connect' | 'import';
 };
 
+type SelectableImportCandidate = {
+  id: string;
+  title: string;
+  subtitle: string;
+  detail: string;
+  date: string | null;
+  alreadyImported: boolean;
+  href?: string | null;
+  iconUrl?: string | null;
+  thumbnailUrl?: string | null;
+  previewKind?: 'drive' | 'gmail';
+};
+
+type SelectiveImportControl = {
+  query: string;
+  queryPlaceholder: string;
+  emptyLabel: string;
+  browseLabel: string;
+  importLabel: string;
+  candidates: SelectableImportCandidate[];
+  selectedIds: string[];
+  isListing: boolean;
+  onQueryChange: (value: string) => void;
+  onBrowse: () => void;
+  onToggle: (id: string) => void;
+  onImportSelected: () => void;
+};
+
 const sourceAccent: Record<WorkspaceSource, string> = {
   calendar: 'bg-sky-500',
   contact: 'bg-fuchsia-500',
@@ -77,7 +108,7 @@ const sourceSoftAccent: Record<WorkspaceSource, string> = {
   gmail: 'border-rose-100 bg-rose-50 text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-300',
 };
 
-export function GoogleWorkspaceCard({ indexingStatus }: GoogleWorkspaceCardProps) {
+export function GoogleWorkspaceCard({ indexingStatus, variant = 'user' }: GoogleWorkspaceCardProps) {
   const auth = useAuth();
   const { isAuthenticated, getAccessToken } = auth;
   const [isConnecting, setIsConnecting] = useState(false);
@@ -88,6 +119,55 @@ export function GoogleWorkspaceCard({ indexingStatus }: GoogleWorkspaceCardProps
   const contacts = useGoogleContactsIntegration(auth);
   const drive = useGoogleDriveIntegration(auth);
   const gmail = useGoogleGmailIntegration(auth);
+  const [driveImportQuery, setDriveImportQuery] = useState('');
+  const [gmailImportQuery, setGmailImportQuery] = useState('');
+  const [selectedDriveIds, setSelectedDriveIds] = useState<string[]>([]);
+  const [selectedGmailIds, setSelectedGmailIds] = useState<string[]>([]);
+  const [activeImportSource, setActiveImportSource] = useState<'drive' | 'gmail' | null>(null);
+
+  const browseDriveCandidates = useCallback(async () => {
+    const candidates = await drive.listImportCandidates({ limit: 25, query: driveImportQuery });
+    const candidateIds = new Set(candidates.map((candidate) => candidate.id));
+    setSelectedDriveIds((current) => current.filter((id) => candidateIds.has(id)));
+  }, [drive, driveImportQuery]);
+
+  const browseGmailCandidates = useCallback(async () => {
+    const candidates = await gmail.listImportCandidates({ limit: 25, query: gmailImportQuery });
+    const candidateIds = new Set(candidates.map((candidate) => candidate.id));
+    setSelectedGmailIds((current) => current.filter((id) => candidateIds.has(id)));
+  }, [gmail, gmailImportQuery]);
+
+  const importSelectedDrive = useCallback(async () => {
+    const imported = await drive.importSelectedDriveFiles(selectedDriveIds);
+    if (imported) setSelectedDriveIds([]);
+  }, [drive, selectedDriveIds]);
+
+  const importSelectedGmail = useCallback(async () => {
+    const imported = await gmail.importSelectedGmailMessages(selectedGmailIds);
+    if (imported) setSelectedGmailIds([]);
+  }, [gmail, selectedGmailIds]);
+
+  const toggleDriveCandidate = useCallback((id: string) => {
+    setSelectedDriveIds((current) =>
+      current.includes(id) ? current.filter((item) => item !== id) : [...current, id],
+    );
+  }, []);
+
+  const toggleGmailCandidate = useCallback((id: string) => {
+    setSelectedGmailIds((current) =>
+      current.includes(id) ? current.filter((item) => item !== id) : [...current, id],
+    );
+  }, []);
+
+  const openDriveImportModal = useCallback(() => {
+    setActiveImportSource('drive');
+    void browseDriveCandidates();
+  }, [browseDriveCandidates]);
+
+  const openGmailImportModal = useCallback(() => {
+    setActiveImportSource('gmail');
+    void browseGmailCandidates();
+  }, [browseGmailCandidates]);
 
   const rows: WorkspaceRow[] = useMemo(() => [
     {
@@ -138,7 +218,29 @@ export function GoogleWorkspaceCard({ indexingStatus }: GoogleWorkspaceCardProps
         'What feedback did Linh send?',
         'Which emails mention the demo?',
       ],
-      onImport: () => void gmail.syncGmail(20),
+      onImport: openGmailImportModal,
+      selectiveImport: {
+        query: gmailImportQuery,
+        queryPlaceholder: 'Search sender, subject, or Gmail query',
+        emptyLabel: 'Browse Gmail to choose specific messages before importing.',
+        browseLabel: 'Choose emails',
+        importLabel: 'Import selected emails',
+        candidates: gmail.candidates.map((message) => ({
+          id: message.id,
+          title: message.subject,
+          subtitle: message.sender,
+          detail: message.snippet ?? 'No preview text available.',
+          date: message.receivedAt,
+          alreadyImported: message.alreadyImported,
+          previewKind: 'gmail',
+        })),
+        selectedIds: selectedGmailIds,
+        isListing: gmail.isListingCandidates,
+        onQueryChange: setGmailImportQuery,
+        onBrowse: () => void browseGmailCandidates(),
+        onToggle: toggleGmailCandidate,
+        onImportSelected: () => void importSelectedGmail(),
+      },
     },
     {
       source: 'drive',
@@ -163,7 +265,32 @@ export function GoogleWorkspaceCard({ indexingStatus }: GoogleWorkspaceCardProps
         'What does the demo plan require?',
         'Which document explains MVP scope?',
       ],
-      onImport: () => void drive.syncGoogleDrive(20),
+      onImport: openDriveImportModal,
+      selectiveImport: {
+        query: driveImportQuery,
+        queryPlaceholder: 'Search file name',
+        emptyLabel: 'Browse Drive to choose specific files before importing.',
+        browseLabel: 'Choose files',
+        importLabel: 'Import selected files',
+        candidates: drive.candidates.map((file) => ({
+          id: file.id,
+          title: file.name,
+          subtitle: formatDriveMimeType(file.mimeType),
+          detail: file.size ? formatFileSize(file.size) : 'No file size available.',
+          date: file.modifiedTime,
+          alreadyImported: file.alreadyImported,
+          href: file.webViewLink,
+          iconUrl: file.iconLink,
+          thumbnailUrl: file.thumbnailLink,
+          previewKind: 'drive',
+        })),
+        selectedIds: selectedDriveIds,
+        isListing: drive.isListingCandidates,
+        onQueryChange: setDriveImportQuery,
+        onBrowse: () => void browseDriveCandidates(),
+        onToggle: toggleDriveCandidate,
+        onImportSelected: () => void importSelectedDrive(),
+      },
     },
     {
       source: 'contact',
@@ -190,7 +317,24 @@ export function GoogleWorkspaceCard({ indexingStatus }: GoogleWorkspaceCardProps
       ],
       onImport: () => void contacts.syncGoogleContacts(50),
     },
-  ], [calendar, contacts, drive, gmail]);
+  ], [
+    browseDriveCandidates,
+    browseGmailCandidates,
+    calendar,
+    contacts,
+    drive,
+    driveImportQuery,
+    gmail,
+    gmailImportQuery,
+    importSelectedDrive,
+    importSelectedGmail,
+    openDriveImportModal,
+    openGmailImportModal,
+    selectedDriveIds,
+    selectedGmailIds,
+    toggleDriveCandidate,
+    toggleGmailCandidate,
+  ]);
 
   const presentations = useMemo(() => {
     return Object.fromEntries(
@@ -214,18 +358,18 @@ export function GoogleWorkspaceCard({ indexingStatus }: GoogleWorkspaceCardProps
   ];
   const overallTone: SourceTone = attentionCount > 0 ? 'attention' : readyCount > 0 ? 'ready' : connected ? 'working' : 'idle';
   const overallLabel = !connected
-    ? 'Connect Google'
+    ? 'Connect a source'
     : attentionCount > 0
       ? `${attentionCount} source${attentionCount === 1 ? '' : 's'} need attention`
       : readyCount > 0
         ? `${readyCount}/4 indexed`
         : 'Import sources';
 
-  const reconnectGoogle = async () => {
+  const reconnectGoogle = async (source: WorkspaceSource | 'all' = 'all') => {
     setIsConnecting(true);
     clearFeedback();
     try {
-      const url = await fetchCalendarConnectUrl(getAccessToken());
+      const url = await fetchCalendarConnectUrl(getAccessToken(), source);
       if (!isSafeRedirectUrl(url)) {
         throw new Error('Received an invalid redirect URL from the server.');
       }
@@ -282,6 +426,7 @@ export function GoogleWorkspaceCard({ indexingStatus }: GoogleWorkspaceCardProps
   };
 
   const feedback = workspaceFeedback ?? calendar.feedback ?? contacts.feedback ?? drive.feedback ?? gmail.feedback;
+  const activeImportRow = activeImportSource ? rows.find((row) => row.source === activeImportSource) : null;
 
   if (!isAuthenticated) {
     return (
@@ -309,6 +454,111 @@ export function GoogleWorkspaceCard({ indexingStatus }: GoogleWorkspaceCardProps
     );
   }
 
+  if (variant === 'user') {
+    return (
+      <section id="google-workspace" className="scroll-mt-24 enterprise-card p-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="max-w-2xl">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
+              Google Workspace
+            </p>
+            <h3 className="mt-1.5 text-xl font-semibold tracking-tight text-slate-950 dark:text-slate-100">
+              Bring useful Google context into Search
+            </h3>
+            <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
+              Connect only the Google source you need, choose what to import, then ask Second Brain questions with citations from those sources.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={`status-badge ${toneBadgeClass(overallTone)}`}>
+              {overallLabel}
+            </span>
+          </div>
+        </div>
+
+        <div className="mt-5 grid gap-3 md:grid-cols-2">
+          {rows.map((row) => (
+            <UserGoogleSourceCard
+              key={row.source}
+              row={row}
+              presentation={presentations[row.source]}
+              indexingInfo={getIndexingInfo(row.source, indexingStatus)}
+              isConnecting={isConnecting}
+              onConnect={() => void reconnectGoogle(row.source)}
+            />
+          ))}
+        </div>
+
+        {feedback && (
+          <div className={`mt-4 rounded-xl border p-3 ${
+            feedback.type === 'success'
+              ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200'
+              : 'border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-200'
+          }`}>
+            <div className="flex items-start justify-between gap-3">
+              <p className="text-sm font-medium" role={feedback.type === 'error' ? 'alert' : 'status'}>
+                {feedback.text}
+              </p>
+              <button
+                type="button"
+                onClick={clearFeedback}
+                className="shrink-0 cursor-pointer text-xs font-semibold opacity-70 transition hover:opacity-100"
+                aria-label="Dismiss message"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
+
+        {connected && (
+          <details className="mt-4 rounded-xl border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-900/40">
+            <summary className="cursor-pointer text-sm font-semibold text-slate-700 dark:text-slate-200">
+              Privacy controls
+            </summary>
+            <div className="mt-3 space-y-3">
+              <label className="flex items-start gap-3 text-sm text-slate-600 dark:text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={deleteSyncedGoogleData}
+                  onChange={(event) => setDeleteSyncedGoogleData(event.target.checked)}
+                  disabled={isDisconnecting}
+                  className="mt-1 h-4 w-4 rounded border-slate-300 text-rose-600 focus:ring-rose-500 disabled:cursor-not-allowed"
+                />
+                <span>
+                  <span className="font-semibold text-slate-900 dark:text-slate-100">
+                    Delete imported Google data too
+                  </span>
+                  <span className="block text-xs leading-5 text-slate-500 dark:text-slate-400">
+                    Removes imported Google rows, memory chunks, and pending Google indexing jobs from this workspace.
+                  </span>
+                </span>
+              </label>
+              <button
+                type="button"
+                onClick={() => void handleDisconnectGoogle()}
+                disabled={isDisconnecting}
+                className="rounded-lg border border-rose-200 bg-white px-4 py-2 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-rose-900/60 dark:bg-slate-950 dark:text-rose-300 dark:hover:bg-rose-950/30"
+              >
+                {isDisconnecting ? 'Disconnecting...' : 'Disconnect Google'}
+              </button>
+            </div>
+          </details>
+        )}
+
+        {activeImportRow?.selectiveImport && (
+          <GoogleImportSelectionModal
+            isOpen
+            sourceLabel={activeImportRow.label}
+            control={activeImportRow.selectiveImport}
+            isImporting={activeImportRow.isSyncing}
+            onClose={() => setActiveImportSource(null)}
+          />
+        )}
+      </section>
+    );
+  }
+
   return (
     <section id="google-workspace" className="scroll-mt-24 enterprise-card p-5">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -320,7 +570,7 @@ export function GoogleWorkspaceCard({ indexingStatus }: GoogleWorkspaceCardProps
             Google sources for AI Recall
           </h3>
           <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
-            Connect Google once, import the sources you need, wait for indexing, then ask Search questions with cited Google evidence.
+            Connect individual sources for least-privilege access, or connect all sources explicitly for a full demo import.
           </p>
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
@@ -335,11 +585,11 @@ export function GoogleWorkspaceCard({ indexingStatus }: GoogleWorkspaceCardProps
           </span>
           <button
             type="button"
-            onClick={() => void reconnectGoogle()}
+            onClick={() => void reconnectGoogle('all')}
             disabled={isConnecting}
             className="action-secondary disabled:cursor-not-allowed"
           >
-            {isConnecting ? 'Opening Google...' : connected ? 'Reconnect Google' : 'Connect Google'}
+            {isConnecting ? 'Opening Google...' : connected ? 'Reconnect all Google sources' : 'Connect all Google sources'}
           </button>
           {connected && (
             <button
@@ -378,7 +628,7 @@ export function GoogleWorkspaceCard({ indexingStatus }: GoogleWorkspaceCardProps
         <StepItem
           step="1"
           title="Connect"
-          description={connected ? 'Google readonly access is connected.' : 'Approve Calendar, Gmail, Drive, and Contacts once.'}
+          description={connected ? 'At least one readonly Google source is connected.' : 'Connect only the source you plan to import, or explicitly connect all.'}
           done={connected}
         />
         <StepItem
@@ -431,10 +681,19 @@ export function GoogleWorkspaceCard({ indexingStatus }: GoogleWorkspaceCardProps
             presentation={presentations[row.source]}
             indexingInfo={getIndexingInfo(row.source, indexingStatus)}
             isConnecting={isConnecting}
-            onConnect={() => void reconnectGoogle()}
+            onConnect={() => void reconnectGoogle(row.source)}
           />
         ))}
       </div>
+      {activeImportRow?.selectiveImport && (
+        <GoogleImportSelectionModal
+          isOpen
+          sourceLabel={activeImportRow.label}
+          control={activeImportRow.selectiveImport}
+          isImporting={activeImportRow.isSyncing}
+          onClose={() => setActiveImportSource(null)}
+        />
+      )}
     </section>
   );
 }
@@ -467,6 +726,107 @@ function StepItem({
   );
 }
 
+function UserGoogleSourceCard({
+  row,
+  presentation,
+  indexingInfo,
+  isConnecting,
+  onConnect,
+}: {
+  row: WorkspaceRow;
+  presentation: SourcePresentation;
+  indexingInfo: IndexingInfo;
+  isConnecting: boolean;
+  onConnect: () => void;
+}) {
+  const selection = row.selectiveImport;
+  const isBusy = row.isLoading || row.isSyncing || Boolean(selection?.isListing);
+  const actionDisabled = presentation.buttonKind === 'connect'
+    ? isConnecting
+    : !row.connected || isBusy;
+  const action = presentation.buttonKind === 'connect' ? onConnect : row.onImport;
+  const imported = row.valueCount > 0 || Boolean(row.lastSyncedAt);
+  const memoryReady = presentation.tone === 'ready';
+  const buttonLabel = selection
+    ? selection.isListing
+      ? 'Loading list...'
+      : selection.browseLabel
+    : presentation.buttonLabel;
+  const firstExample = row.examples[0];
+
+  return (
+    <article className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-blue-200 hover:shadow-md dark:border-slate-800 dark:bg-slate-950/50 dark:hover:border-blue-900/70">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={`h-2.5 w-2.5 rounded-full ${sourceAccent[row.source]}`} aria-hidden />
+            <h4 className="text-base font-semibold text-slate-950 dark:text-slate-100">{row.label}</h4>
+            <span className={`status-badge ${toneBadgeClass(presentation.tone)}`}>
+              {presentation.statusLabel}
+            </span>
+          </div>
+          <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
+            {row.description}
+          </p>
+        </div>
+        <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-semibold ${sourceSoftAccent[row.source]}`}>
+          {row.valueLabel}
+        </span>
+      </div>
+
+      <div className="mt-4 grid gap-2 sm:grid-cols-3">
+        <FlowState label="Connected" done={row.connected} active={!row.connected && presentation.buttonKind === 'connect'} />
+        <FlowState label="Imported" done={imported} active={row.isSyncing} />
+        <FlowState label="Ready for AI" done={memoryReady} active={indexingInfo.active} attention={indexingInfo.failed || presentation.tone === 'attention'} />
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-xs font-medium leading-5 text-slate-500 dark:text-slate-400">
+            {presentation.statusDetail}
+          </p>
+          <p className="mt-0.5 text-xs text-slate-400 dark:text-slate-500">
+            Last import: {formatLastSynced(row.lastSyncedAt)}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={action}
+          disabled={actionDisabled}
+          className={`${presentation.buttonKind === 'connect' ? 'action-secondary' : 'action-primary'} disabled:cursor-not-allowed disabled:opacity-60`}
+        >
+          {row.isSyncing ? 'Importing...' : isConnecting && presentation.buttonKind === 'connect' ? 'Opening...' : buttonLabel}
+        </button>
+      </div>
+
+      {firstExample ? (
+        <Link
+          href={`/search?q=${encodeURIComponent(firstExample)}`}
+          className="mt-3 inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-blue-800 dark:hover:bg-blue-950/30 dark:hover:text-blue-300"
+        >
+          Try: {firstExample}
+        </Link>
+      ) : null}
+
+      {row.feedback?.type === 'error' ? (
+        <p className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-300">
+          {row.feedback.text}
+        </p>
+      ) : null}
+      {row.lastError && !row.feedback ? (
+        <p className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-300">
+          {friendlyError(row.lastError)}
+        </p>
+      ) : null}
+      {indexingInfo.detail && !indexingInfo.failed ? (
+        <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
+          {indexingInfo.detail}
+        </p>
+      ) : null}
+    </article>
+  );
+}
+
 function MemorySourceRow({
   row,
   presentation,
@@ -480,11 +840,17 @@ function MemorySourceRow({
   isConnecting: boolean;
   onConnect: () => void;
 }) {
-  const isBusy = row.isLoading || row.isSyncing;
+  const selection = row.selectiveImport;
+  const isBusy = row.isLoading || row.isSyncing || Boolean(selection?.isListing);
   const actionDisabled = presentation.buttonKind === 'connect'
     ? isConnecting
     : !row.connected || isBusy;
   const action = presentation.buttonKind === 'connect' ? onConnect : row.onImport;
+  const buttonLabel = selection
+    ? selection.isListing
+      ? 'Loading list...'
+      : selection.browseLabel
+    : presentation.buttonLabel;
   const imported = row.valueCount > 0 || Boolean(row.lastSyncedAt);
   const memoryReady = presentation.tone === 'ready';
 
@@ -571,7 +937,7 @@ function MemorySourceRow({
             disabled={actionDisabled}
             className={`${presentation.buttonKind === 'connect' ? 'action-secondary' : 'action-primary'} min-w-40 disabled:cursor-not-allowed`}
           >
-            {row.isSyncing ? 'Importing...' : isConnecting && presentation.buttonKind === 'connect' ? 'Opening...' : presentation.buttonLabel}
+            {row.isSyncing ? 'Importing...' : isConnecting && presentation.buttonKind === 'connect' ? 'Opening...' : buttonLabel}
           </button>
           <p className="max-w-44 text-left text-xs leading-5 text-slate-500 dark:text-slate-400 lg:text-right">
             {presentation.statusDetail}
@@ -579,6 +945,232 @@ function MemorySourceRow({
         </div>
       </div>
     </div>
+  );
+}
+
+function GoogleImportSelectionModal({
+  isOpen,
+  sourceLabel,
+  control,
+  isImporting,
+  onClose,
+}: {
+  isOpen: boolean;
+  sourceLabel: string;
+  control: SelectiveImportControl;
+  isImporting: boolean;
+  onClose: () => void;
+}) {
+  const [mounted, setMounted] = useState(false);
+  const selectedSet = new Set(control.selectedIds);
+  const selectedCount = control.selectedIds.length;
+  const disabled = isImporting || control.isListing;
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !disabled) onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [disabled, isOpen, onClose]);
+
+  if (!isOpen || !mounted) return null;
+
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <button
+        type="button"
+        aria-label="Close import picker"
+        className="absolute inset-0 cursor-default bg-slate-950/60 backdrop-blur-sm"
+        onClick={() => {
+          if (!disabled) onClose();
+        }}
+      />
+      <div className="relative flex max-h-[86vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-950">
+        <div className="border-b border-slate-200 p-5 dark:border-slate-800">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
+                Selective import
+              </p>
+              <h3 className="mt-1 text-xl font-semibold tracking-tight text-slate-950 dark:text-slate-100">
+                Choose {sourceLabel} memory sources
+              </h3>
+              <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500 dark:text-slate-400">
+                Browse Google first, select only the items you want, then import them into Second Brain for indexing and citations.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={disabled}
+              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+            >
+              Close
+            </button>
+          </div>
+
+          <div className="mt-4 flex flex-col gap-2 lg:flex-row lg:items-center">
+            <input
+              type="search"
+              value={control.query}
+              onChange={(event) => control.onQueryChange(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  control.onBrowse();
+                }
+              }}
+              placeholder={control.queryPlaceholder}
+              className="min-h-11 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-300 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-blue-800 dark:focus:ring-blue-950/50"
+              disabled={disabled}
+              autoFocus
+            />
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={control.onBrowse}
+                disabled={disabled}
+                className="action-secondary disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {control.isListing ? 'Loading...' : 'Refresh list'}
+              </button>
+              <button
+                type="button"
+                onClick={control.onImportSelected}
+                disabled={disabled || selectedCount === 0}
+                className="action-primary disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isImporting
+                  ? 'Importing...'
+                  : selectedCount > 0
+                    ? `${control.importLabel} (${selectedCount})`
+                    : control.importLabel}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50/80 p-4 dark:bg-slate-900/40">
+          <div className="rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
+            {control.isListing ? (
+              <div className="grid gap-2 p-3">
+                {[0, 1, 2, 3, 4].map((item) => (
+                  <div
+                    key={item}
+                    className="h-20 animate-pulse rounded-lg border border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-900"
+                  />
+                ))}
+              </div>
+            ) : control.candidates.length > 0 ? (
+              <div className="divide-y divide-slate-200 dark:divide-slate-800">
+                {control.candidates.map((candidate) => (
+                  <label
+                    key={candidate.id}
+                    className="flex cursor-pointer items-start gap-3 p-4 transition hover:bg-slate-50 dark:hover:bg-slate-900/70"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedSet.has(candidate.id)}
+                      onChange={() => control.onToggle(candidate.id)}
+                      disabled={disabled}
+                      className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed"
+                    />
+                    <CandidatePreview candidate={candidate} />
+                    <span className="min-w-0 flex-1">
+                      <span className="flex flex-wrap items-center gap-2">
+                        {candidate.href ? (
+                          <a
+                            href={candidate.href}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="truncate text-sm font-semibold text-slate-900 underline-offset-4 hover:underline dark:text-slate-100"
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            {candidate.title}
+                          </a>
+                        ) : (
+                          <span className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
+                            {candidate.title}
+                          </span>
+                        )}
+                        {candidate.alreadyImported && (
+                          <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-300">
+                            Imported
+                          </span>
+                        )}
+                      </span>
+                      <span className="mt-1 block text-xs font-medium text-slate-500 dark:text-slate-400">
+                        {candidate.subtitle}
+                        {candidate.date ? ` · ${formatLastSynced(candidate.date)}` : ''}
+                      </span>
+                      <span className="mt-1 line-clamp-3 block text-xs leading-5 text-slate-500 dark:text-slate-400">
+                        {candidate.detail}
+                      </span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            ) : (
+              <p className="p-5 text-sm text-slate-500 dark:text-slate-400">
+                {control.emptyLabel}
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 p-4 dark:border-slate-800">
+          <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
+            {selectedCount > 0
+              ? `${selectedCount} item${selectedCount === 1 ? '' : 's'} selected for import.`
+              : 'Nothing is imported until you select items and confirm.'}
+          </p>
+          <button
+            type="button"
+            onClick={control.onImportSelected}
+            disabled={disabled || selectedCount === 0}
+            className="action-primary disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isImporting
+              ? 'Importing...'
+              : selectedCount > 0
+                ? `${control.importLabel} (${selectedCount})`
+                : control.importLabel}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+function CandidatePreview({ candidate }: { candidate: SelectableImportCandidate }) {
+  const [imageFailed, setImageFailed] = useState(false);
+  const imageUrl = candidate.thumbnailUrl ?? candidate.iconUrl;
+  const label = candidate.previewKind === 'gmail'
+    ? getInitials(candidate.subtitle || candidate.title)
+    : formatPreviewLabel(candidate.subtitle);
+
+  return (
+    <span className="relative flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-slate-100 text-xs font-bold text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
+      {imageUrl && !imageFailed ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={imageUrl}
+          alt=""
+          referrerPolicy="no-referrer"
+          className="h-full w-full object-cover"
+          onError={() => setImageFailed(true)}
+        />
+      ) : (
+        <span>{label}</span>
+      )}
+    </span>
   );
 }
 
@@ -635,6 +1227,45 @@ function formatScope(scope: string) {
   return scope.replace(/^https:\/\/www\.googleapis\.com\/auth\//, '');
 }
 
+function formatDriveMimeType(mimeType: string) {
+  if (mimeType === 'application/vnd.google-apps.document') return 'Google Doc';
+  if (mimeType === 'application/vnd.google-apps.spreadsheet') return 'Google Sheet';
+  if (mimeType === 'application/vnd.google-apps.presentation') return 'Google Slides';
+  if (mimeType === 'application/pdf') return 'PDF';
+  if (mimeType.startsWith('image/')) return 'Image';
+  if (mimeType.startsWith('text/')) return 'Text file';
+  return mimeType.split('/').pop()?.replaceAll('.', ' ') ?? mimeType;
+}
+
+function formatPreviewLabel(value: string) {
+  if (value === 'Google Doc') return 'DOC';
+  if (value === 'Google Sheet') return 'XLS';
+  if (value === 'Google Slides') return 'PPT';
+  if (value === 'PDF') return 'PDF';
+  if (value === 'Image') return 'IMG';
+  if (value === 'Text file') return 'TXT';
+  return 'FILE';
+}
+
+function formatFileSize(value: string) {
+  const bytes = Number(value);
+  if (!Number.isFinite(bytes) || bytes <= 0) return 'Size unavailable';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
+}
+
+function getInitials(value: string) {
+  const words = value
+    .replace(/<[^>]+>/g, ' ')
+    .split(/\s+/)
+    .map((word) => word.trim())
+    .filter(Boolean);
+  const initials = words.slice(0, 2).map((word) => word[0]?.toUpperCase()).join('');
+  return initials || 'GM';
+}
+
 function FlowState({
   label,
   done,
@@ -681,7 +1312,7 @@ function getSourcePresentation(row: WorkspaceRow, indexingInfo: IndexingInfo): S
       statusLabel: isReconnectError(row.feedback.text) ? 'Fix access' : 'Needs attention',
       statusDetail: friendlyError(row.feedback.text),
       tone: 'attention',
-      buttonLabel: isReconnectError(row.feedback.text) ? 'Reconnect Google' : 'Try again',
+      buttonLabel: isReconnectError(row.feedback.text) ? `Reconnect ${row.label}` : 'Try again',
       buttonKind: isReconnectError(row.feedback.text) ? 'connect' : 'import',
     };
   }
@@ -691,7 +1322,7 @@ function getSourcePresentation(row: WorkspaceRow, indexingInfo: IndexingInfo): S
       statusLabel: 'Needs reconnect',
       statusDetail: friendlyError(row.lastError),
       tone: 'attention',
-      buttonLabel: 'Reconnect Google',
+      buttonLabel: `Reconnect ${row.label}`,
       buttonKind: 'connect',
     };
   }
@@ -699,9 +1330,9 @@ function getSourcePresentation(row: WorkspaceRow, indexingInfo: IndexingInfo): S
   if (!row.connected) {
     return {
       statusLabel: 'Connect first',
-      statusDetail: 'Connect Google, then import this source.',
+      statusDetail: `Connect ${row.label} readonly access, then import this source.`,
       tone: 'idle',
-      buttonLabel: 'Connect Google',
+      buttonLabel: `Connect ${row.label}`,
       buttonKind: 'connect',
     };
   }

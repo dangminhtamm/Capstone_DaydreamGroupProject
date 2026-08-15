@@ -427,6 +427,7 @@ export interface EntityMentionInput {
   chunkId: string;
   entityType: string; // 'person', 'project', 'tag'
   entityValue: string;
+  entityValueNormalized?: string;
 }
 
 /**
@@ -456,15 +457,32 @@ export async function insertEntityMentions(
   for (const mention of unique) {
     await prisma.$executeRawUnsafe(
       `
-        INSERT INTO "entity_mentions" ("id", "chunk_id", "entity_type", "entity_value")
-        VALUES (gen_random_uuid(), $1, $2, $3)
+        INSERT INTO "entity_mentions" (
+          "id",
+          "chunk_id",
+          "entity_type",
+          "entity_value",
+          "entity_value_normalized"
+        )
+        VALUES (gen_random_uuid(), $1, $2, $3, $4)
         ON CONFLICT ("chunk_id", "entity_type", "entity_value") DO NOTHING
       `,
       mention.chunkId,
       mention.entityType,
       mention.entityValue,
+      mention.entityValueNormalized ?? normalizeEntityValue(mention.entityValue),
     );
   }
+}
+
+function normalizeEntityValue(value: string) {
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[đĐ]/g, "d")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
 }
 
 /**
@@ -529,4 +547,3 @@ export async function resolveMemoryChunkIds(
   }
   return map;
 }
-

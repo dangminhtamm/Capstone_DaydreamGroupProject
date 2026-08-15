@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import {
   generateAiText,
-  getGeminiAnswerModel,
+  getTuturuuuAnswerModel,
 } from '@second-brain/ai';
 import {
   deleteMemoryChunksForSource,
@@ -246,6 +246,7 @@ export class DiaryService {
         payload: input.payload ?? {},
         run_after: new Date(),
         locked_at: null,
+        locked_by: null,
         processed_at: null,
       },
       create: {
@@ -442,7 +443,7 @@ export class DiaryService {
   // AI Writing Copilot
   // ---------------------------------------------------------------------------
   async copilot(userId: string, text: string, action: string) {
-    const modelName = getGeminiAnswerModel();
+    const modelName = getTuturuuuAnswerModel();
     const systemContext = [
       'You are the AI Writing Copilot for a Smart Personal Diary app called "Second Brain".',
       'The user writes daily diary entries to record their thoughts, emotions, and activities.',

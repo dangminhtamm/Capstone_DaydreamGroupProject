@@ -1,6 +1,7 @@
 import './instrument';
 
 import { NestFactory } from '@nestjs/core';
+import type { INestApplication } from '@nestjs/common';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
@@ -29,6 +30,8 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const logger = new Logger('Bootstrap');
 
+  configureTrustProxy(app, logger);
+
   app.setGlobalPrefix('api');
   app.use(requestIdMiddleware);
   app.use(securityHeadersMiddleware);
@@ -54,3 +57,23 @@ async function bootstrap() {
   logger.log(`API server running on http://localhost:${port}/api`);
 }
 bootstrap();
+
+function configureTrustProxy(app: INestApplication, logger: Logger) {
+  const trustProxy = parseTrustProxy(process.env.TRUST_PROXY);
+  if (trustProxy === undefined) return;
+
+  const expressApp = app.getHttpAdapter().getInstance() as {
+    set?: (key: string, value: boolean | number | string) => void;
+  };
+  expressApp.set?.('trust proxy', trustProxy);
+  logger.log(`Express trust proxy configured: ${String(trustProxy)}`);
+}
+
+function parseTrustProxy(value?: string) {
+  const normalized = value?.trim();
+  if (!normalized) return undefined;
+  if (normalized === 'true') return true;
+  if (normalized === 'false') return false;
+  if (/^\d+$/.test(normalized)) return Number(normalized);
+  return normalized;
+}

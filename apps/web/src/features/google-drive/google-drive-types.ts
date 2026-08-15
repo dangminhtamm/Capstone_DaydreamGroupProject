@@ -1,6 +1,6 @@
 export type DriveConnectionStatus = {
   source?: 'drive';
-  oauthMode?: 'all_google_sources';
+  oauthMode?: 'all_google_sources' | 'source_scoped';
   connected: boolean;
   scopes?: string[];
   requestedScopes?: string[];
@@ -22,9 +22,15 @@ export type GoogleDriveFile = {
   modifiedTime: string | null;
 };
 
+export type GoogleDriveImportCandidate = GoogleDriveFile & {
+  size: string | null;
+  alreadyImported: boolean;
+};
+
 export type DriveSyncResult = {
   message: string;
   syncedCount: number;
+  requestedCount?: number;
   queuedIndexingJobs?: number;
   memoryIndexingStatus?: 'queued' | 'succeeded' | 'failed';
 };

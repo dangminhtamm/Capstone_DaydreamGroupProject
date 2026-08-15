@@ -48,7 +48,7 @@ export interface AnswerMemoryStreamResult {
  *
  * This function waits for the canonical grounded-answer pipeline to finish,
  * then streams the validated answer text in small chunks. API/UI should keep
- * treating real token-by-token Gemini streaming as experimental until the
+ * treating real token-by-token Tuturuuu streaming as experimental until the
  * final streamed output can be validated and citation-recovered before display.
  */
 export async function answerMemoryStream(

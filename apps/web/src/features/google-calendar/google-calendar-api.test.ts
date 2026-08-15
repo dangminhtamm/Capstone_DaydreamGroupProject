@@ -122,10 +122,31 @@ test('fetchCalendarConnectUrl returns the OAuth URL', async () => {
   process.env.NEXT_PUBLIC_API_URL = 'http://localhost:3001';
   const { fetchCalendarConnectUrl } = await import('./google-calendar-api.ts');
 
-  globalThis.fetch = async () => mockResponse({ url: 'https://accounts.google.com/o/oauth2/auth?scope=calendar' });
+  let capturedUrl = '';
+  globalThis.fetch = async (input) => {
+    capturedUrl = String(input);
+    return mockResponse({ url: 'https://accounts.google.com/o/oauth2/auth?scope=calendar' });
+  };
 
   const url = await fetchCalendarConnectUrl('jwt-token');
   assert.equal(url, 'https://accounts.google.com/o/oauth2/auth?scope=calendar');
+  assert.equal(new URL(capturedUrl).searchParams.get('source'), 'all');
+});
+
+test('fetchCalendarConnectUrl can request a source-scoped OAuth URL', async () => {
+  process.env.NEXT_PUBLIC_API_URL = 'http://localhost:3001';
+  const { fetchCalendarConnectUrl } = await import('./google-calendar-api.ts');
+
+  let capturedUrl = '';
+  globalThis.fetch = async (input) => {
+    capturedUrl = String(input);
+    return mockResponse({ url: 'https://accounts.google.com/o/oauth2/auth?scope=gmail' });
+  };
+
+  await fetchCalendarConnectUrl('jwt-token', 'gmail');
+
+  assert.equal(new URL(capturedUrl).pathname, '/api/calendar/connect');
+  assert.equal(new URL(capturedUrl).searchParams.get('source'), 'gmail');
 });
 
 test('fetchCalendarConnectUrl throws when backend does not return url', async () => {

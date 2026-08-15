@@ -1,8 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { getAuditLogStatus } from '../../common/middleware/audit-log.middleware';
 import { checkRedisRateLimitHealth, getRateLimitStatus } from '../../common/middleware/rate-limit.middleware';
+import { getSecurityHeaderStatus } from '../../common/middleware/security-headers.middleware';
 import { getSearchCacheStatus } from '../../common/cache/search-answer-cache';
+import { getQueryEmbeddingCacheStatus } from '../../common/cache/query-embedding-cache';
 import { TUTURUUU_EMBEDDING_MODEL } from '@second-brain/ai';
 
 type DbCountRow = {
@@ -89,7 +91,28 @@ type EmbeddingSummaryRow = {
 export class HealthService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async getHealth() {
+  getLiveness() {
+    return { status: 'alive' as const };
+  }
+
+  async getReadiness() {
+    const checkedAt = new Date().toISOString();
+    const database = await this.checkDatabase();
+
+    if (!database.ok) {
+      throw new ServiceUnavailableException({
+        status: 'not_ready',
+        checkedAt,
+      });
+    }
+
+    return {
+      status: 'ready' as const,
+      checkedAt,
+    };
+  }
+
+  async getDiagnostics() {
     const checkedAt = new Date().toISOString();
     const [redis, database] = await Promise.all([
       checkRedisRateLimitHealth(),
@@ -105,6 +128,7 @@ export class HealthService {
           google_connections: true,
           summaries: true,
           memory_chunks: true,
+          entity_mentions: true,
           worker_heartbeats: true,
         })
       : {};
@@ -116,7 +140,9 @@ export class HealthService {
           google_connections_user_source_key: true,
           summaries_user_type_period_key: true,
           indexing_outbox_job_source_key: true,
+          indexing_outbox_processing_lease_idx: true,
           memory_chunks_user_source_chunk_key: true,
+          entity_mentions_type_normalized_value_idx: true,
           worker_heartbeats_heartbeat_at_idx: true,
         }, 'index')
       : {};
@@ -145,7 +171,7 @@ export class HealthService {
 
     const missingRequiredSchema = [...Object.values(tables), ...Object.values(indexes)]
       .some((check) => check.required && !check.ok);
-    const missingRequiredEnv = !env.databaseConfigured || !env.supabaseConfigured || !env.geminiConfigured;
+    const missingRequiredEnv = !env.databaseConfigured || !env.supabaseConfigured || !env.tuturuuuConfigured;
     const queueNeedsAction = outbox.failedJobCount > 0 || outbox.deadLetterJobCount > 0 || outbox.staleProcessingCount > 0;
     const embeddingNeedsAction = embeddingIndex.available && !embeddingIndex.healthy;
     const status = database.ok &&
@@ -249,7 +275,7 @@ export class HealthService {
             COUNT(*) FILTER (WHERE status IN ('pending', 'retry') AND run_after <= now()) AS "dueJobCount",
             COUNT(*) FILTER (
               WHERE status = 'processing'
-                AND locked_at < now() - interval '10 minutes'
+                AND locked_at < now() - ($1 * interval '1 millisecond')
             ) AS "staleProcessingCount",
             COUNT(*) FILTER (WHERE status = 'failed') AS "failedJobCount",
             COUNT(*) FILTER (WHERE status = 'dead_letter') AS "deadLetterJobCount",
@@ -258,6 +284,7 @@ export class HealthService {
             )) * 1000 AS "oldestPendingAgeMs"
           FROM indexing_outbox
           `,
+          this.getIndexingLeaseTimeoutMs(),
         ),
       ]);
       const summary = summaryRows[0];
@@ -288,6 +315,12 @@ export class HealthService {
         detail: error instanceof Error ? error.message : 'Could not read indexing_outbox.',
       };
     }
+  }
+
+  private getIndexingLeaseTimeoutMs() {
+    const configured = Number(process.env.INDEXING_LEASE_TIMEOUT_MS ?? 5 * 60_000);
+    if (!Number.isFinite(configured)) return 5 * 60_000;
+    return Math.min(Math.max(Math.trunc(configured), 60_000), 60 * 60_000);
   }
 
   private async getWorkerHealth(tableAvailable: boolean): Promise<WorkerHealth> {
@@ -445,10 +478,17 @@ export class HealthService {
         hasRealValue(process.env.SUPABASE_URL) &&
         hasRealValue(supabaseServerKey) &&
         !supabaseServerKeyIsPublishable,
-      geminiConfigured: hasRealValue(process.env.TUTURUUU_AI_API_KEY),
+      tuturuuuConfigured: hasRealValue(process.env.TUTURUUU_AI_API_KEY),
       googleOAuthConfigured: hasRealValue(process.env.GOOGLE_CLIENT_ID) && hasRealValue(process.env.GOOGLE_CLIENT_SECRET),
       redisConfigured: hasRealValue(process.env.REDIS_URL),
       redisReachable: redis.reachable,
+      rateLimitRedisRequired:
+        process.env.RATE_LIMIT_REDIS_REQUIRED === 'true' ||
+        (process.env.NODE_ENV === 'production' && process.env.RATE_LIMIT_REDIS_REQUIRED !== 'false'),
+      trustedProxyConfigured:
+        hasRealValue(process.env.TRUST_PROXY) ||
+        process.env.RATE_LIMIT_TRUST_PROXY_HEADERS === 'true' ||
+        hasRealValue(process.env.RATE_LIMIT_CLIENT_IP_HEADER),
       temporalConfigured: hasRealValue(process.env.TEMPORAL_ADDRESS) || hasRealValue(process.env.TEMPORAL_NAMESPACE),
       sentryConfigured: hasRealValue(process.env.SENTRY_DSN),
       openTelemetryConfigured:
@@ -465,17 +505,12 @@ export class HealthService {
       },
       securityHeaders: {
         enabled: true,
-        headers: [
-          'X-Content-Type-Options',
-          'X-Frame-Options',
-          'Referrer-Policy',
-          'Permissions-Policy',
-          'Cross-Origin-Resource-Policy',
-        ],
+        ...getSecurityHeaderStatus(),
       },
       rateLimit: getRateLimitStatus(),
       auditLogging: getAuditLogStatus(),
       searchCache: getSearchCacheStatus(),
+      queryEmbeddingCache: getQueryEmbeddingCacheStatus(),
       observability: {
         sentryConfigured: hasRealValue(process.env.SENTRY_DSN),
         openTelemetryConfigured:
@@ -501,11 +536,13 @@ export class HealthService {
     const warnings: string[] = [];
 
     if (!input.database.ok) warnings.push('Database is not reachable.');
-    if (!input.env.geminiConfigured) warnings.push('TUTURUUU_AI_API_KEY is missing; AI summary/search/indexing will fail.');
+    if (!input.env.tuturuuuConfigured) warnings.push('TUTURUUU_AI_API_KEY is missing; AI summary/search/indexing will fail.');
     if (!input.env.supabaseConfigured) warnings.push('Supabase service env is missing; storage/auth-backed features may fail.');
     if (!input.env.googleOAuthConfigured) warnings.push('Google OAuth env is missing; Calendar connect cannot run end-to-end.');
-    if (!input.env.redisConfigured) warnings.push('Redis is not configured; rate limiting and hot answer cache are using local fallbacks.');
-    if (input.env.redisConfigured && !input.env.redisReachable) warnings.push('Redis is configured but not reachable; rate limiting and hot answer cache are using local fallbacks.');
+    if (!input.env.redisConfigured) warnings.push('Redis is not configured; rate limiting, hot answer cache, and shared query embedding cache are using local fallbacks.');
+    if (input.env.redisConfigured && !input.env.redisReachable) warnings.push('Redis is configured but not reachable; rate limiting, hot answer cache, and shared query embedding cache are using local fallbacks.');
+    if (input.env.rateLimitRedisRequired && !input.env.redisReachable) warnings.push('Production rate limiting requires Redis, but Redis is not reachable.');
+    if (process.env.NODE_ENV === 'production' && !input.env.trustedProxyConfigured) warnings.push('Trusted proxy/IP header is not configured; anonymous rate limiting will use direct socket IP.');
     if (!input.env.temporalConfigured) warnings.push('Temporal is not configured; worker jobs are running with local cron/outbox semantics.');
     if (!input.env.sentryConfigured) warnings.push('Sentry is not configured; production error reporting is disabled.');
     if (!input.env.openTelemetryConfigured) warnings.push('OpenTelemetry is not configured; distributed tracing export is disabled.');

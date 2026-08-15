@@ -1,16 +1,17 @@
 import {
+  formatSummaryDateTime,
+  formatSummaryPeriodRange,
   generateAiText,
-  getGeminiSummaryModel,
+  getSummaryPeriod,
+  getTuturuuuSummaryModel,
+  isLastLocalDayOfMonth,
+  resolveSummaryTimeZone,
+  type SummaryPeriod,
 } from '@second-brain/ai';
 import * as cron from 'node-cron';
 import { prisma } from '../../lib/prisma';
 
 type SummaryType = 'daily' | 'weekly' | 'monthly' | 'yearly';
-
-type Period = {
-  start: Date;
-  end: Date;
-};
 
 async function generateSummaryForUser(
   userId: string,
@@ -80,6 +81,7 @@ async function enqueueSummaryIndexingJob(userId: string, summaryId: string, tx: 
       payload: {},
       run_after: new Date(),
       locked_at: null,
+      locked_by: null,
       processed_at: null,
     },
     create: {
@@ -93,42 +95,57 @@ async function enqueueSummaryIndexingJob(userId: string, summaryId: string, tx: 
   });
 }
 
-async function buildSummaryContext(userId: string, type: SummaryType, period: Period) {
+async function buildSummaryContext(userId: string, type: SummaryType, period: SummaryPeriod) {
   if (type === 'weekly') {
     const dailySummaries = await findLowerSummaries(userId, 'daily', period);
     if (dailySummaries.length) {
-      return { hasContent: true, text: formatSummaryList('Daily summaries', dailySummaries) };
+      return {
+        hasContent: true,
+        text: formatSummaryList('Daily summaries', dailySummaries, period.timeZone),
+      };
     }
   }
 
   if (type === 'monthly') {
     const weeklySummaries = await findLowerSummaries(userId, 'weekly', period);
     if (weeklySummaries.length) {
-      return { hasContent: true, text: formatSummaryList('Weekly summaries', weeklySummaries) };
+      return {
+        hasContent: true,
+        text: formatSummaryList('Weekly summaries', weeklySummaries, period.timeZone),
+      };
     }
 
     const dailySummaries = await findLowerSummaries(userId, 'daily', period);
     if (dailySummaries.length) {
-      return { hasContent: true, text: formatSummaryList('Daily summaries', dailySummaries) };
+      return {
+        hasContent: true,
+        text: formatSummaryList('Daily summaries', dailySummaries, period.timeZone),
+      };
     }
   }
 
   if (type === 'yearly') {
     const monthlySummaries = await findLowerSummaries(userId, 'monthly', period);
     if (monthlySummaries.length) {
-      return { hasContent: true, text: formatSummaryList('Monthly summaries', monthlySummaries) };
+      return {
+        hasContent: true,
+        text: formatSummaryList('Monthly summaries', monthlySummaries, period.timeZone),
+      };
     }
 
     const weeklySummaries = await findLowerSummaries(userId, 'weekly', period);
     if (weeklySummaries.length) {
-      return { hasContent: true, text: formatSummaryList('Weekly summaries', weeklySummaries) };
+      return {
+        hasContent: true,
+        text: formatSummaryList('Weekly summaries', weeklySummaries, period.timeZone),
+      };
     }
   }
 
   return buildRawActivityContext(userId, period);
 }
 
-function findLowerSummaries(userId: string, type: SummaryType, period: Period) {
+function findLowerSummaries(userId: string, type: SummaryType, period: SummaryPeriod) {
   return prisma.summary.findMany({
     where: {
       user_id: userId,
@@ -140,7 +157,7 @@ function findLowerSummaries(userId: string, type: SummaryType, period: Period) {
   });
 }
 
-async function buildRawActivityContext(userId: string, period: Period) {
+async function buildRawActivityContext(userId: string, period: SummaryPeriod) {
   const [diaries, events] = await Promise.all([
     prisma.diaryEntry.findMany({
       where: {
@@ -163,7 +180,10 @@ async function buildRawActivityContext(userId: string, period: Period) {
     sections.push(
       [
         'Diary entries:',
-        ...diaries.map((entry) => `- ${entry.entry_date.toISOString()}: ${entry.raw_text}`),
+        ...diaries.map(
+          (entry) =>
+            `- ${formatSummaryDateTime(entry.entry_date, period.timeZone)}: ${entry.raw_text}`,
+        ),
       ].join('\n'),
     );
   }
@@ -174,7 +194,10 @@ async function buildRawActivityContext(userId: string, period: Period) {
         'Calendar events:',
         ...events.map(
           (event) =>
-            `- ${event.start_time.toISOString()}-${event.end_time.toISOString()}: ${event.title}${
+            `- ${formatSummaryDateTime(event.start_time, period.timeZone)}-${formatSummaryDateTime(
+              event.end_time,
+              period.timeZone,
+            )}: ${event.title}${
               event.description ? ` - ${event.description}` : ''
             }`,
         ),
@@ -188,60 +211,33 @@ async function buildRawActivityContext(userId: string, period: Period) {
   };
 }
 
-async function callAI(type: SummaryType, period: Period, context: string) {
+async function callAI(type: SummaryType, period: SummaryPeriod, context: string) {
   const text = await generateAiText({
-    model: getGeminiSummaryModel(),
+    model: getTuturuuuSummaryModel(),
     prompt: buildSummaryPrompt(type, period, context),
   });
   if (!text) throw new Error('AI returned an empty summary.');
   return sanitizeSummaryContent(text);
 }
 
-const dayMs = 24 * 60 * 60 * 1000;
-
-function getSummaryPeriod(type: SummaryType, anchor: Date): Period {
-  if (type === 'daily') {
-    const start = startOfUtcDay(anchor);
-    return { start, end: new Date(start.getTime() + dayMs - 1) };
-  }
-
-  if (type === 'weekly') {
-    const start = startOfUtcWeek(anchor);
-    return { start, end: new Date(start.getTime() + 7 * dayMs - 1) };
-  }
-
-  if (type === 'monthly') {
-    const start = new Date(Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth(), 1));
-    const end = new Date(Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth() + 1, 1) - 1);
-    return { start, end };
-  }
-
-  const start = new Date(Date.UTC(anchor.getUTCFullYear(), 0, 1));
-  const end = new Date(Date.UTC(anchor.getUTCFullYear() + 1, 0, 1) - 1);
-  return { start, end };
-}
-
-function startOfUtcDay(date: Date) {
-  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
-}
-
-function startOfUtcWeek(date: Date) {
-  const day = date.getUTCDay();
-  const mondayOffset = day === 0 ? -6 : 1 - day;
-  return new Date(startOfUtcDay(date).getTime() + mondayOffset * dayMs);
-}
-
-function formatSummaryList(label: string, summaries: Array<{ period_start: Date; period_end: Date; content: string }>) {
+function formatSummaryList(
+  label: string,
+  summaries: Array<{ period_start: Date; period_end: Date; content: string }>,
+  timeZone: string,
+) {
   return [
     `${label}:`,
     ...summaries.map(
       (summary) =>
-        `- ${summary.period_start.toISOString()} to ${summary.period_end.toISOString()}: ${summary.content}`,
+        `- ${formatSummaryDateTime(summary.period_start, timeZone)} to ${formatSummaryDateTime(
+          summary.period_end,
+          timeZone,
+        )}: ${summary.content}`,
     ),
   ].join('\n');
 }
 
-function buildSummaryPrompt(type: SummaryType, period: Period, context: string) {
+function buildSummaryPrompt(type: SummaryType, period: SummaryPeriod, context: string) {
   const instructions: Record<SummaryType, string> = {
     daily:
       'Create a concise daily log. Capture concrete events, accomplishments, mood if evident, and notable follow-ups.',
@@ -257,7 +253,7 @@ function buildSummaryPrompt(type: SummaryType, period: Period, context: string) 
 You are the reflection engine for a personal Second Brain diary.
 
 Summary type: ${type}
-Period: ${period.start.toISOString()} to ${period.end.toISOString()}
+Period: ${formatSummaryPeriodRange(period)}
 
 Task:
 ${instructions[type]}
@@ -303,10 +299,11 @@ export class SummaryPipelineJob {
   }
 
   static startCron() {
+    const summaryTimeZone = resolveSummaryTimeZone();
     cron.schedule('50 23 * * *', async () => {
-      console.log('[Cron] Triggering Daily Summary pipeline (23:50)');
+      console.log(`[Cron] Triggering Daily Summary pipeline (23:50 ${summaryTimeZone})`);
       await runForAllUsers('daily');
-    });
+    }, { timezone: summaryTimeZone });
     console.log('Background Worker for Daily Summary Pipeline started.');
   }
 }
@@ -317,10 +314,11 @@ export class WeeklySummaryPipelineJob {
   }
 
   static startCron() {
+    const summaryTimeZone = resolveSummaryTimeZone();
     cron.schedule('55 23 * * 0', async () => {
-      console.log('[Cron] Triggering Weekly Summary pipeline (Sunday 23:55)');
+      console.log(`[Cron] Triggering Weekly Summary pipeline (Sunday 23:55 ${summaryTimeZone})`);
       await runForAllUsers('weekly');
-    });
+    }, { timezone: summaryTimeZone });
     console.log('Background Worker for Weekly Summary Pipeline started.');
   }
 }
@@ -331,14 +329,16 @@ export class MonthlySummaryPipelineJob {
   }
 
   static startCron() {
+    const summaryTimeZone = resolveSummaryTimeZone();
     cron.schedule('58 23 28-31 * *', async () => {
       const now = new Date();
-      const tomorrow = new Date(now.getTime() + dayMs);
-      if (tomorrow.getUTCDate() !== 1) return;
+      if (!isLastLocalDayOfMonth(now, summaryTimeZone)) return;
 
-      console.log('[Cron] Triggering Monthly Summary pipeline (last day of month, 23:58)');
+      console.log(
+        `[Cron] Triggering Monthly Summary pipeline (last local day of month, 23:58 ${summaryTimeZone})`,
+      );
       await runForAllUsers('monthly', now);
-    });
+    }, { timezone: summaryTimeZone });
     console.log('Background Worker for Monthly Summary Pipeline started.');
   }
 }
@@ -349,10 +349,11 @@ export class YearlySummaryPipelineJob {
   }
 
   static startCron() {
+    const summaryTimeZone = resolveSummaryTimeZone();
     cron.schedule('59 23 31 12 *', async () => {
-      console.log('[Cron] Triggering Yearly Summary pipeline (Dec 31 23:59)');
+      console.log(`[Cron] Triggering Yearly Summary pipeline (Dec 31 23:59 ${summaryTimeZone})`);
       await runForAllUsers('yearly');
-    });
+    }, { timezone: summaryTimeZone });
     console.log('Background Worker for Yearly Summary Pipeline started.');
   }
 }

@@ -405,6 +405,7 @@ export class IndexingService {
       error: null,
       run_after: new Date(),
       locked_at: null,
+      locked_by: null,
       processed_at: null,
     };
   }
@@ -445,7 +446,7 @@ export class IndexingService {
       summaries: 'Generate one daily summary and one weekly summary from the Summary page.',
       calendar_events: 'Connect Google Calendar, then run Sync Demo or Sync Now in Settings.',
       linked_calendar: 'Make sure diary entry dates match synced Calendar events, then run Calendar sync/linking again.',
-      attachments: 'Upload one text/PDF/image attachment and let the worker extract/index it.',
+      attachments: 'Upload one text/PDF/image/audio attachment and let the worker extract or transcribe and index it.',
       outbox_available: 'Apply database migrations before relying on async indexing.',
       outbox_clean: 'Inspect retry/dead-letter indexing jobs and requeue or fix the underlying error.',
       embedding_model: `Re-embed memory chunks with ${TUTURUUU_EMBEDDING_MODEL} so semantic search uses the current model.`,

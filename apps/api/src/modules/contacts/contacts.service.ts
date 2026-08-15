@@ -15,6 +15,7 @@ import {
   getGoogleConnectionStatus,
   recordGoogleSyncFailure,
   recordGoogleSyncSuccess,
+  shouldStoreGoogleRawPayloads,
 } from '../google-connections/google-connections';
 
 type GoogleContactRow = {
@@ -24,7 +25,7 @@ type GoogleContactRow = {
   phone_numbers: string[];
   organizations: string[];
   photo_url: string | null;
-  raw_json: people_v1.Schema$Person;
+  raw_json: people_v1.Schema$Person | null;
 };
 
 @Injectable()
@@ -99,7 +100,7 @@ export class ContactsService {
 
     return {
       source: 'contact',
-      oauthMode: 'all_google_sources',
+      oauthMode: this.getOauthMode(connection.scopes),
       connected: connection.connected && fallbackConnected,
       scopes: connection.scopes,
       requestedScopes: GOOGLE_SOURCE_SCOPES.contact,
@@ -124,6 +125,17 @@ export class ContactsService {
 
     return this.prisma.googleContact.findMany({
       where: { user_id: user.id },
+      select: {
+        id: true,
+        external_id: true,
+        display_name: true,
+        email_addresses: true,
+        phone_numbers: true,
+        organizations: true,
+        photo_url: true,
+        created_at: true,
+        updated_at: true,
+      },
       orderBy: { display_name: 'asc' },
       take: 50,
     });
@@ -280,8 +292,16 @@ export class ContactsService {
       phone_numbers: phoneNumbers,
       organizations,
       photo_url: person.photos?.find((photo) => photo.url)?.url ?? null,
-      raw_json: person,
+      raw_json: shouldStoreGoogleRawPayloads() ? person : null,
     };
+  }
+
+  private getOauthMode(scopes: string[]) {
+    const workspaceScopes = getAllGoogleWorkspaceScopes();
+    const normalizedScopes = new Set(scopes);
+    return workspaceScopes.every((scope) => normalizedScopes.has(scope))
+      ? 'all_google_sources'
+      : 'source_scoped';
   }
 
   private uniqueValues(values: string[]) {
@@ -320,6 +340,7 @@ export class ContactsService {
         },
         run_after: new Date(),
         locked_at: null,
+        locked_by: null,
         processed_at: null,
       },
       create: {

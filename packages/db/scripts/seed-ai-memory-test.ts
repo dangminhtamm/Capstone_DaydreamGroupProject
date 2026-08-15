@@ -59,7 +59,7 @@ const diaries: SeedDiary[] = [
     mood: "bad",
     tags: ["ai-memory", "bug", "retrieval"],
     content:
-      "Tam found two search quality problems. First, some answers mentioned the right topic but missed the strongest source. Second, a few generated answers sounded confident even when citation support was weak. We decided to improve local query parsing, boost metadata like people and projects, and fall back to direct evidence when Gemini returns unsupported names or dates.",
+      "Tam found two search quality problems. First, some answers mentioned the right topic but missed the strongest source. Second, a few generated answers sounded confident even when citation support was weak. We decided to improve local query parsing, boost metadata like people and projects, and fall back to direct evidence when Tuturuuu returns unsupported names or dates.",
   },
   {
     id: "ai-memory-test-diary-06",
@@ -77,7 +77,7 @@ const diaries: SeedDiary[] = [
     mood: "bad",
     tags: ["risk", "blocker", "demo"],
     content:
-      "The main blocker this week is making sure the worker is running before the final rehearsal. If the worker is off, diary entries and attachments are saved but memory chunks are not created yet. Another risk is Gemini quota during live demo. I felt stressed because the worker and quota problems could break the live AI memory search demo. We agreed to prepare fast-path answers and fallback evidence cards so search still works when answer generation is slow or unavailable.",
+      "The main blocker this week is making sure the worker is running before the final rehearsal. If the worker is off, diary entries and attachments are saved but memory chunks are not created yet. Another risk is Tuturuuu quota during live demo. I felt stressed because the worker and quota problems could break the live AI memory search demo. We agreed to prepare fast-path answers and fallback evidence cards so search still works when answer generation is slow or unavailable.",
   },
   {
     id: "ai-memory-test-diary-08",
@@ -86,7 +86,7 @@ const diaries: SeedDiary[] = [
     mood: "neutral",
     tags: ["latency", "benchmark", "evaluation"],
     content:
-      "We discussed the 500 millisecond memory requirement from the review document. We should measure retrieval latency separately from Gemini answer generation. The metrics to report are embedding time, database retrieval time, reranking time, time to first result, answer generation time, and total answer time. We should claim p95 retrieval latency, not average full answer latency.",
+      "We discussed the 500 millisecond memory requirement from the review document. We should measure retrieval latency separately from Tuturuuu answer generation. The metrics to report are embedding time, database retrieval time, reranking time, time to first result, answer generation time, and total answer time. We should claim p95 retrieval latency, not average full answer latency.",
   },
   {
     id: "ai-memory-test-diary-09",
@@ -262,6 +262,7 @@ async function enqueueDiaryIndexingJob(
       },
       run_after: new Date(),
       locked_at: null,
+      locked_by: null,
       processed_at: null,
     },
     create: {

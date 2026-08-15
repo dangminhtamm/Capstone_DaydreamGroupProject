@@ -6,7 +6,7 @@
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
-    "build": "pnpm --filter @second-brain/db build && pnpm --filter @second-brain/ai build && pnpm run build:app",
+    "build": "pnpm --filter @second-brain/shared build && pnpm --filter @second-brain/db build && pnpm --filter @second-brain/ai build && pnpm run build:app",
     "build:app": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "nest start",
@@ -30,6 +30,7 @@
     "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
     "@second-brain/ai": "workspace:*",
+    "@second-brain/shared": "workspace:*",
     "@sentry/nestjs": "^10.69.0",
     "@supabase/supabase-js": "^2.108.1",
     "class-transformer": "^0.5.1",
