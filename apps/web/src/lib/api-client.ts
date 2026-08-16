@@ -89,6 +89,8 @@ async function readApiError(response: Response, fallback: string) {
 }
 
 // Diary API functions
+export const YEARLY_DIARY_ENTRY_LIMIT = 500;
+
 export async function createDiaryEntry(
   payload: CreateDiaryPayload,
   accessToken: string | null
@@ -108,7 +110,7 @@ export async function createDiaryEntry(
 
 export async function getDiaryEntries(
   accessToken: string | null,
-  limit = 100,
+  limit = YEARLY_DIARY_ENTRY_LIMIT,
 ): Promise<DiaryEntry[]> {
   const query = new URLSearchParams({ limit: String(limit) });
   const response = await authFetch(`/api/diary?${query}`, {

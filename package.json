@@ -14,6 +14,7 @@
     "docker:migrate": "docker compose run --rm migrate",
     "db:migrate:deploy": "pnpm --filter @second-brain/db prisma:migrate:deploy",
     "demo:seed": "node --env-file=.env --experimental-strip-types packages/db/scripts/seed-demo.ts",
+    "demo:seed:yearly": "node --env-file=.env --experimental-strip-types packages/db/scripts/seed-yearly-view.ts",
     "demo:drain": "pnpm --filter @second-brain/worker indexing:drain",
     "demo:reset-indexing": "pnpm --filter @second-brain/worker indexing:reset-retries",
     "demo:prepare": "pnpm demo:seed && pnpm demo:drain",

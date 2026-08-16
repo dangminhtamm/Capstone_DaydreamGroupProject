@@ -214,7 +214,7 @@ describe('DiaryService', () => {
           orderBy: { start_time: 'asc' },
         },
       },
-      orderBy: { created_at: 'desc' },
+      orderBy: [{ entry_date: 'desc' }, { created_at: 'desc' }],
       take: 100,
     });
     expect(result).toHaveLength(1);

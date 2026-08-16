@@ -217,6 +217,7 @@ model DiaryEntry {
   attachments     Attachment[]
   calendar_events CalendarEvent[] // Linked events from your matching logic
 
+  @@index([user_id, entry_date(sort: Desc)], map: "diary_entries_user_entry_date_idx")
   @@map("diary_entries")
 }
 

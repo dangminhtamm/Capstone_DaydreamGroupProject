@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { getDiaryEntries, updateDiaryEntry, deleteDiaryEntry, type DiaryEntry, type UpdateDiaryPayload } from "@/lib/api-client";
 import { TimelineList } from "./timeline-list";
+import { YearlyActivityView } from "./yearly-activity-view";
 
 type LoadState = "idle" | "loading" | "success" | "error";
 
@@ -307,84 +308,91 @@ export function TimelineContainer() {
   }
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[1fr_260px]">
-      <div>
-        {selectedDate && (
-          <div className="mb-4 flex items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50/50 px-4 py-2 dark:border-indigo-800 dark:bg-indigo-900/20">
-            <svg className="h-4 w-4 text-indigo-600 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-            <span className="text-sm font-medium text-indigo-700 dark:text-indigo-300">
-              Showing entries for {new Date(selectedDate + "T00:00:00").toLocaleDateString("default", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
-            </span>
-            <span className="ml-1 text-xs text-indigo-500 dark:text-indigo-400">({filteredEntries.length})</span>
-          </div>
-        )}
-        <TimelineList entries={filteredEntries} onUpdate={handleUpdate} onDelete={handleDelete} isAdmin={isAdmin} />
-      </div>
-      <aside className="order-first lg:order-last">
-        <div className="sticky top-28">
-          <MiniCalendar
-            entryDates={entryDates}
-            selectedDate={selectedDate}
-            onSelect={setSelectedDate}
-          />
-          {/* Quick stats */}
-          <div className="mt-3 enterprise-card p-4">
-            <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Writing snapshot</p>
-            <div className="mt-2 grid grid-cols-2 gap-3">
-              <div className="text-center">
-                <p className="text-xl font-bold text-slate-900 dark:text-slate-100">{entries.length}</p>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400">Entries</p>
-              </div>
-              <div className="text-center">
-                <p className="text-xl font-bold text-slate-900 dark:text-slate-100">{entryDates.size}</p>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400">Active days</p>
-              </div>
-            </div>
-          </div>
-          <div className="mt-3 enterprise-card p-4">
-            <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Mood pattern</p>
-            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-              {dominantMood ? `Most frequent: ${dominantMood.value[0].toUpperCase()}${dominantMood.value.slice(1)}` : "Add moods in Diary"}
-            </p>
-            <div className="mt-3 space-y-2">
-              {(["great", "good", "neutral", "bad"] as const).map((mood) => {
-                const count = moodStats[mood] ?? 0;
-                const width = entries.length ? Math.round((count / entries.length) * 100) : 0;
-                return (
-                  <div key={mood}>
-                    <div className="mb-1 flex items-center justify-between text-xs">
-                      <span className="capitalize text-slate-600 dark:text-slate-300">{mood}</span>
-                      <span className="font-semibold text-slate-500 dark:text-slate-400">{count}</span>
-                    </div>
-                    <div className="h-1.5 rounded-full bg-slate-100 dark:bg-slate-700">
-                      <div
-                        className="h-1.5 rounded-full bg-indigo-500 transition-all"
-                        style={{ width: `${width}%` }}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-          {topTags.length > 0 && (
-            <div className="mt-3 enterprise-card p-4">
-              <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Top tags</p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {topTags.map(([tag, count]) => (
-                  <span
-                    key={tag}
-                    className="status-badge"
-                  >
-                    #{tag}
-                    <span className="text-indigo-400 dark:text-indigo-500">{count}</span>
-                  </span>
-                ))}
-              </div>
+    <div className="space-y-6">
+      <YearlyActivityView
+        entries={entries}
+        selectedDate={selectedDate}
+        onSelectDate={setSelectedDate}
+      />
+      <div className="grid gap-6 lg:grid-cols-[1fr_260px]">
+        <div>
+          {selectedDate && (
+            <div className="mb-4 flex items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50/50 px-4 py-2 dark:border-indigo-800 dark:bg-indigo-900/20">
+              <svg className="h-4 w-4 text-indigo-600 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+              <span className="text-sm font-medium text-indigo-700 dark:text-indigo-300">
+                Showing entries for {new Date(selectedDate + "T00:00:00").toLocaleDateString("default", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
+              </span>
+              <span className="ml-1 text-xs text-indigo-500 dark:text-indigo-400">({filteredEntries.length})</span>
             </div>
           )}
+          <TimelineList key={selectedDate ?? "all"} entries={filteredEntries} onUpdate={handleUpdate} onDelete={handleDelete} isAdmin={isAdmin} />
         </div>
-      </aside>
+        <aside className="order-first lg:order-last">
+          <div className="sticky top-28">
+            <MiniCalendar
+              entryDates={entryDates}
+              selectedDate={selectedDate}
+              onSelect={setSelectedDate}
+            />
+            {/* Quick stats */}
+            <div className="mt-3 enterprise-card p-4">
+              <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Writing snapshot</p>
+              <div className="mt-2 grid grid-cols-2 gap-3">
+                <div className="text-center">
+                  <p className="text-xl font-bold text-slate-900 dark:text-slate-100">{entries.length}</p>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">Entries</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-xl font-bold text-slate-900 dark:text-slate-100">{entryDates.size}</p>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">Active days</p>
+                </div>
+              </div>
+            </div>
+            <div className="mt-3 enterprise-card p-4">
+              <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Mood pattern</p>
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                {dominantMood ? `Most frequent: ${dominantMood.value[0].toUpperCase()}${dominantMood.value.slice(1)}` : "Add moods in Diary"}
+              </p>
+              <div className="mt-3 space-y-2">
+                {(["great", "good", "neutral", "bad"] as const).map((mood) => {
+                  const count = moodStats[mood] ?? 0;
+                  const width = entries.length ? Math.round((count / entries.length) * 100) : 0;
+                  return (
+                    <div key={mood}>
+                      <div className="mb-1 flex items-center justify-between text-xs">
+                        <span className="capitalize text-slate-600 dark:text-slate-300">{mood}</span>
+                        <span className="font-semibold text-slate-500 dark:text-slate-400">{count}</span>
+                      </div>
+                      <div className="h-1.5 rounded-full bg-slate-100 dark:bg-slate-700">
+                        <div
+                          className="h-1.5 rounded-full bg-indigo-500 transition-all"
+                          style={{ width: `${width}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            {topTags.length > 0 && (
+              <div className="mt-3 enterprise-card p-4">
+                <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Top tags</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {topTags.map(([tag, count]) => (
+                    <span
+                      key={tag}
+                      className="status-badge"
+                    >
+                      #{tag}
+                      <span className="text-indigo-400 dark:text-indigo-500">{count}</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </aside>
+      </div>
     </div>
   );
 }

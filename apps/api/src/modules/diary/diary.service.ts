@@ -105,7 +105,7 @@ export class DiaryService {
           orderBy: { start_time: 'asc' },
         },
       },
-      orderBy: { created_at: 'desc' },
+      orderBy: [{ entry_date: 'desc' }, { created_at: 'desc' }],
       take: options.limit ?? 100,
     });
 

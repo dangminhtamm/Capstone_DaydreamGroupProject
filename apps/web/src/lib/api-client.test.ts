@@ -58,6 +58,25 @@ test('getDiaryEntries throws the backend error message when fetch fails', async 
   );
 });
 
+test('getDiaryEntries requests enough records for a 365+ entry yearly view', async () => {
+  const { getDiaryEntries, YEARLY_DIARY_ENTRY_LIMIT } = await import(apiClientUrl);
+  let capturedUrl = '';
+
+  globalThis.fetch = async (input) => {
+    capturedUrl = String(input);
+    return new Response(JSON.stringify([]), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  };
+
+  await getDiaryEntries('jwt-token');
+
+  const url = new URL(capturedUrl);
+  assert.equal(url.searchParams.get('limit'), String(YEARLY_DIARY_ENTRY_LIMIT));
+  assert.ok(YEARLY_DIARY_ENTRY_LIMIT >= 366);
+});
+
 function expectUrl(actual: string, expectedPath: string) {
   const url = new URL(actual);
   assert.equal(url.pathname, expectedPath);
