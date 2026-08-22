@@ -10,10 +10,14 @@
   --border-subtle: rgba(203, 213, 225, 0.9);
   --text-muted: #64748b;
   --text-secondary: #475569;
-  --accent: #2563eb;
-  --accent-strong: #1d4ed8;
-  --accent-light: #dbeafe;
-  --accent-surface: rgba(37, 99, 235, 0.08);
+  --accent: #4f46e5;
+  --accent-strong: #4338ca;
+  --accent-light: #e0e7ff;
+  --accent-surface: rgba(79, 70, 229, 0.08);
+  --accent-cyan: #0891b2;
+  --accent-cyan-surface: rgba(8, 145, 178, 0.09);
+  --accent-pink: #db2777;
+  --accent-pink-surface: rgba(219, 39, 119, 0.08);
   --danger: #ef4444;
   --danger-light: #fef2f2;
   --success: #10b981;
@@ -32,10 +36,14 @@
   --border-subtle: rgba(51, 65, 85, 0.8);
   --text-muted: #94a3b8;
   --text-secondary: #cbd5e1;
-  --accent: #60a5fa;
-  --accent-strong: #3b82f6;
-  --accent-light: rgba(59, 130, 246, 0.2);
-  --accent-surface: rgba(96, 165, 250, 0.12);
+  --accent: #818cf8;
+  --accent-strong: #6366f1;
+  --accent-light: rgba(99, 102, 241, 0.2);
+  --accent-surface: rgba(129, 140, 248, 0.12);
+  --accent-cyan: #22d3ee;
+  --accent-cyan-surface: rgba(34, 211, 238, 0.12);
+  --accent-pink: #f472b6;
+  --accent-pink-surface: rgba(244, 114, 182, 0.12);
   --danger: #f87171;
   --danger-light: rgba(239, 68, 68, 0.15);
   --success: #34d399;
@@ -137,14 +145,14 @@ body {
 
 .enterprise-card {
   border: 1px solid var(--border-subtle);
-  border-radius: 14px;
+  border-radius: 10px;
   background: var(--surface);
   box-shadow: 0 10px 30px rgba(15, 23, 42, 0.035), 0 1px 2px rgba(15, 23, 42, 0.05);
 }
 
 .enterprise-panel {
   border: 1px solid var(--border-subtle);
-  border-radius: 12px;
+  border-radius: 8px;
   background: var(--surface-2);
 }
 
@@ -171,7 +179,7 @@ body {
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  border-radius: 0.75rem;
+  border-radius: 0.5rem;
   padding: 0.625rem 1rem;
   font-size: 0.875rem;
   font-weight: 700;

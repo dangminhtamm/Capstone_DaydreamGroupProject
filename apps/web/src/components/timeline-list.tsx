@@ -1,10 +1,25 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatDateTime } from "@second-brain/shared";
+import {
+  CalendarDays,
+  Check,
+  Clock3,
+  ExternalLink,
+  FileText,
+  Image as ImageIcon,
+  Inbox,
+  Music2,
+  Paperclip,
+  PencilLine,
+  Trash2,
+  X,
+} from "lucide-react";
 import { EditDiaryModal } from "./edit-diary-modal";
 import { ConfirmDialog } from "./confirm-dialog";
 import type { DiaryAttachment, DiaryCalendarEvent, DiaryMood, UpdateDiaryPayload } from "@/lib/api-client";
+import { MOOD_META } from "@/lib/mood-meta";
 
 type DiaryEntry = {
   id: string;
@@ -23,29 +38,19 @@ type TimelineListProps = {
   entries: DiaryEntry[];
   onUpdate?: (id: string, payload: UpdateDiaryPayload) => Promise<void>;
   onDelete?: (id: string) => Promise<void>;
+  onLoadAttachmentAudio?: (attachmentId: string) => Promise<Blob>;
   isAdmin?: boolean;
 };
 
-const PAGE_SIZE = 5;
+type AudioPlaybackState = "loading" | "ready" | "retrying" | "error";
 
-const MOOD_META: Record<DiaryMood, { label: string; className: string }> = {
-  great: {
-    label: "Great",
-    className: "status-badge-success",
-  },
-  good: {
-    label: "Good",
-    className: "border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-300",
-  },
-  neutral: {
-    label: "Neutral",
-    className: "",
-  },
-  bad: {
-    label: "Bad",
-    className: "status-badge-danger",
-  },
+type TimelineGroup = {
+  key: string;
+  label: string;
+  items: Array<{ entry: DiaryEntry; index: number }>;
 };
+
+const PAGE_SIZE = 5;
 
 function isAttachmentObject(value: string | DiaryAttachment): value is DiaryAttachment {
   return typeof value === "object" && value !== null;
@@ -73,20 +78,30 @@ function isAudioAttachment(attachment: string | DiaryAttachment): attachment is 
   return isAttachmentObject(attachment) && attachment.fileType.startsWith("audio/");
 }
 
-function getStatusClass(status: string) {
+function getStatusTextClass(status: string) {
   if (status === "indexed") {
-    return "status-badge-success";
+    return "text-emerald-700 dark:text-emerald-300";
   }
 
   if (status === "failed") {
-    return "status-badge-danger";
+    return "text-rose-700 dark:text-rose-300";
   }
 
   if (status === "processing") {
-    return "border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-300";
+    return "text-sky-700 dark:text-sky-300";
   }
 
-  return "status-badge-warning";
+  return "text-amber-700 dark:text-amber-300";
+}
+
+function getIndexStatusLabel(status: string) {
+  if (status === "indexed") return "Indexed for AI";
+  if (status === "processing") return "Indexing";
+  if (status === "retry") return "Index retry";
+  if (status === "failed") return "Index failed";
+  if (status === "queued") return "Queued for index";
+  if (status === "extracting") return "Extracting";
+  return "Linked";
 }
 
 function formatEventTime(event: DiaryCalendarEvent) {
@@ -95,8 +110,8 @@ function formatEventTime(event: DiaryCalendarEvent) {
   return `${start.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} - ${end.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
 }
 
-function getEntryActivityDate(entry: DiaryEntry) {
-  return entry.entryDate ?? entry.createdAt;
+function getEntryActivityDate(entry: DiaryEntry, isAdmin: boolean) {
+  return isAdmin ? entry.entryDate ?? entry.createdAt : entry.createdAt;
 }
 
 function isDifferentTimestamp(first: Date | string, second: Date | string) {
@@ -113,14 +128,208 @@ function formatDiaryDate(value: Date | string) {
   });
 }
 
-export function TimelineList({ entries, onUpdate, onDelete, isAdmin = false }: TimelineListProps) {
+function formatEntryTime(value: Date | string) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return String(value);
+  return date.toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function getTimelineGroup(value: Date | string, now = new Date()) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return { key: "earlier", label: "Earlier" };
+
+  const day = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+
+  if (day.getTime() === today.getTime()) return { key: "today", label: "Today" };
+  if (day.getTime() === yesterday.getTime()) return { key: "yesterday", label: "Yesterday" };
+
+  const weekStart = new Date(today);
+  weekStart.setDate(today.getDate() - ((today.getDay() + 6) % 7));
+  const nextWeekStart = new Date(weekStart);
+  nextWeekStart.setDate(weekStart.getDate() + 7);
+  if (day >= weekStart && day < nextWeekStart) return { key: "this-week", label: "This week" };
+
+  return {
+    key: `${date.getFullYear()}-${date.getMonth()}`,
+    label: date.toLocaleDateString(undefined, { month: "long", year: "numeric" }),
+  };
+}
+
+function formatFileSize(bytes?: number) {
+  if (!bytes || bytes < 1) return undefined;
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+}
+
+function formatDuration(seconds?: number) {
+  if (seconds == null || !Number.isFinite(seconds) || seconds < 0) return "0:00";
+  const wholeSeconds = Math.floor(seconds);
+  const minutes = Math.floor(wholeSeconds / 60);
+  return `${minutes}:${String(wholeSeconds % 60).padStart(2, "0")}`;
+}
+
+function getAttachmentKind(attachment: string | DiaryAttachment) {
+  if (!isAttachmentObject(attachment)) return "file";
+  if (attachment.fileType.startsWith("audio/")) return "audio";
+  if (attachment.fileType.startsWith("image/")) return "image";
+  if (attachment.fileType === "application/pdf") return "pdf";
+  if (attachment.fileType.includes("word") || attachment.fileType.includes("document")) return "document";
+  if (attachment.fileType.startsWith("text/")) return "text";
+  return "file";
+}
+
+function getAttachmentTypeLabel(attachment: string | DiaryAttachment) {
+  if (!isAttachmentObject(attachment)) return "File";
+  const extension = attachment.fileName.split(".").pop();
+  if (extension && extension !== attachment.fileName && extension.length <= 5) return extension.toUpperCase();
+  const subtype = attachment.fileType.split("/").pop();
+  return subtype ? subtype.replace("vnd.openxmlformats-officedocument.", "").toUpperCase() : "File";
+}
+
+function AttachmentTypeIcon({ kind }: { kind: ReturnType<typeof getAttachmentKind> }) {
+  const className = "h-5 w-5";
+
+  if (kind === "audio") {
+    return <Music2 className={className} aria-hidden="true" />;
+  }
+  if (kind === "image") {
+    return <ImageIcon className={className} aria-hidden="true" />;
+  }
+  if (kind === "pdf" || kind === "document" || kind === "text") {
+    return <FileText className={className} aria-hidden="true" />;
+  }
+  return <Paperclip className={className} aria-hidden="true" />;
+}
+
+function getAttachmentIconClass(kind: ReturnType<typeof getAttachmentKind>) {
+  if (kind === "audio") return "bg-pink-50 text-pink-600 dark:bg-pink-950/40 dark:text-pink-300";
+  if (kind === "image") return "bg-cyan-50 text-cyan-700 dark:bg-cyan-950/40 dark:text-cyan-300";
+  if (kind === "pdf") return "bg-pink-50 text-pink-600 dark:bg-pink-950/40 dark:text-pink-300";
+  if (kind === "document") return "bg-indigo-50 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-300";
+  return "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300";
+}
+
+export function TimelineList({
+  entries,
+  onUpdate,
+  onDelete,
+  onLoadAttachmentAudio,
+  isAdmin = false,
+}: TimelineListProps) {
   const [currentPage, setCurrentPage] = useState(1);
   const [expandedEntryIds, setExpandedEntryIds] = useState<Set<string>>(() => new Set());
+  const [attachmentSizes, setAttachmentSizes] = useState<Record<string, number>>({});
+  const [audioPlaybackStates, setAudioPlaybackStates] = useState<Record<string, AudioPlaybackState>>({});
+  const [audioPlaybackUrls, setAudioPlaybackUrls] = useState<Record<string, string>>({});
+  const [audioDurations, setAudioDurations] = useState<Record<string, number>>({});
+  const [audioCurrentTimes, setAudioCurrentTimes] = useState<Record<string, number>>({});
+  const loadingAudioIds = useRef(new Set<string>());
+  const audioObjectUrls = useRef<Record<string, string>>({});
+  const requestedAttachmentSizeUrls = useRef(new Set<string>());
+  const audioElements = useRef<Record<string, HTMLAudioElement | null>>({});
   const totalPages = Math.max(1, Math.ceil(entries.length / PAGE_SIZE));
   const paginatedEntries = useMemo(() => {
     const start = (currentPage - 1) * PAGE_SIZE;
     return entries.slice(start, start + PAGE_SIZE);
   }, [currentPage, entries]);
+  const groupedPaginatedEntries = useMemo<TimelineGroup[]>(() => {
+    const groups: TimelineGroup[] = [];
+    const groupsByKey = new Map<string, TimelineGroup>();
+
+    paginatedEntries.forEach((entry, index) => {
+      const groupMeta = getTimelineGroup(getEntryActivityDate(entry, isAdmin));
+      let group = groupsByKey.get(groupMeta.key);
+      if (!group) {
+        group = { ...groupMeta, items: [] };
+        groupsByKey.set(groupMeta.key, group);
+        groups.push(group);
+      }
+      group.items.push({ entry, index });
+    });
+
+    return groups;
+  }, [isAdmin, paginatedEntries]);
+
+  const loadAttachmentAudio = useCallback(async (
+    attachment: DiaryAttachment,
+    retrying = false,
+  ) => {
+    if (loadingAudioIds.current.has(attachment.id)) return;
+    if (!onLoadAttachmentAudio) {
+      setAudioPlaybackStates((current) => ({ ...current, [attachment.id]: "error" }));
+      return;
+    }
+
+    loadingAudioIds.current.add(attachment.id);
+    setAudioPlaybackStates((current) => ({
+      ...current,
+      [attachment.id]: retrying ? "retrying" : "loading",
+    }));
+
+    try {
+      const content = await onLoadAttachmentAudio(attachment.id);
+      const objectUrl = URL.createObjectURL(content);
+      const previousUrl = audioObjectUrls.current[attachment.id];
+      audioObjectUrls.current[attachment.id] = objectUrl;
+      if (previousUrl) URL.revokeObjectURL(previousUrl);
+
+      setAttachmentSizes((current) => ({ ...current, [attachment.id]: content.size }));
+      setAudioPlaybackUrls((current) => ({ ...current, [attachment.id]: objectUrl }));
+      setAudioPlaybackStates((current) => ({ ...current, [attachment.id]: "loading" }));
+    } catch {
+      setAudioPlaybackStates((current) => ({ ...current, [attachment.id]: "error" }));
+    } finally {
+      loadingAudioIds.current.delete(attachment.id);
+    }
+  }, [onLoadAttachmentAudio]);
+
+  useEffect(() => {
+    paginatedEntries.forEach((entry) => {
+      entry.attachments?.forEach((attachment) => {
+        if (!isAudioAttachment(attachment)) return;
+        if (audioPlaybackUrls[attachment.id]) return;
+        if (audioPlaybackStates[attachment.id] === "error") return;
+        void loadAttachmentAudio(attachment);
+      });
+    });
+  }, [audioPlaybackStates, audioPlaybackUrls, loadAttachmentAudio, paginatedEntries]);
+
+  useEffect(() => () => {
+    Object.values(audioObjectUrls.current).forEach((url) => URL.revokeObjectURL(url));
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    paginatedEntries.forEach((entry) => {
+      entry.attachments?.forEach((attachment) => {
+        if (!isAttachmentObject(attachment)) return;
+        const href = attachment.signedUrl;
+        if (!href) return;
+        const requestKey = `${attachment.id}:${href}`;
+        if (requestedAttachmentSizeUrls.current.has(requestKey)) return;
+        requestedAttachmentSizeUrls.current.add(requestKey);
+
+        void fetch(href, { method: "HEAD", signal: controller.signal })
+          .then((response) => {
+            if (!response.ok) return;
+            const bytes = Number(response.headers.get("content-length"));
+            if (!Number.isFinite(bytes) || bytes <= 0) return;
+            setAttachmentSizes((current) => ({ ...current, [attachment.id]: bytes }));
+          })
+          .catch(() => undefined);
+      });
+    });
+
+    return () => controller.abort();
+  }, [paginatedEntries]);
 
   // Edit modal state
   const [editingEntry, setEditingEntry] = useState<DiaryEntry | null>(null);
@@ -192,39 +401,47 @@ export function TimelineList({ entries, onUpdate, onDelete, isAdmin = false }: T
             : "bg-rose-600 text-white"
         }`}>
           {toast.type === "success" ? (
-            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-            </svg>
+            <Check className="h-4 w-4" aria-hidden="true" />
           ) : (
-            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
+            <X className="h-4 w-4" aria-hidden="true" />
           )}
           {toast.message}
         </div>
       )}
 
-      {/* Timeline vertical line */}
-      {paginatedEntries.length > 1 && (
-        <div className="absolute left-[14px] top-8 bottom-28 w-px bg-slate-200 dark:bg-slate-800" />
-      )}
-      
-      <ul className="space-y-4">
-        {paginatedEntries.map((entry, index) => {
-          const activityDate = getEntryActivityDate(entry);
+      <div className="space-y-8">
+        {groupedPaginatedEntries.map((group) => (
+          <section key={group.key} aria-labelledby={`timeline-group-${group.key}`}>
+            <div className="mb-3 flex items-center gap-3 pl-10">
+              <h2 id={`timeline-group-${group.key}`} className="shrink-0 text-base font-bold text-slate-950 dark:text-slate-100">
+                {group.label}
+              </h2>
+              <span className="shrink-0 text-xs font-medium text-slate-400 dark:text-slate-500">
+                {group.items.length} {group.items.length === 1 ? "memory" : "memories"}
+              </span>
+              <span className="h-px flex-1 bg-slate-200 dark:bg-slate-800" aria-hidden="true" />
+            </div>
+            <div className="relative">
+              {group.items.length > 1 ? (
+                <div className="absolute bottom-6 left-[14px] top-7 w-px bg-slate-200 dark:bg-slate-800" aria-hidden="true" />
+              ) : null}
+              <ul className="space-y-4">
+        {group.items.map(({ entry, index }) => {
+          const activityDate = getEntryActivityDate(entry, isAdmin);
           const showCreatedDate = isDifferentTimestamp(activityDate, entry.createdAt);
           const isExpanded = expandedEntryIds.has(entry.id);
           const shouldClamp = entry.content.trim().length > 360;
+          const MoodIcon = entry.mood ? MOOD_META[entry.mood].icon : null;
 
           return (
           <li key={entry.id} className="relative pl-10">
             {/* Timeline dot */}
-            <div className="absolute left-0 top-5 z-10 flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-slate-900 text-white dark:border-slate-950 dark:bg-slate-700">
-              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+            <div className="absolute left-0 top-5 z-10 flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-pink-600 text-white dark:border-slate-950 dark:bg-pink-500">
+              <PencilLine className="h-3.5 w-3.5" aria-hidden="true" />
             </div>
             
             {/* Card */}
-            <div className="group relative enterprise-card p-4 transition hover:border-indigo-200 dark:hover:border-indigo-800">
+            <div className="group relative enterprise-card p-4 transition hover:border-pink-200 dark:hover:border-pink-900/70">
               {/* Entry number badge + action buttons */}
               {isAdmin ? (
               <div className="absolute -top-3 right-6 flex items-center gap-2">
@@ -243,17 +460,16 @@ export function TimelineList({ entries, onUpdate, onDelete, isAdmin = false }: T
 
                   {/* Action buttons */}
                   {(onUpdate || onDelete) && (
-                    <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                    <div className="flex shrink-0 items-center gap-1 opacity-100 transition-opacity lg:opacity-0 lg:group-hover:opacity-100 lg:group-focus-within:opacity-100">
                       {onUpdate && (
                         <button
                           type="button"
                           onClick={() => setEditingEntry(entry)}
                           className="cursor-pointer rounded-lg p-1.5 text-slate-400 transition hover:bg-indigo-50 hover:text-indigo-600 dark:hover:bg-indigo-900/30 dark:hover:text-indigo-400"
                           title="Edit entry"
+                          aria-label={`Edit ${entry.title}`}
                         >
-                          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                          </svg>
+                          <PencilLine className="h-4 w-4" aria-hidden="true" />
                         </button>
                       )}
                       {onDelete && (
@@ -262,31 +478,28 @@ export function TimelineList({ entries, onUpdate, onDelete, isAdmin = false }: T
                           onClick={() => setDeletingEntry(entry)}
                           className="cursor-pointer rounded-lg p-1.5 text-slate-400 transition hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-900/30 dark:hover:text-rose-400"
                           title="Delete entry"
+                          aria-label={`Delete ${entry.title}`}
                         >
-                          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                          </svg>
+                          <Trash2 className="h-4 w-4" aria-hidden="true" />
                         </button>
                       )}
                     </div>
                   )}
                 </div>
-                <div className="flex flex-wrap items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
-                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                  </svg>
-                  <span className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-                    {isAdmin ? "Memory date" : "Diary date"}
+                <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+                  <CalendarDays className="h-3.5 w-3.5" aria-hidden="true" />
+                  <span className="text-xs font-medium text-slate-400 dark:text-slate-500">
+                    {isAdmin ? "Memory time" : "Created time"}
                   </span>
                   <time className="font-medium">
-                    {isAdmin ? formatDateTime(activityDate) : formatDiaryDate(activityDate)}
+                    {formatDiaryDate(activityDate)} · {formatEntryTime(activityDate)}
                   </time>
                 </div>
                 {(entry.mood || entry.tags?.length) && (
                   <div className="flex flex-wrap items-center gap-2 pt-1">
                     {entry.mood ? (
                       <span className={`status-badge ${MOOD_META[entry.mood].className}`}>
-                        <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                        {MoodIcon ? <MoodIcon className="h-3.5 w-3.5" aria-hidden="true" /> : null}
                         {MOOD_META[entry.mood].label}
                       </span>
                     ) : null}
@@ -304,7 +517,7 @@ export function TimelineList({ entries, onUpdate, onDelete, isAdmin = false }: T
               
               {/* Content */}
               <div className="relative">
-                <div className="absolute bottom-0 left-0 top-0 w-1 rounded-full bg-indigo-500"></div>
+                <div className="absolute bottom-0 left-0 top-0 w-1 rounded-full bg-pink-500"></div>
                 <p className={`pl-4 text-sm leading-7 text-slate-700 dark:text-slate-300 ${shouldClamp && !isExpanded ? "line-clamp-4" : ""}`}>
                   {entry.content}
                 </p>
@@ -312,7 +525,7 @@ export function TimelineList({ entries, onUpdate, onDelete, isAdmin = false }: T
                   <button
                     type="button"
                     onClick={() => toggleEntryExpanded(entry.id)}
-                    className="mt-2 cursor-pointer pl-4 text-xs font-semibold text-indigo-600 transition hover:text-indigo-700 dark:text-indigo-300 dark:hover:text-indigo-200"
+                    className="mt-2 cursor-pointer pl-4 text-xs font-semibold text-pink-600 transition hover:text-pink-700 dark:text-pink-300 dark:hover:text-pink-200"
                   >
                     {isExpanded ? "Show less" : "View more"}
                   </button>
@@ -322,16 +535,14 @@ export function TimelineList({ entries, onUpdate, onDelete, isAdmin = false }: T
               {/* Linked calendar events */}
               {entry.calendarEvents && entry.calendarEvents.length > 0 && (
                 <div className="mt-4 border-t border-slate-100 pt-4 dark:border-slate-700">
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  <p className="mb-2 text-[13px] font-semibold text-slate-600 dark:text-slate-300">
                     Linked calendar events
                   </p>
                   <div className="grid gap-2">
                     {entry.calendarEvents.map((event) => {
                       const content = (
                         <>
-                          <svg className="h-4 w-4 shrink-0 text-sky-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                          </svg>
+                          <CalendarDays className="h-4 w-4 shrink-0 text-cyan-600 dark:text-cyan-300" aria-hidden="true" />
                           <span className="min-w-0 flex-1 truncate font-medium">{event.title}</span>
                           <span className="shrink-0 text-slate-500 dark:text-slate-400">{formatEventTime(event)}</span>
                         </>
@@ -363,43 +574,145 @@ export function TimelineList({ entries, onUpdate, onDelete, isAdmin = false }: T
               {/* Attachments */}
               {entry.attachments && entry.attachments.length > 0 && (
                 <div className="mt-4 border-t border-slate-100 pt-4 dark:border-slate-700">
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  <p className="mb-2 text-[13px] font-semibold text-slate-600 dark:text-slate-300">
                     Attachments
                   </p>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="grid gap-2">
                     {entry.attachments.map((attachment, i) => {
                       const status = getAttachmentStatus(attachment);
                       const href = getAttachmentHref(attachment);
                       const label = getAttachmentLabel(attachment, i);
-                      const content = (
+                      const indexStatusLabel = getIndexStatusLabel(status);
+                      const attachmentKind = getAttachmentKind(attachment);
+                      const attachmentTypeLabel = getAttachmentTypeLabel(attachment);
+                      const attachmentId = isAttachmentObject(attachment) ? attachment.id : undefined;
+                      const fileSizeLabel = attachmentId ? formatFileSize(attachmentSizes[attachmentId]) : undefined;
+                      const duration = attachmentId ? audioDurations[attachmentId] : undefined;
+                      const durationLabel = attachmentKind === "audio" && duration ? formatDuration(duration) : undefined;
+                      const attachmentHeader = (
                         <>
-                          <svg className="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                          </svg>
-                          <span className="max-w-[180px] truncate">{label}</span>
-                          <span className={`status-badge ${getStatusClass(status)}`}>
-                            {status}
+                          <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${getAttachmentIconClass(attachmentKind)}`}>
+                            <AttachmentTypeIcon kind={attachmentKind} />
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-semibold text-slate-800 dark:text-slate-200">{label}</span>
+                            <span className="mt-0.5 flex flex-wrap items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400">
+                              <span>{attachmentTypeLabel}</span>
+                              {fileSizeLabel ? <><span aria-hidden="true">·</span><span>{fileSizeLabel}</span></> : null}
+                              {durationLabel ? <><span aria-hidden="true">·</span><span>{durationLabel}</span></> : null}
+                              <span aria-hidden="true">·</span>
+                              <span
+                                className={`inline-flex items-center gap-1 font-medium ${getStatusTextClass(status)}`}
+                                aria-label={`Memory indexing status: ${indexStatusLabel}`}
+                              >
+                                <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true" />
+                                {indexStatusLabel}
+                              </span>
+                            </span>
                           </span>
                         </>
                       );
 
-                      if (href && isAudioAttachment(attachment)) {
+                      if (isAudioAttachment(attachment)) {
+                        const audioSource = audioPlaybackUrls[attachment.id];
+                        const playbackState = audioPlaybackStates[attachment.id] ?? "loading";
+                        const showPlayer = Boolean(audioSource)
+                          && playbackState !== "retrying"
+                          && playbackState !== "error";
+
                         return (
                           <div
                             key={attachment.id}
-                            className="w-full max-w-md rounded-lg border border-slate-200 bg-slate-50 p-2.5 dark:border-slate-800 dark:bg-slate-900"
+                            className="w-full max-w-xl rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950"
                           >
-                            <div className="mb-2 flex items-center gap-1.5 text-xs text-slate-700 dark:text-slate-300">
-                              {content}
+                            <div className="mb-3 flex min-w-0 items-center gap-3">
+                              {attachmentHeader}
                             </div>
-                            <audio
-                              controls
-                              preload="metadata"
-                              src={href}
-                              className="h-9 w-full"
-                            >
-                              Your browser does not support audio playback.
-                            </audio>
+                            {audioSource ? (
+                              <audio
+                                key={audioSource}
+                                ref={(element) => {
+                                  audioElements.current[attachment.id] = element;
+                                }}
+                                controls
+                                preload="metadata"
+                                src={audioSource}
+                                onError={() => {
+                                  setAudioPlaybackStates((current) => ({
+                                    ...current,
+                                    [attachment.id]: "error",
+                                  }));
+                                }}
+                                onLoadedMetadata={(event) => {
+                                  const nextDuration = event.currentTarget.duration;
+                                  if (Number.isFinite(nextDuration)) {
+                                    setAudioDurations((current) => ({ ...current, [attachment.id]: nextDuration }));
+                                  }
+                                  setAudioPlaybackStates((current) => ({
+                                    ...current,
+                                    [attachment.id]: "ready",
+                                  }));
+                                }}
+                                onTimeUpdate={(event) => {
+                                  setAudioCurrentTimes((current) => ({
+                                    ...current,
+                                    [attachment.id]: event.currentTarget.currentTime,
+                                  }));
+                                }}
+                                aria-label={`Play ${label}`}
+                                className={showPlayer ? "h-9 w-full" : "hidden"}
+                              >
+                                Your browser does not support audio playback.
+                              </audio>
+                            ) : null}
+                            <div className={playbackState === "ready" ? "sr-only" : "mt-2"} aria-live="polite">
+                              {playbackState === "loading" ? (
+                                <p className="flex items-center gap-2 text-xs font-medium text-slate-500 dark:text-slate-400">
+                                  <span className="h-3 w-3 animate-spin rounded-full border-2 border-slate-300 border-t-indigo-500 dark:border-slate-600 dark:border-t-indigo-400" aria-hidden="true" />
+                                  Loading audio
+                                </p>
+                              ) : null}
+                              {playbackState === "retrying" ? (
+                                <p className="flex min-h-10 items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 text-xs font-medium text-sky-700 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-sky-300">
+                                  <span className="h-3 w-3 animate-spin rounded-full border-2 border-sky-300 border-t-sky-600 dark:border-sky-700 dark:border-t-sky-300" aria-hidden="true" />
+                                  Retrying audio
+                                </p>
+                              ) : null}
+                              {playbackState === "error" ? (
+                                <div className="flex min-h-11 flex-wrap items-center justify-between gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs dark:border-rose-900/60 dark:bg-rose-950/30">
+                                  <span className="font-medium text-rose-700 dark:text-rose-300">Playback unavailable</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => void loadAttachmentAudio(attachment, true)}
+                                    className="inline-flex min-h-10 cursor-pointer items-center justify-center rounded-lg border border-rose-300 bg-white px-3 font-semibold text-rose-700 transition hover:bg-rose-100 dark:border-rose-800 dark:bg-rose-950/50 dark:text-rose-300 dark:hover:bg-rose-900/40"
+                                  >
+                                    Retry
+                                  </button>
+                                </div>
+                              ) : null}
+                              {playbackState === "ready" ? "Audio ready to play" : null}
+                            </div>
+                            {showPlayer && duration && duration > 0 ? (
+                              <div className="mt-2 flex items-center gap-2 text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                                <span className="w-9 text-right tabular-nums">{formatDuration(audioCurrentTimes[attachment.id])}</span>
+                                <input
+                                  type="range"
+                                  min="0"
+                                  max={duration}
+                                  step="0.1"
+                                  value={Math.min(audioCurrentTimes[attachment.id] ?? 0, duration)}
+                                  onChange={(event) => {
+                                    const nextTime = Number(event.target.value);
+                                    const audio = audioElements.current[attachment.id];
+                                    if (audio) audio.currentTime = nextTime;
+                                    setAudioCurrentTimes((current) => ({ ...current, [attachment.id]: nextTime }));
+                                  }}
+                                  className="h-1.5 min-w-0 flex-1 cursor-pointer accent-indigo-600"
+                                  aria-label={`Seek ${label}`}
+                                />
+                                <span className="w-9 tabular-nums">{formatDuration(duration)}</span>
+                              </div>
+                            ) : null}
                           </div>
                         );
                       }
@@ -410,17 +723,18 @@ export function TimelineList({ entries, onUpdate, onDelete, isAdmin = false }: T
                           href={href}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs text-slate-700 transition-colors hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+                          className="flex w-full max-w-xl items-center gap-3 rounded-lg border border-slate-200 bg-white p-3 transition-colors hover:border-indigo-200 hover:bg-indigo-50/30 dark:border-slate-800 dark:bg-slate-950 dark:hover:border-indigo-800 dark:hover:bg-indigo-950/20"
                         >
-                          {content}
+                          {attachmentHeader}
+                          <ExternalLink className="h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
                         </a>
                       ) : (
-                        <span
+                        <div
                           key={isAttachmentObject(attachment) ? attachment.id : i}
-                          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"
+                          className="flex w-full max-w-xl items-center gap-3 rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950"
                         >
-                          {content}
-                        </span>
+                          {attachmentHeader}
+                        </div>
                       );
                     })}
                   </div>
@@ -429,10 +743,8 @@ export function TimelineList({ entries, onUpdate, onDelete, isAdmin = false }: T
               
               {/* Footer decoration */}
               {isAdmin && showCreatedDate ? (
-                <div className="mt-4 pt-4 border-t border-slate-100 flex items-center gap-2 text-xs text-slate-400 dark:border-slate-700 dark:text-slate-500">
-                <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
-                </svg>
+                <div className="mt-4 flex items-center gap-2 border-t border-slate-100 pt-4 text-[11px] text-slate-400 dark:border-slate-700 dark:text-slate-500">
+                <Clock3 className="h-3.5 w-3.5" aria-hidden="true" />
                 <span>Created {formatDateTime(entry.createdAt)}</span>
                 </div>
               ) : null}
@@ -440,15 +752,17 @@ export function TimelineList({ entries, onUpdate, onDelete, isAdmin = false }: T
           </li>
           );
         })}
-      </ul>
+              </ul>
+            </div>
+          </section>
+        ))}
+      </div>
       
       {/* Empty state */}
       {entries.length === 0 && (
         <div className="text-center py-12">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-slate-100 mb-4 dark:bg-slate-800">
-            <svg className="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-            </svg>
+          <div className="mb-4 inline-flex h-14 w-14 items-center justify-center rounded-lg bg-cyan-50 text-cyan-600 dark:bg-cyan-950/40 dark:text-cyan-300">
+            <Inbox className="h-7 w-7" aria-hidden="true" />
           </div>
           <h3 className="text-lg font-semibold text-slate-900 mb-2 dark:text-slate-100">No entries yet</h3>
           <p className="text-slate-500 dark:text-slate-400">Start by creating your first diary entry</p>

@@ -261,7 +261,7 @@ export class SyncCalendarJob {
           last_error_at
         )
         VALUES (
-          $1,
+          $1::text,
           $2,
           $3,
           $4,

@@ -117,7 +117,7 @@ export class GoogleConnectionsService {
         UPDATE memory_chunks
         SET metadata = COALESCE(metadata, '{}'::jsonb) - 'calendarEventIds' - 'calendarEvents',
             updated_at = now()
-        WHERE user_id = ${userId}
+        WHERE user_id = ${userId}::text
           AND source_type = 'diary'
           AND (
             metadata ? 'calendarEventIds'
@@ -147,8 +147,8 @@ export class GoogleConnectionsService {
             last_error = NULL,
             last_error_at = NULL,
             updated_at = now()
-        WHERE user_id = $1
-          AND source = ANY($2)
+        WHERE user_id = $1::text
+          AND source = ANY($2::text[])
         `,
         userId,
         GOOGLE_WORKSPACE_SOURCES,

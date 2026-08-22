@@ -530,7 +530,7 @@ function buildEntityRankingCte(
         ) AS entity_score
       FROM entity_mentions
       INNER JOIN memory_chunks entity_chunks
-        ON entity_chunks.id = entity_mentions.chunk_id
+        ON entity_chunks.id::text = entity_mentions.chunk_id::text
       ${entityWhereClause}
         AND (${exactMatch} OR ${fullValueMatch} OR ${partialMatch})
       GROUP BY entity_mentions.chunk_id
@@ -599,7 +599,7 @@ function normalizeEntityText(value: string) {
 }
 
 function buildWhereClause(userId: string, filters: RetrievalFilters): PrismaSql {
-  const conditions: PrismaSql[] = [Prisma.sql`user_id = ${userId}`];
+  const conditions: PrismaSql[] = [Prisma.sql`user_id = ${userId}::text`];
 
   if (filters.chunkType) {
     conditions.push(Prisma.sql`chunk_type = ${filters.chunkType}`);
@@ -629,7 +629,9 @@ function buildWhereClause(userId: string, filters: RetrievalFilters): PrismaSql 
 }
 
 function buildEntityWhereClause(userId: string, filters: RetrievalFilters): PrismaSql {
-  const conditions: PrismaSql[] = [Prisma.sql`entity_chunks.user_id = ${userId}`];
+  const conditions: PrismaSql[] = [
+    Prisma.sql`entity_chunks.user_id = ${userId}::text`,
+  ];
 
   if (filters.chunkType) {
     conditions.push(Prisma.sql`entity_chunks.chunk_type = ${filters.chunkType}`);

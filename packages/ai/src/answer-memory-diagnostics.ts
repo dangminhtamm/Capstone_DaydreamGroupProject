@@ -85,7 +85,7 @@ export function shouldAttachMemoryIndexDiagnostics(input: {
 }
 
 function buildFilterConditions(userId: string, filters: RetrievalFilters): PrismaSql[] {
-  const conditions: PrismaSql[] = [Prisma.sql`user_id = ${userId}`];
+  const conditions: PrismaSql[] = [Prisma.sql`user_id = ${userId}::text`];
 
   if (filters.chunkType) {
     conditions.push(Prisma.sql`chunk_type = ${filters.chunkType}`);

@@ -77,6 +77,33 @@ test('getDiaryEntries requests enough records for a 365+ entry yearly view', asy
   assert.ok(YEARLY_DIARY_ENTRY_LIMIT >= 366);
 });
 
+test('getDiaryAttachmentContent downloads audio through the authenticated API', async () => {
+  const { getDiaryAttachmentContent } = await import(apiClientUrl);
+  let capturedUrl = '';
+  let capturedInit: RequestInit | undefined;
+
+  globalThis.fetch = async (input, init) => {
+    capturedUrl = String(input);
+    capturedInit = init;
+    return new Response(Buffer.from('mp3-bytes'), {
+      status: 200,
+      headers: { 'Content-Type': 'audio/mpeg' },
+    });
+  };
+
+  const content = await getDiaryAttachmentContent('attachment-1', 'jwt-token');
+
+  expectUrl(capturedUrl, '/api/upload/attachment/attachment-1/content');
+  assert.equal(capturedInit?.method, 'GET');
+  assert.equal(
+    (capturedInit?.headers as Record<string, string>).Authorization,
+    'Bearer jwt-token',
+  );
+  assert.equal((capturedInit?.headers as Record<string, string>).Accept, 'audio/*');
+  assert.equal(content.type, 'audio/mpeg');
+  assert.equal(await content.text(), 'mp3-bytes');
+});
+
 function expectUrl(actual: string, expectedPath: string) {
   const url = new URL(actual);
   assert.equal(url.pathname, expectedPath);

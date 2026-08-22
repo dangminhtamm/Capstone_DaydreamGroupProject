@@ -1,4 +1,8 @@
 import type { NextConfig } from "next";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const workspaceRoot = join(dirname(fileURLToPath(import.meta.url)), "../..");
 
 const isProduction = process.env.NODE_ENV === "production";
 
@@ -29,6 +33,9 @@ const contentSecurityPolicy = [
 ].join("; ");
 
 const nextConfig: NextConfig = {
+  turbopack: {
+    root: workspaceRoot,
+  },
   images: {
     remotePatterns: [
       {

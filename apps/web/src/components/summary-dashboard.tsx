@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { ChartNoAxesColumnIncreasing } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { MOOD_META } from "@/lib/mood-meta";
 import {
   generateSummary,
   getDiaryEntries,
@@ -156,15 +158,8 @@ function getDominantMood(entries: DiaryEntry[]) {
   const dominant = [...counts.entries()].sort((first, second) => second[1] - first[1])[0];
   if (!dominant) return null;
 
-  const labelMap: Record<string, string> = {
-    great: "Great",
-    good: "Good",
-    neutral: "Neutral",
-    bad: "Difficult",
-  };
-
   return {
-    label: labelMap[dominant[0]] ?? dominant[0],
+    label: MOOD_META[dominant[0] as keyof typeof MOOD_META]?.label ?? dominant[0],
     count: dominant[1],
   };
 }
@@ -242,7 +237,7 @@ function formatSummaryPeriod(summary: SummaryRecord) {
 function AiSummaryList({ summaries }: { summaries: SummaryRecord[] }) {
   if (!summaries.length) {
     return (
-      <div className="rounded-2xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500 dark:border-slate-600 dark:text-slate-400">
+      <div className="rounded-lg border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500 dark:border-slate-600 dark:text-slate-400">
         No AI-generated summaries yet. Generate one now or wait for the background worker to add daily, weekly, monthly, and yearly reflections.
       </div>
     );
@@ -280,7 +275,7 @@ function ActivityBars({ summaries }: { summaries: DailySummary[] }) {
     <div className="enterprise-card p-5">
       <div className="mb-6 flex items-center justify-between gap-3">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">Activity</p>
+          <p className="text-[13px] font-semibold text-slate-500 dark:text-slate-400">Activity</p>
           <h3 className="mt-1.5 text-xl font-semibold text-slate-950 dark:text-slate-100">Last 7 days</h3>
         </div>
         <span className="status-badge">
@@ -293,7 +288,7 @@ function ActivityBars({ summaries }: { summaries: DailySummary[] }) {
             <div key={day.dateKey} className="flex flex-1 flex-col items-center gap-3">
               <div className="flex h-32 w-full items-end rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 dark:border-slate-800 dark:bg-slate-900/70">
                 <div
-                  className="w-full rounded-md bg-indigo-600 transition-all"
+                  className="w-full rounded-md bg-cyan-500 transition-all"
                   style={{ height: `${Math.max((day.entries.length / maxEntries) * 100, 10)}%` }}
                 />
               </div>
@@ -304,7 +299,7 @@ function ActivityBars({ summaries }: { summaries: DailySummary[] }) {
             </div>
           ))
         ) : (
-          <div className="flex h-full w-full items-center justify-center rounded-2xl border border-dashed border-slate-200 text-sm text-slate-500 dark:border-slate-600 dark:text-slate-400">
+          <div className="flex h-full w-full items-center justify-center rounded-lg border border-dashed border-slate-200 text-sm text-slate-500 dark:border-slate-600 dark:text-slate-400">
             No activity data yet
           </div>
         )}
@@ -329,10 +324,10 @@ function InsightSnapshot({
   const focusTerms = latestWeek ? getTopKeywords(latestWeek.entries).slice(0, 5) : [];
 
   return (
-    <section className="enterprise-card p-5">
+    <section className="border-y border-slate-200 py-6 dark:border-slate-800">
       <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
         <div className="max-w-2xl">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
+          <p className="text-[13px] font-semibold text-slate-500 dark:text-slate-400">
             Insight snapshot
           </p>
           <h3 className="mt-2 text-xl font-semibold tracking-tight text-slate-950 dark:text-slate-100">
@@ -347,7 +342,7 @@ function InsightSnapshot({
 
         <div className="grid gap-3 sm:grid-cols-3 xl:w-[520px]">
           <div className="enterprise-panel p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Latest day</p>
+            <p className="text-[13px] font-semibold text-slate-500 dark:text-slate-400">Latest day</p>
             <p className="mt-2 text-lg font-bold text-slate-950 dark:text-slate-100">
               {latestDay?.label ?? "No entries"}
             </p>
@@ -356,7 +351,7 @@ function InsightSnapshot({
             </p>
           </div>
           <div className="enterprise-panel p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Mood trend</p>
+            <p className="text-[13px] font-semibold text-slate-500 dark:text-slate-400">Mood trend</p>
             <p className="mt-2 text-lg font-bold text-slate-950 dark:text-slate-100">
               {mood?.label ?? "Not enough data"}
             </p>
@@ -365,7 +360,7 @@ function InsightSnapshot({
             </p>
           </div>
           <div className="enterprise-panel p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Next step</p>
+            <p className="text-[13px] font-semibold text-slate-500 dark:text-slate-400">Next step</p>
             <p className="mt-2 text-lg font-bold text-slate-950 dark:text-slate-100">
               {latestAiSummary ? "Review summary" : "Generate summary"}
             </p>
@@ -422,7 +417,7 @@ function PersonalReflectionCard({
     <section className="enterprise-card p-5">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
+          <p className="text-[13px] font-semibold text-slate-500 dark:text-slate-400">
             Reflection
           </p>
           <h3 className="mt-1.5 text-xl font-semibold text-slate-950 dark:text-slate-100">
@@ -443,17 +438,17 @@ function PersonalReflectionCard({
       </div>
 
       {message ? (
-        <p className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300">
+        <p className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300">
           {message}
         </p>
       ) : null}
       {error ? (
-        <p className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700 dark:border-rose-800 dark:bg-rose-900/30 dark:text-rose-300">
+        <p className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700 dark:border-rose-800 dark:bg-rose-900/30 dark:text-rose-300">
           {error}
         </p>
       ) : null}
 
-      <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-900/60">
+      <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-900/60">
         {latestAiSummary ? (
           <>
             <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -633,8 +628,8 @@ export function SummaryDashboard() {
         <div className="pointer-events-none select-none opacity-50 blur-[1px]">
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
             {['Total Entries', 'This Week', 'Words Written', 'Avg. Words'].map((label) => (
-              <div key={label} className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-                <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">{label}</p>
+              <div key={label} className="rounded-lg border border-slate-200/80 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+                <p className="text-[13px] font-semibold text-slate-500">{label}</p>
                 <div className="mt-2 h-7 w-1/2 rounded-full bg-slate-200 dark:bg-slate-700" />
               </div>
             ))}
@@ -643,10 +638,8 @@ export function SummaryDashboard() {
 
         {/* Overlay CTA */}
         <div className="-mt-16 relative z-10 enterprise-card p-8 text-center">
-          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-indigo-100 text-indigo-600 dark:bg-indigo-900/40 dark:text-indigo-400">
-            <svg className="h-7 w-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-6m4 6V7m4 10v-3M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z" />
-            </svg>
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-lg bg-indigo-100 text-indigo-600 dark:bg-indigo-900/40 dark:text-indigo-300">
+            <ChartNoAxesColumnIncreasing className="h-7 w-7" aria-hidden="true" />
           </div>
           <h3 className="mt-4 text-base font-bold text-slate-900 dark:text-slate-100">Your insights will appear here</h3>
           <p className="mt-1.5 text-sm text-slate-500 dark:text-slate-400">Sign in to see your writing stats, streaks, and activity trends.</p>
@@ -723,7 +716,7 @@ export function SummaryDashboard() {
       <section className="enterprise-card p-5">
         <div className="mb-5 flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">AI reflections</p>
+            <p className="text-[13px] font-semibold text-slate-500 dark:text-slate-400">AI reflections</p>
             <h3 className="mt-1.5 text-xl font-semibold text-slate-950 dark:text-slate-100">Generated summaries</h3>
           </div>
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
@@ -761,12 +754,12 @@ export function SummaryDashboard() {
           Generate uses the selected date as the anchor for the chosen daily, weekly, monthly, or yearly period.
         </p>
         {generateMessage ? (
-          <p className="mb-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300">
+          <p className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300">
             {generateMessage}
           </p>
         ) : null}
         {generateError ? (
-          <p className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700 dark:border-rose-800 dark:bg-rose-900/30 dark:text-rose-300">
+          <p className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700 dark:border-rose-800 dark:bg-rose-900/30 dark:text-rose-300">
             {generateError}
           </p>
         ) : null}
@@ -780,7 +773,7 @@ export function SummaryDashboard() {
         <div className="enterprise-card p-5">
           <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">Overview</p>
+              <p className="text-[13px] font-semibold text-slate-500 dark:text-slate-400">Overview</p>
               <h3 className="mt-1.5 text-xl font-semibold text-slate-950 dark:text-slate-100">Daily and weekly summaries</h3>
             </div>
             <div className="grid grid-cols-2 rounded-lg border border-slate-200 bg-slate-50 p-0.5 text-sm font-semibold text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
@@ -822,7 +815,7 @@ export function SummaryDashboard() {
                   </div>
                 </article>
               ))}
-              {!dailySummaries.length ? <p className="rounded-2xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-500 dark:border-slate-600 dark:text-slate-400">No daily summaries yet.</p> : null}
+              {!dailySummaries.length ? <p className="rounded-lg border border-dashed border-slate-200 p-6 text-center text-sm text-slate-500 dark:border-slate-600 dark:text-slate-400">No daily summaries yet.</p> : null}
             </div>
           ) : (
             <div className="space-y-3">
@@ -839,14 +832,14 @@ export function SummaryDashboard() {
                   </div>
                   <div className="h-2 rounded-full bg-slate-200 dark:bg-slate-600">
                     <div
-                      className="h-2 rounded-full bg-indigo-600"
+                      className="h-2 rounded-full bg-pink-500"
                       style={{ width: `${Math.min((week.activeDays / 7) * 100, 100)}%` }}
                     />
                   </div>
                   <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">Average {week.averageWords} words per active day</p>
                 </article>
               ))}
-              {!weeklySummaries.length ? <p className="rounded-2xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-500 dark:border-slate-600 dark:text-slate-400">No weekly summaries yet.</p> : null}
+              {!weeklySummaries.length ? <p className="rounded-lg border border-dashed border-slate-200 p-6 text-center text-sm text-slate-500 dark:border-slate-600 dark:text-slate-400">No weekly summaries yet.</p> : null}
             </div>
           )}
         </div>
@@ -855,7 +848,7 @@ export function SummaryDashboard() {
       <section className="enterprise-card p-5">
         <div className="mb-5 flex items-center justify-between gap-3">
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
+            <p className="text-[13px] font-semibold text-slate-500 dark:text-slate-400">
               {isAdmin ? "Data source" : "Recent memories"}
             </p>
             <h3 className="mt-1.5 text-xl font-semibold text-slate-950 dark:text-slate-100">
@@ -884,7 +877,7 @@ export function SummaryDashboard() {
             ))}
           </div>
         ) : (
-          <p className="rounded-2xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-500 dark:border-slate-600 dark:text-slate-400">
+          <p className="rounded-lg border border-dashed border-slate-200 p-6 text-center text-sm text-slate-500 dark:border-slate-600 dark:text-slate-400">
             Create diary entries to populate this dashboard.
           </p>
         )}

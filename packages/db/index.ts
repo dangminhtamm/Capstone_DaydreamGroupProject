@@ -93,9 +93,9 @@ export async function insertMemoryChunk(
       )
       VALUES (
         gen_random_uuid(),
-        $1,
+        $1::text,
         $2,
-        $3,
+        $3::text,
         $4,
         $5,
         $6,
@@ -185,9 +185,9 @@ export async function deleteMemoryChunksForSource(
   await prisma.$executeRawUnsafe(
     `
       DELETE FROM "memory_chunks"
-      WHERE "user_id" = $1
+      WHERE "user_id" = $1::text
         AND "source_type" = $2
-        AND "source_id" = $3
+        AND "source_id" = $3::text
     `,
     ref.userId,
     ref.sourceType,
@@ -207,9 +207,9 @@ export async function pruneMemoryChunksForSource(
   await prisma.$executeRawUnsafe(
     `
       DELETE FROM "memory_chunks"
-      WHERE "user_id" = $1
+      WHERE "user_id" = $1::text
         AND "source_type" = $2
-        AND "source_id" = $3
+        AND "source_id" = $3::text
         AND "chunk_index" >= $4
     `,
     input.userId,
@@ -338,7 +338,7 @@ export async function vectorSearch(
   // $1 is always the query vector; $2 is always userId.
   // Extra filters start at $3.
   const conditions: string[] = [
-    `"user_id" = $2`,
+    `"user_id" = $2::text`,
     // Only search chunks that actually have an embedding stored
     `"embedding" IS NOT NULL`,
   ];
@@ -464,7 +464,7 @@ export async function insertEntityMentions(
           "entity_value",
           "entity_value_normalized"
         )
-        VALUES (gen_random_uuid(), $1, $2, $3, $4)
+        VALUES (gen_random_uuid(), $1::text, $2, $3, $4)
         ON CONFLICT ("chunk_id", "entity_type", "entity_value") DO NOTHING
       `,
       mention.chunkId,
@@ -502,10 +502,10 @@ export async function deleteEntityMentionsForSource(
     `
       DELETE FROM "entity_mentions"
       WHERE "chunk_id" IN (
-        SELECT "id" FROM "memory_chunks"
-        WHERE "user_id" = $1
+        SELECT "id"::text FROM "memory_chunks"
+        WHERE "user_id" = $1::text
           AND "source_type" = $2
-          AND "source_id" = $3
+          AND "source_id" = $3::text
       )
     `,
     ref.userId,
@@ -531,9 +531,9 @@ export async function resolveMemoryChunkIds(
     `
       SELECT "id", "chunk_index"
       FROM "memory_chunks"
-      WHERE "user_id" = $1
+      WHERE "user_id" = $1::text
         AND "source_type" = $2
-        AND "source_id" = $3
+        AND "source_id" = $3::text
       ORDER BY "chunk_index"
     `,
     args.userId,

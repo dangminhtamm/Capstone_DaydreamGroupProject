@@ -27,6 +27,7 @@ import {
 import { prisma } from '../../lib/prisma';
 import type { WorkerMetricsSnapshot } from '../../metrics';
 import {
+  extractAudioAttachmentContent,
   extractAttachmentContent,
   isAudioMimeType,
 } from './attachment-extraction';
@@ -164,6 +165,7 @@ export class DataIngestionJob {
 
   private static async claimJobs(batchSize: number) {
     const safeBatchSize = Math.min(Math.max(Math.floor(batchSize), 1), 100);
+    const sourceIdFilter = process.env.INDEXING_WORKER_SOURCE_ID_FILTER?.trim() || null;
     return prisma.$queryRawUnsafe<IndexingJob[]>(
       `
       WITH candidates AS (
@@ -172,6 +174,7 @@ export class DataIngestionJob {
         WHERE job_type = 'index_memory'
           AND status IN ('pending', 'retry')
           AND run_after <= now()
+          AND ($3::text IS NULL OR source_id = $3)
         ORDER BY
           CASE source_type
             WHEN 'diary' THEN 0
@@ -199,6 +202,7 @@ export class DataIngestionJob {
       `,
       safeBatchSize,
       this.workerId,
+      sourceIdFilter,
     );
   }
 
@@ -241,7 +245,7 @@ export class DataIngestionJob {
       `
       UPDATE indexing_outbox
       SET locked_at = now(), updated_at = now()
-      WHERE id = ANY($1::uuid[])
+      WHERE id = ANY($1::text[])
         AND status = 'processing'
         AND locked_by = $2
       RETURNING id
@@ -264,7 +268,7 @@ export class DataIngestionJob {
             locked_by = NULL,
             updated_at = now(),
             error = COALESCE(error, 'Worker released an unfinished indexing lease.')
-        WHERE id = ANY($1::uuid[])
+        WHERE id = ANY($1::text[])
           AND status = 'processing'
           AND locked_by = $2
         `,
@@ -428,18 +432,25 @@ export class DataIngestionJob {
         throw new Error(error?.message ?? `File not found in storage: ${attachment.storage_path}`);
       }
 
-      const base64Data = Buffer.from(await data.arrayBuffer()).toString('base64');
+      const rawBuffer = Buffer.from(await data.arrayBuffer());
       const audio = isAudioMimeType(attachment.file_type);
+
       try {
-        extractedText = await extractAttachmentContent({
-          attachmentId: attachment.id,
-          base64Data,
-          mimeType: attachment.file_type,
-          fileName: sourceTitle ?? attachment.storage_path,
-          maxOutputTokens: audio
-            ? this.getAudioTranscriptionMaxOutputTokens()
-            : this.getAttachmentExtractionMaxOutputTokens(),
-        });
+        extractedText = audio
+          ? await extractAudioAttachmentContent({
+              attachmentId: attachment.id,
+              buffer: rawBuffer,
+              mimeType: attachment.file_type,
+              fileName: sourceTitle ?? attachment.storage_path,
+              maxOutputTokens: this.getAudioTranscriptionMaxOutputTokens(),
+            })
+          : await extractAttachmentContent({
+              attachmentId: attachment.id,
+              base64Data: rawBuffer.toString('base64'),
+              mimeType: attachment.file_type,
+              fileName: sourceTitle ?? attachment.storage_path,
+              maxOutputTokens: this.getAttachmentExtractionMaxOutputTokens(),
+            });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (audio) {
@@ -755,18 +766,24 @@ export class DataIngestionJob {
       return buffer.toString('utf8').trim();
     }
 
-    const base64Data = buffer.toString('base64');
     const audio = isAudioMimeType(driveFile.mime_type);
+
     try {
-      return await extractAttachmentContent({
-        attachmentId: `drive-${driveFile.external_id}`,
-        base64Data,
-        mimeType: driveFile.mime_type,
-        fileName: driveFile.name,
-        maxOutputTokens: audio
-          ? this.getAudioTranscriptionMaxOutputTokens()
-          : this.getAttachmentExtractionMaxOutputTokens(),
-      });
+      return audio
+        ? await extractAudioAttachmentContent({
+            attachmentId: `drive-${driveFile.external_id}`,
+            buffer,
+            mimeType: driveFile.mime_type,
+            fileName: driveFile.name,
+            maxOutputTokens: this.getAudioTranscriptionMaxOutputTokens(),
+          })
+        : await extractAttachmentContent({
+            attachmentId: `drive-${driveFile.external_id}`,
+            base64Data: buffer.toString('base64'),
+            mimeType: driveFile.mime_type,
+            fileName: driveFile.name,
+            maxOutputTokens: this.getAttachmentExtractionMaxOutputTokens(),
+          });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (audio) {
@@ -997,7 +1014,7 @@ export class DataIngestionJob {
           last_error = $3,
           last_error_at = now(),
           updated_at = now()
-        WHERE user_id = $1 AND source = $2
+        WHERE user_id = $1::text AND source = $2
         `,
         job.user_id,
         source,

@@ -28,7 +28,7 @@ async function writeWorkerHeartbeat(status: 'running' | 'stopping', detail?: str
         await prisma.$executeRawUnsafe(
             `
             INSERT INTO worker_heartbeats (id, status, detail, started_at, heartbeat_at, updated_at)
-            VALUES ($1, $2, $3, now(), now(), now())
+            VALUES ($1::text, $2, $3, now(), now(), now())
             ON CONFLICT (id)
             DO UPDATE SET
                 status = EXCLUDED.status,

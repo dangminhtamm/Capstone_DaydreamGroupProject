@@ -3,6 +3,8 @@ import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
+const DEFAULT_SIGNED_URL_TTL_SECONDS = 60 * 60;
+
 @Injectable()
 export class StorageService {
   private supabase?: SupabaseClient;
@@ -84,7 +86,11 @@ export class StorageService {
     };
   }
 
-  async createSignedUrl(bucket: string, path: string, expiresInSeconds = 300) {
+  async createSignedUrl(
+    bucket: string,
+    path: string,
+    expiresInSeconds = DEFAULT_SIGNED_URL_TTL_SECONDS,
+  ) {
     const supabase = this.getSupabaseClient();
     const { data, error } = await supabase.storage
       .from(bucket)
@@ -121,4 +127,3 @@ export class StorageService {
     }
   }
 }
-

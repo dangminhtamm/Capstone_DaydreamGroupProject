@@ -1,4 +1,8 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  NotFoundException,
+  StreamableFile,
+} from '@nestjs/common';
 import { AUDIO_ATTACHMENT_MAX_BYTES } from './attachment-upload-policy';
 import { indexMemoryFromAttachment } from '@second-brain/ai';
 import { insertMemoryChunks, pruneMemoryChunksForSource } from '@second-brain/db';
@@ -87,6 +91,42 @@ describe('UploadController', () => {
       select: { id: true, entry_date: true },
     });
     expect(storageService.uploadFile).not.toHaveBeenCalled();
+  });
+
+  it('streams an owned audio attachment with browser-friendly headers', async () => {
+    prisma.user.findUnique.mockResolvedValue({ id: 'user-1' });
+    prisma.attachment.findFirst.mockResolvedValue({
+      storage_path: 'attachments/user-1/recording.mp3',
+      file_type: 'audio/mpeg',
+    });
+    storageService.downloadFile.mockResolvedValue(Buffer.from('mp3-bytes'));
+    const response = { set: jest.fn() };
+
+    const result = await controller.downloadAttachment(
+      { user: { userId: 'supabase-user-1' } },
+      'attachment-audio-1',
+      response as any,
+    );
+
+    expect(prisma.attachment.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'attachment-audio-1',
+        diary_entry: { user_id: 'user-1' },
+      },
+      select: { storage_path: true, file_type: true },
+    });
+    expect(storageService.downloadFile).toHaveBeenCalledWith(
+      'attachments-bucket',
+      'attachments/user-1/recording.mp3',
+    );
+    expect(response.set).toHaveBeenCalledWith(
+      expect.objectContaining({
+        'Content-Disposition': 'inline; filename="recording.mp3"',
+        'Content-Length': '9',
+        'Content-Type': 'audio/mpeg',
+      }),
+    );
+    expect(result).toBeInstanceOf(StreamableFile);
   });
 
   it('stores extracted text and queues text attachment indexing', async () => {

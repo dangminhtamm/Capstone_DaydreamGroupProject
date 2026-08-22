@@ -104,7 +104,7 @@ export async function getGoogleConnectionStatus(
         last_error_at,
         sync_cursor
       FROM google_connections
-      WHERE user_id = $1 AND source = $2
+      WHERE user_id = $1::text AND source = $2
       LIMIT 1
       `,
       userId,
@@ -237,7 +237,7 @@ async function upsertGoogleConnection(
         last_error_at,
         sync_cursor
       )
-      VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $6 IS NULL THEN NULL ELSE now() END, CASE WHEN $7::jsonb IS NULL THEN NULL ELSE $7::jsonb END)
+      VALUES ($1::text, $2, $3, $4, $5, $6, CASE WHEN $6 IS NULL THEN NULL ELSE now() END, CASE WHEN $7::jsonb IS NULL THEN NULL ELSE $7::jsonb END)
       ON CONFLICT (user_id, source) DO UPDATE SET
         connected = EXCLUDED.connected,
         scopes = CASE
@@ -272,7 +272,7 @@ async function hasAnyGoogleConnectionRows(prisma: PrismaService, userId: string)
       `
       SELECT COUNT(*)::text AS count
       FROM google_connections
-      WHERE user_id = $1
+      WHERE user_id = $1::text
       `,
       userId,
     );

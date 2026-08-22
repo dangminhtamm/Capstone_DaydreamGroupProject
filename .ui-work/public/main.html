@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#08090d">
+    <title>Your library — AWS Music</title>
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body class="dashboard-page">
+    <header class="topbar">
+        <a class="brand" href="/main.html" aria-label="AWS Music home">
+            <span class="brand-mark">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 16.5V8.6l10-2.1v7.7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="5" cy="17" r="2.5" fill="currentColor"/><circle cx="15" cy="15" r="2.5" fill="currentColor"/></svg>
+            </span>
+            <span class="brand-word">AWS Music</span>
+        </a>
+
+        <div class="topbar-actions">
+            <div class="user-pill" aria-label="Signed-in user">
+                <span class="avatar" id="userInitial">…</span>
+                <span class="user-meta">
+                    <small>Listening as</small>
+                    <strong id="userName">Loading…</strong>
+                </span>
+            </div>
+            <a href="/api/logout" class="icon-btn" title="Sign out" aria-label="Sign out">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M10 5H5v14h5M14 8l4 4-4 4m4-4H9" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </a>
+        </div>
+    </header>
+
+    <main class="dashboard-shell">
+        <section class="hero">
+            <div class="hero-copy">
+                <p class="eyebrow">Made for your mood</p>
+                <h1>Find your next <span>favorite.</span></h1>
+                <p>Search the AWS Music catalogue by title, year, or artist—then keep the tracks you love in your personal collection.</p>
+            </div>
+        </section>
+
+        <section class="content-section" aria-labelledby="discoverTitle">
+            <div class="section-heading">
+                <div>
+                    <h2 id="discoverTitle">Discover music</h2>
+                    <p>Use one or more filters to explore the catalogue.</p>
+                </div>
+                <span class="count-badge" id="searchCount">Ready to search</span>
+            </div>
+
+            <div class="search-panel">
+                <form id="queryForm" class="search-form">
+                    <div class="search-field">
+                        <label for="qTitle">Song title</label>
+                        <input type="search" id="qTitle" placeholder="e.g. American" autocomplete="off">
+                    </div>
+                    <div class="search-field">
+                        <label for="qYear">Release year</label>
+                        <input type="search" id="qYear" placeholder="e.g. 2012" inputmode="numeric" autocomplete="off">
+                    </div>
+                    <div class="search-field">
+                        <label for="qArtist">Artist</label>
+                        <input type="search" id="qArtist" placeholder="e.g. Jack Johnson" autocomplete="off">
+                    </div>
+                    <button type="submit" class="primary-btn search-btn" id="searchButton">
+                        <span class="button-loader" aria-hidden="true"></span>
+                        <svg class="button-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="6.5" stroke="currentColor" stroke-width="2"/><path d="m16 16 4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                        <span class="button-text">Search</span>
+                    </button>
+                </form>
+                <p class="search-hint">Tip: combining filters gives you more precise results.</p>
+                <div id="queryError" class="inline-message" role="alert" aria-live="polite">
+                    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"/><path d="M12 7v6m0 4v.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                    <span></span>
+                </div>
+            </div>
+
+            <div class="music-grid" id="queryResults" aria-live="polite">
+                <div class="empty-state">
+                    <div>
+                        <span class="empty-icon">
+                            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="6.5" stroke="currentColor" stroke-width="1.8"/><path d="m16 16 4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                        </span>
+                        <h3>Your discovery starts here</h3>
+                        <p>Enter a title, year, or artist above to find music.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content-section" aria-labelledby="libraryTitle">
+            <div class="section-heading">
+                <div>
+                    <h2 id="libraryTitle">Your collection</h2>
+                    <p>The tracks you have saved for later.</p>
+                </div>
+                <span class="count-badge" id="subscriptionCount">Loading…</span>
+            </div>
+            <div class="music-grid" id="subResults" aria-live="polite">
+                <div class="song-card skeleton"></div>
+                <div class="song-card skeleton"></div>
+                <div class="song-card skeleton"></div>
+                <div class="song-card skeleton"></div>
+            </div>
+        </section>
+    </main>
+
+    <div class="toast" id="toast" role="status" aria-live="polite">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 12 4 4L19 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span></span>
+    </div>
+
+    <script>
+        const icons = {
+            plus: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+            trash: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 7h14M9 7V4h6v3m2 0-1 13H8L7 7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+            music: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M8 17V7l10-2v10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="5.5" cy="17.5" r="2.5" stroke="currentColor" stroke-width="1.8"/><circle cx="15.5" cy="15.5" r="2.5" stroke="currentColor" stroke-width="1.8"/></svg>'
+        };
+
+        const queryForm = document.getElementById('queryForm');
+        const queryResults = document.getElementById('queryResults');
+        const subResults = document.getElementById('subResults');
+        const queryError = document.getElementById('queryError');
+        const searchButton = document.getElementById('searchButton');
+        let toastTimer;
+
+        function showToast(message) {
+            const toast = document.getElementById('toast');
+            toast.querySelector('span').textContent = message;
+            toast.classList.add('is-visible');
+            clearTimeout(toastTimer);
+            toastTimer = setTimeout(() => toast.classList.remove('is-visible'), 2600);
+        }
+
+        function setError(message = '') {
+            queryError.querySelector('span').textContent = message;
+            queryError.classList.toggle('is-visible', Boolean(message));
+        }
+
+        function updateCount(elementId, count, singular = 'track') {
+            document.getElementById(elementId).textContent = `${count} ${count === 1 ? singular : `${singular}s`}`;
+        }
+
+        function renderEmpty(container, title, message) {
+            container.replaceChildren();
+            const state = document.createElement('div');
+            state.className = 'empty-state';
+            state.innerHTML = `<div><span class="empty-icon">${icons.music}</span><h3></h3><p></p></div>`;
+            state.querySelector('h3').textContent = title;
+            state.querySelector('p').textContent = message;
+            container.appendChild(state);
+        }
+
+        function createSongCard(song, isSubscribed) {
+            const card = document.createElement('article');
+            card.className = 'song-card';
+
+            const cover = document.createElement('div');
+            cover.className = 'cover-wrap';
+            const image = document.createElement('img');
+            image.className = 'song-img';
+            image.src = song.s3_url || '';
+            image.alt = `${song.title} cover`;
+            image.loading = 'lazy';
+            image.addEventListener('error', () => {
+                image.remove();
+                cover.style.background = 'linear-gradient(135deg, #30364a, #161922)';
+                cover.innerHTML = `<span class="empty-icon" style="position:absolute;inset:50% auto auto 50%;transform:translate(-50%,-50%)">${icons.music}</span>`;
+            }, {once: true});
+            const shade = document.createElement('span');
+            shade.className = 'cover-shade';
+            cover.append(image, shade);
+
+            const info = document.createElement('div');
+            info.className = 'song-info';
+            const title = document.createElement('h3');
+            title.className = 'song-title';
+            title.textContent = song.title;
+            title.title = song.title;
+            const artist = document.createElement('p');
+            artist.className = 'song-artist';
+            artist.textContent = `${song.artist} · ${song.year}`;
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = `btn-action ${isSubscribed ? 'btn-remove' : 'btn-sub'}`;
+            button.innerHTML = `${isSubscribed ? icons.trash : icons.plus}<span>${isSubscribed ? 'Remove' : 'Save track'}</span>`;
+            button.addEventListener('click', async () => {
+                button.disabled = true;
+                if (isSubscribed) await removeSub(song.title);
+                else await subscribe(song);
+                button.disabled = false;
+            });
+
+            info.append(title, artist, button);
+            card.append(cover, info);
+            return card;
+        }
+
+        function renderSongs(container, songs, isSubscribed) {
+            container.replaceChildren();
+            const fragment = document.createDocumentFragment();
+            songs.forEach(song => fragment.appendChild(createSongCard(song, isSubscribed)));
+            container.appendChild(fragment);
+        }
+
+        async function loadUser() {
+            const response = await fetch('/api/user');
+            if (response.status === 401) {
+                window.location.href = '/login.html';
+                return false;
+            }
+            if (!response.ok) throw new Error('Could not load your profile.');
+            const data = await response.json();
+            const userName = data.user_name || 'Listener';
+            document.getElementById('userName').textContent = userName;
+            document.getElementById('userInitial').textContent = userName.charAt(0).toUpperCase();
+            return true;
+        }
+
+        async function loadSubscriptions() {
+            try {
+                const response = await fetch('/api/subscriptions');
+                if (!response.ok) throw new Error('Could not load your collection.');
+                const data = await response.json();
+                const songs = data.success && Array.isArray(data.data) ? data.data : [];
+                updateCount('subscriptionCount', songs.length);
+                if (songs.length) renderSongs(subResults, songs, true);
+                else renderEmpty(subResults, 'Your collection is waiting', 'Search for music above and save the tracks you love.');
+            } catch (error) {
+                document.getElementById('subscriptionCount').textContent = 'Unavailable';
+                renderEmpty(subResults, 'Could not load collection', 'Please refresh the page and try again.');
+            }
+        }
+
+        queryForm.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            setError();
+            const query = {
+                title: document.getElementById('qTitle').value.trim(),
+                year: document.getElementById('qYear').value.trim(),
+                artist: document.getElementById('qArtist').value.trim()
+            };
+            if (!query.title && !query.year && !query.artist) {
+                setError('Enter at least one search filter to continue.');
+                return;
+            }
+
+            searchButton.disabled = true;
+            searchButton.classList.add('is-loading');
+            try {
+                const response = await fetch('/api/query', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(query)
+                });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error || 'Search is currently unavailable.');
+                if (data.success && Array.isArray(data.data) && data.data.length) {
+                    renderSongs(queryResults, data.data, false);
+                    updateCount('searchCount', data.data.length, 'result');
+                } else {
+                    renderEmpty(queryResults, 'No matches found', 'Try a different title, year, or artist.');
+                    updateCount('searchCount', 0, 'result');
+                }
+            } catch (error) {
+                setError(error.message || 'Search failed. Please try again.');
+                document.getElementById('searchCount').textContent = 'Search failed';
+            } finally {
+                searchButton.disabled = false;
+                searchButton.classList.remove('is-loading');
+            }
+        });
+
+        async function subscribe(song) {
+            try {
+                const response = await fetch('/api/subscribe', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({title: song.title, artist: song.artist, year: song.year, image_url: song.image_url})
+                });
+                if (!response.ok) throw new Error();
+                showToast(`“${song.title}” added to your collection`);
+                await loadSubscriptions();
+            } catch {
+                setError('Could not save this track. Please try again.');
+            }
+        }
+
+        async function removeSub(title) {
+            try {
+                const response = await fetch('/api/unsubscribe', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({title})
+                });
+                if (!response.ok) throw new Error();
+                showToast(`“${title}” removed from your collection`);
+                await loadSubscriptions();
+            } catch {
+                setError('Could not remove this track. Please try again.');
+            }
+        }
+
+        (async function init() {
+            try {
+                if (await loadUser()) await loadSubscriptions();
+            } catch {
+                window.location.href = '/login.html';
+            }
+        })();
+    </script>
+</body>
+</html>

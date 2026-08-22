@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#08090d">
+    <title>Create account — AWS Music</title>
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+    <main class="auth-page">
+        <section class="auth-visual" aria-label="AWS Music introduction">
+            <a class="brand" href="/login.html" aria-label="AWS Music home">
+                <span class="brand-mark">
+                    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 16.5V8.6l10-2.1v7.7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="5" cy="17" r="2.5" fill="currentColor"/><circle cx="15" cy="15" r="2.5" fill="currentColor"/></svg>
+                </span>
+                AWS Music
+            </a>
+
+            <div class="auth-copy">
+                <p class="eyebrow">Start your collection</p>
+                <h1>Your next favorite is <em>waiting.</em></h1>
+                <p>Create an account, explore the catalogue, and save every track that deserves another listen.</p>
+            </div>
+
+            <div class="wave-art" aria-hidden="true">
+                <i style="--h:30px"></i><i style="--h:55px"></i><i style="--h:22px"></i><i style="--h:42px"></i><i style="--h:65px"></i><i style="--h:34px"></i><i style="--h:50px"></i><i style="--h:19px"></i><i style="--h:39px"></i><i style="--h:60px"></i><i style="--h:27px"></i><i style="--h:45px"></i><i style="--h:31px"></i><i style="--h:17px"></i>
+            </div>
+        </section>
+
+        <section class="auth-panel">
+            <div class="auth-card">
+                <p class="eyebrow">Join AWS Music</p>
+                <h2>Create your account</h2>
+                <p class="auth-subtitle">It only takes a moment to start building your library.</p>
+                <div id="error" class="form-message" role="alert" aria-live="polite"></div>
+
+                <form id="registerForm" class="auth-form" novalidate>
+                    <div class="field">
+                        <label for="email">Email address</label>
+                        <div class="input-wrap">
+                            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 6h16v12H4V6Z" stroke="currentColor" stroke-width="1.8"/><path d="m5 7 7 6 7-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                            <input type="email" id="email" name="email" autocomplete="email" placeholder="you@example.com" required autofocus>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <label for="user_name">Username</label>
+                        <div class="input-wrap">
+                            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="1.8"/><path d="M4.5 20c.8-4 3.3-6 7.5-6s6.7 2 7.5 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                            <input type="text" id="user_name" name="user_name" autocomplete="username" placeholder="Choose a username" minlength="2" required>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <label for="password">Password</label>
+                        <div class="input-wrap">
+                            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M8 10V7a4 4 0 0 1 8 0v3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                            <input type="password" id="password" name="password" autocomplete="new-password" placeholder="Create a password" minlength="6" required>
+                            <button type="button" class="password-toggle" aria-label="Show password" aria-pressed="false">
+                                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M2.5 12s3.5-5 9.5-5 9.5 5 9.5 5-3.5 5-9.5 5-9.5-5-9.5-5Z" stroke="currentColor" stroke-width="1.7"/><circle cx="12" cy="12" r="2.5" stroke="currentColor" stroke-width="1.7"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                    <button type="submit" class="primary-btn" id="submitButton">
+                        <span class="button-loader" aria-hidden="true"></span>
+                        <span>Create account</span>
+                        <svg class="button-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </button>
+                </form>
+                <p class="auth-switch">Already have an account? <a href="/login.html">Sign in</a></p>
+            </div>
+        </section>
+    </main>
+
+    <script>
+        const form = document.getElementById('registerForm');
+        const errorBox = document.getElementById('error');
+        const submitButton = document.getElementById('submitButton');
+        const passwordInput = document.getElementById('password');
+        const passwordToggle = document.querySelector('.password-toggle');
+
+        passwordToggle.addEventListener('click', () => {
+            const isVisible = passwordInput.type === 'text';
+            passwordInput.type = isVisible ? 'password' : 'text';
+            passwordToggle.setAttribute('aria-pressed', String(!isVisible));
+            passwordToggle.setAttribute('aria-label', isVisible ? 'Show password' : 'Hide password');
+        });
+
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            errorBox.classList.remove('is-visible');
+            if (!form.checkValidity()) {
+                form.reportValidity();
+                return;
+            }
+            submitButton.disabled = true;
+            submitButton.classList.add('is-loading');
+            try {
+                const response = await fetch('/api/register', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        email: document.getElementById('email').value.trim(),
+                        user_name: document.getElementById('user_name').value.trim(),
+                        password: passwordInput.value
+                    })
+                });
+                const data = await response.json();
+                if (data.success) window.location.href = data.redirect;
+                else throw new Error(data.message || 'Unable to create your account.');
+            } catch (error) {
+                errorBox.textContent = error.message || 'Connection failed. Please try again.';
+                errorBox.classList.add('is-visible');
+            } finally {
+                submitButton.disabled = false;
+                submitButton.classList.remove('is-loading');
+            }
+        });
+    </script>
+</body>
+</html>

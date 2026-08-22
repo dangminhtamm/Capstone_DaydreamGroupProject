@@ -19,6 +19,7 @@
   "scripts": {
     "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\"",
     "build": "pnpm run clean && tsc -p tsconfig.build.json",
+    "test": "node --import tsx --test src/*.test.ts",
     "prisma:generate": "prisma generate --config prisma.config.ts",
     "prisma:validate": "prisma validate --schema prisma/schema.prisma",
     "prisma:migrate:deploy": "prisma migrate deploy --config prisma.config.ts",
@@ -31,6 +32,7 @@
     "@types/node": "^24.0.0",
     "@types/pg": "^8.20.0",
     "prisma": "^7.8.0",
+    "tsx": "^4.23.1",
     "typescript": "^5.9.3"
   }
 }

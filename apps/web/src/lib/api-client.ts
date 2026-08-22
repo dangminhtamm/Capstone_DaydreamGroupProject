@@ -141,6 +141,44 @@ export async function getDiaryEntry(
   return response.json();
 }
 
+export async function getDiaryAttachment(
+  id: string,
+  accessToken: string | null,
+): Promise<{ signedUrl?: string }> {
+  const response = await authFetch(`/api/upload/attachment/${id}`, {
+    method: 'GET',
+  }, accessToken);
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response, 'Failed to refresh attachment URL'));
+  }
+
+  return response.json();
+}
+
+export async function getDiaryAttachmentContent(
+  id: string,
+  accessToken: string | null,
+): Promise<Blob> {
+  const response = await authFetch(`/api/upload/attachment/${id}/content`, {
+    method: 'GET',
+    headers: {
+      Accept: 'audio/*',
+    },
+  }, accessToken);
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response, 'Failed to load attachment audio'));
+  }
+
+  const content = await response.blob();
+  if (!content.size) {
+    throw new Error('Attachment audio is empty.');
+  }
+
+  return content;
+}
+
 export type UpdateDiaryPayload = {
   title?: string;
   content?: string;

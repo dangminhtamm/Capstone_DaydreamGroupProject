@@ -14,8 +14,11 @@ import {
   ParseFilePipe,
   MaxFileSizeValidator,
   FileTypeValidator,
+  Res,
+  StreamableFile,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import type { Response } from 'express';
 import { StorageService } from '../../storage/storage.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -92,6 +95,49 @@ export class UploadController {
     }
 
     return this.toClientAttachment(attachment);
+  }
+
+  @Get('attachment/:id/content')
+  async downloadAttachment(
+    @Request() req: { user: { userId: string } },
+    @Param('id') attachmentId: string,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const user = await this.findUserOrThrow(req.user.userId);
+    const attachment = await this.prisma.attachment.findFirst({
+      where: {
+        id: attachmentId,
+        diary_entry: {
+          user_id: user.id,
+        },
+      },
+      select: {
+        storage_path: true,
+        file_type: true,
+      },
+    });
+
+    if (!attachment) {
+      throw new NotFoundException('Attachment not found.');
+    }
+
+    const content = await this.storageService.downloadFile(
+      'attachments-bucket',
+      attachment.storage_path,
+    );
+    const fileName = this.getStoredFileName(attachment.storage_path).replace(
+      /["\r\n]/g,
+      '_',
+    );
+
+    response.set({
+      'Cache-Control': 'private, max-age=300',
+      'Content-Disposition': `inline; filename="${fileName}"`,
+      'Content-Length': String(content.length),
+      'Content-Type': attachment.file_type || 'application/octet-stream',
+    });
+
+    return new StreamableFile(content);
   }
 
   @Post('attachment')

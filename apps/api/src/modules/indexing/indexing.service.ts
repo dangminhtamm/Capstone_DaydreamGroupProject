@@ -316,7 +316,7 @@ export class IndexingService {
 
   private async getCounts(userId: string) {
     const rows = await this.prisma.$queryRawUnsafe<CountRow[]>(
-      'SELECT status, COUNT(*) AS count FROM indexing_outbox WHERE user_id = $1 GROUP BY status ORDER BY status',
+      'SELECT status, COUNT(*) AS count FROM indexing_outbox WHERE user_id = $1::text GROUP BY status ORDER BY status',
       userId,
     );
 
@@ -328,7 +328,7 @@ export class IndexingService {
 
   private async getStaleProcessingCount(userId: string) {
     const rows = await this.prisma.$queryRawUnsafe<Array<{ count: number | bigint }>>(
-      "SELECT COUNT(*) AS count FROM indexing_outbox WHERE user_id = $1 AND status = 'processing' AND locked_at < NOW() - INTERVAL '10 minutes'",
+      "SELECT COUNT(*) AS count FROM indexing_outbox WHERE user_id = $1::text AND status = 'processing' AND locked_at < NOW() - INTERVAL '10 minutes'",
       userId,
     );
 
@@ -352,7 +352,7 @@ export class IndexingService {
         created_at,
         updated_at
       FROM indexing_outbox
-      WHERE user_id = $1
+      WHERE user_id = $1::text
       ORDER BY updated_at DESC, created_at DESC
       LIMIT 10`,
       userId,
@@ -376,7 +376,7 @@ export class IndexingService {
         COUNT(*) FILTER (WHERE embedding IS NULL) AS "missingEmbeddingChunks",
         MAX(updated_at) AS "latestChunkUpdatedAt"
       FROM memory_chunks
-      WHERE user_id = $1
+      WHERE user_id = $1::text
       `,
       userId,
       TUTURUUU_EMBEDDING_MODEL,

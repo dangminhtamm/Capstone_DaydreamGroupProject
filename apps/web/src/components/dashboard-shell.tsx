@@ -3,7 +3,25 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import Image from "next/image";
-import { ReactNode, useState, useEffect } from "react";
+import { ReactNode, useEffect, useRef, useState } from "react";
+import {
+  ChartNoAxesColumnIncreasing,
+  ChevronLeft,
+  ChevronRight,
+  Clock3,
+  LogIn,
+  LogOut,
+  Menu,
+  Moon,
+  PencilLine,
+  Plus,
+  Search,
+  Settings,
+  Sun,
+  UserRound,
+  Zap,
+  type LucideIcon,
+} from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSidebarState } from "@/contexts/SidebarContext";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -19,7 +37,8 @@ type SidebarItem = {
   href: string;
   label: string;
   description?: string;
-  icon: ReactNode;
+  icon: LucideIcon;
+  accent: "cyan" | "indigo" | "pink";
   match?: (pathname: string) => boolean;
 };
 
@@ -32,40 +51,52 @@ const mainNavItems: SidebarItem[] = [
   {
     href: "/diary",
     label: "Diary",
-    icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-      </svg>
-    )
+    icon: PencilLine,
+    accent: "cyan",
   },
   {
     href: "/search",
     label: "Search",
-    icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-      </svg>
-    )
+    icon: Search,
+    accent: "indigo",
   },
   {
     href: "/timeline",
     label: "Timeline",
-    icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-      </svg>
-    )
+    icon: Clock3,
+    accent: "pink",
   },
   {
     href: "/summary",
     label: "Summary",
-    icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-6m4 6V7m4 10v-3M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z" />
-      </svg>
-    )
+    icon: ChartNoAxesColumnIncreasing,
+    accent: "indigo",
   },
 ];
+
+const navAccentStyles = {
+  cyan: {
+    active: "bg-cyan-50 text-cyan-800 ring-cyan-100 dark:bg-cyan-950/40 dark:text-cyan-200 dark:ring-cyan-900/60",
+    icon: "text-cyan-600 dark:text-cyan-300",
+    dot: "bg-cyan-500 dark:bg-cyan-300",
+    mobile: "text-cyan-700 dark:text-cyan-300",
+    pill: "bg-cyan-50 text-cyan-600 dark:bg-cyan-950/60 dark:text-cyan-300",
+  },
+  indigo: {
+    active: "bg-indigo-50 text-indigo-800 ring-indigo-100 dark:bg-indigo-950/40 dark:text-indigo-200 dark:ring-indigo-900/60",
+    icon: "text-indigo-600 dark:text-indigo-300",
+    dot: "bg-indigo-500 dark:bg-indigo-300",
+    mobile: "text-indigo-700 dark:text-indigo-300",
+    pill: "bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-300",
+  },
+  pink: {
+    active: "bg-pink-50 text-pink-800 ring-pink-100 dark:bg-pink-950/40 dark:text-pink-200 dark:ring-pink-900/60",
+    icon: "text-pink-600 dark:text-pink-300",
+    dot: "bg-pink-500 dark:bg-pink-300",
+    mobile: "text-pink-700 dark:text-pink-300",
+    pill: "bg-pink-50 text-pink-600 dark:bg-pink-950/60 dark:text-pink-300",
+  },
+} as const;
 
 const sidebarSections: SidebarSection[] = [
   {
@@ -78,13 +109,9 @@ const sidebarSections: SidebarSection[] = [
       {
         href: "/settings",
         label: "Settings",
+        accent: "indigo",
         match: (pathname) => pathname === "/settings",
-        icon: (
-          <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 0 0 1.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 0 0-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 0 0-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 0 0-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 0 0-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 0 0 1.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.573-1.066z" />
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z" />
-          </svg>
-        ),
+        icon: Settings,
       },
     ],
   },
@@ -93,10 +120,14 @@ const sidebarSections: SidebarSection[] = [
 // useTheme is now imported from @/contexts/ThemeContext
 
 export function DashboardShell({ children, title, description }: DashboardShellProps) {
-  const { user, isAuthenticated, isLoading, signInWithGoogle, signOut } = useAuth();
+  const { user, isAuthenticated, isLoading, signOut } = useAuth();
   const pathname = usePathname();
   const [openMenu, setOpenMenu] = useState<"settings" | null>(null);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [isDesktopViewport, setIsDesktopViewport] = useState(false);
+  const sidebarRef = useRef<HTMLElement>(null);
+  const mobileSidebarToggleRef = useRef<HTMLButtonElement>(null);
+  const wasMobileSidebarOpen = useRef(false);
   const { collapsed: sidebarCollapsed, setCollapsed: setSidebarCollapsed } = useSidebarState();
   const { resolvedTheme, toggleTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
@@ -122,6 +153,71 @@ export function DashboardShell({ children, title, description }: DashboardShellP
     } catch { /* ignore */ }
   }, []);
 
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(min-width: 1024px)");
+    const updateViewport = () => {
+      setIsDesktopViewport(mediaQuery.matches);
+      if (mediaQuery.matches) setMobileSidebarOpen(false);
+    };
+
+    updateViewport();
+    mediaQuery.addEventListener("change", updateViewport);
+    return () => mediaQuery.removeEventListener("change", updateViewport);
+  }, []);
+
+  useEffect(() => {
+    if (isDesktopViewport) {
+      wasMobileSidebarOpen.current = false;
+      return;
+    }
+
+    if (!mobileSidebarOpen) {
+      if (wasMobileSidebarOpen.current) mobileSidebarToggleRef.current?.focus();
+      wasMobileSidebarOpen.current = false;
+      return;
+    }
+
+    wasMobileSidebarOpen.current = true;
+    const sidebar = sidebarRef.current;
+    if (!sidebar) return;
+
+    const getFocusableElements = () => Array.from(
+      sidebar.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ),
+    ).filter((element) => element.getAttribute("aria-hidden") !== "true");
+
+    getFocusableElements()[0]?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setMobileSidebarOpen(false);
+        return;
+      }
+
+      if (event.key !== "Tab") return;
+      const focusableElements = getFocusableElements();
+      if (!focusableElements.length) {
+        event.preventDefault();
+        return;
+      }
+
+      const firstElement = focusableElements[0];
+      const lastElement = focusableElements[focusableElements.length - 1];
+      if (event.shiftKey && document.activeElement === firstElement) {
+        event.preventDefault();
+        lastElement.focus();
+      } else if (!event.shiftKey && document.activeElement === lastElement) {
+        event.preventDefault();
+        firstElement.focus();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [isDesktopViewport, mobileSidebarOpen]);
+
   const avatarUrl: string | undefined =
     user?.user_metadata?.avatar_url ?? user?.user_metadata?.picture ?? undefined;
   const displayName: string = user?.user_metadata?.full_name ?? user?.user_metadata?.name ?? "User";
@@ -134,15 +230,22 @@ export function DashboardShell({ children, title, description }: DashboardShellP
         <div
           className="fixed inset-0 z-20 bg-slate-900/50 backdrop-blur-sm lg:hidden"
           onClick={(e) => { e.stopPropagation(); setMobileSidebarOpen(false); }}
+          aria-hidden="true"
         />
       )}
 
       {/* Sidebar */}
-      <aside className={`fixed inset-y-0 left-0 z-30 w-64 flex-shrink-0 border-r border-slate-200 bg-white transition-all duration-300 dark:border-slate-800 dark:bg-slate-950 lg:static lg:translate-x-0 ${
+      <aside
+        id="app-sidebar"
+        ref={sidebarRef}
+        aria-hidden={!isDesktopViewport && !mobileSidebarOpen}
+        inert={!isDesktopViewport && !mobileSidebarOpen ? true : undefined}
+        className={`fixed inset-y-0 left-0 z-30 w-64 flex-shrink-0 border-r border-slate-200 bg-white transition-all duration-300 dark:border-slate-800 dark:bg-slate-950 lg:static lg:translate-x-0 ${
         sidebarCollapsed ? "lg:w-20" : "lg:w-64"
       } ${
         mobileSidebarOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"
-      }`}>
+      }`}
+      >
         <div className="flex h-full flex-col">
           {/* Logo */}
           <div className={`relative border-b border-slate-200 py-3 dark:border-slate-800 ${sidebarCollapsed ? "lg:px-3 px-5" : "px-5"}`}>
@@ -163,9 +266,7 @@ export function DashboardShell({ children, title, description }: DashboardShellP
                 aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
                 title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
               >
-                <svg className={`h-3.5 w-3.5 transition-transform ${sidebarCollapsed ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                </svg>
+                <ChevronLeft className={`h-3.5 w-3.5 transition-transform ${sidebarCollapsed ? "rotate-180" : ""}`} aria-hidden="true" />
               </button>
             </div>
           </div>
@@ -178,16 +279,14 @@ export function DashboardShell({ children, title, description }: DashboardShellP
               className={`action-primary mb-4 w-full ${sidebarCollapsed ? "lg:px-0 px-4" : "px-4"}`}
               title="New Diary"
             >
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v14m7-7H5" />
-              </svg>
+              <Plus className="h-4 w-4" aria-hidden="true" />
               <span className={sidebarCollapsed ? "lg:hidden" : ""}>New Diary</span>
             </Link>
 
             <div className={sidebarCollapsed ? "space-y-4 lg:space-y-3" : "space-y-5"}>
               {sidebarSections.map((section) => (
                 <div key={section.label}>
-                  <p className={`mb-2 px-2 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500 ${sidebarCollapsed ? "lg:sr-only" : ""}`}>
+                  <p className={`mb-2 px-2 text-xs font-semibold text-slate-400 dark:text-slate-500 ${sidebarCollapsed ? "lg:sr-only" : ""}`}>
                     {section.label}
                   </p>
                   <div className="space-y-1">
@@ -195,6 +294,8 @@ export function DashboardShell({ children, title, description }: DashboardShellP
                       const isActive = item.match
                         ? item.match(pathname)
                         : pathname === item.href;
+                      const ItemIcon = item.icon;
+                      const accentStyle = navAccentStyles[item.accent];
 
                       return (
                         <Link
@@ -207,12 +308,12 @@ export function DashboardShell({ children, title, description }: DashboardShellP
                           }}
                           className={`group flex items-center rounded-lg py-2 text-sm font-medium transition-all ${
                             isActive
-                              ? "bg-blue-50 text-blue-700 ring-1 ring-blue-100 dark:bg-blue-950/40 dark:text-blue-200 dark:ring-blue-900/60"
-                              : "text-slate-600 hover:bg-blue-50/60 hover:text-slate-950 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100"
+                              ? `${accentStyle.active} ring-1`
+                              : "text-slate-600 hover:bg-slate-100/70 hover:text-slate-950 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100"
                           } ${sidebarCollapsed ? "lg:justify-center lg:px-0 px-2 gap-3" : "gap-3 px-2"}`}
                         >
-                          <span className={`shrink-0 transition ${isActive ? "text-indigo-600 dark:text-indigo-300" : "text-slate-400 group-hover:text-slate-700 dark:group-hover:text-slate-200"}`}>
-                            {item.icon}
+                          <span className={`shrink-0 transition ${isActive ? accentStyle.icon : "text-slate-400 group-hover:text-slate-700 dark:group-hover:text-slate-200"}`}>
+                            <ItemIcon className="h-5 w-5" aria-hidden="true" />
                           </span>
                           <span className={`min-w-0 flex-1 ${sidebarCollapsed ? "lg:hidden" : ""}`}>
                             <span className="block truncate">{item.label}</span>
@@ -223,7 +324,7 @@ export function DashboardShell({ children, title, description }: DashboardShellP
                             ) : null}
                           </span>
                           {isActive ? (
-                            <span className={`h-1.5 w-1.5 rounded-full bg-blue-500 dark:bg-blue-300 ${sidebarCollapsed ? "lg:hidden" : ""}`} />
+                            <span className={`h-1.5 w-1.5 rounded-full ${accentStyle.dot} ${sidebarCollapsed ? "lg:hidden" : ""}`} />
                           ) : null}
                         </Link>
                       );
@@ -238,10 +339,8 @@ export function DashboardShell({ children, title, description }: DashboardShellP
           {tokenStats && (
             <div className={`mx-3 mb-3 enterprise-panel p-3 ${sidebarCollapsed ? "lg:hidden" : ""}`}>
               <div className="flex items-center gap-2 mb-2">
-                <svg className="h-4 w-4 text-indigo-500 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                </svg>
-                <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Token Usage</span>
+                <Zap className="h-4 w-4 text-indigo-500 dark:text-indigo-300" aria-hidden="true" />
+                <span className="text-[13px] font-semibold text-slate-600 dark:text-slate-300">Token usage</span>
               </div>
               <div className="space-y-1.5">
                 <div className="flex justify-between items-center">
@@ -297,9 +396,7 @@ export function DashboardShell({ children, title, description }: DashboardShellP
                 className={`action-primary w-full ${sidebarCollapsed ? "lg:px-0 px-4" : "px-4"}`}
                 title="Sign in"
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" />
-                </svg>
+                <LogIn className="h-4 w-4" aria-hidden="true" />
                 <span className={sidebarCollapsed ? "lg:hidden" : ""}>Sign in</span>
               </Link>
             )}
@@ -315,14 +412,15 @@ export function DashboardShell({ children, title, description }: DashboardShellP
             <div className="flex items-center gap-3">
               {/* Hamburger - mobile only */}
               <button
+                ref={mobileSidebarToggleRef}
                 type="button"
                 onClick={(e) => { e.stopPropagation(); setMobileSidebarOpen(!mobileSidebarOpen); }}
                 className="action-quiet cursor-pointer p-2 lg:hidden"
-                aria-label="Toggle sidebar"
+                aria-label={mobileSidebarOpen ? "Close sidebar" : "Open sidebar"}
+                aria-controls="app-sidebar"
+                aria-expanded={mobileSidebarOpen}
               >
-                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                </svg>
+                <Menu className="h-5 w-5" aria-hidden="true" />
               </button>
               <div>
                 <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">{title}</h2>
@@ -338,9 +436,7 @@ export function DashboardShell({ children, title, description }: DashboardShellP
                 className="action-quiet cursor-pointer p-2"
                 aria-label="Settings"
               >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                </svg>
+                <UserRound className="h-5 w-5" aria-hidden="true" />
               </button>
 
               {/* Settings dropdown */}
@@ -374,12 +470,9 @@ export function DashboardShell({ children, title, description }: DashboardShellP
                       onClick={() => setOpenMenu(null)}
                       className="action-quiet flex w-full justify-start px-3"
                     >
-                      <svg className="h-4 w-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                      </svg>
+                      <Settings className="h-4 w-4 text-slate-400" aria-hidden="true" />
                       <span className="flex-1 text-left">Settings</span>
-                      <svg className="h-3.5 w-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                      <ChevronRight className="h-3.5 w-3.5 text-slate-400" aria-hidden="true" />
                     </Link>
 
                     {/* Theme toggle */}
@@ -389,13 +482,9 @@ export function DashboardShell({ children, title, description }: DashboardShellP
                       className="action-quiet flex w-full cursor-pointer justify-start px-3"
                     >
                       {isDark ? (
-                        <svg className="h-4 w-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
-                        </svg>
+                        <Sun className="h-4 w-4 text-amber-400" aria-hidden="true" />
                       ) : (
-                        <svg className="h-4 w-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
-                        </svg>
+                        <Moon className="h-4 w-4 text-slate-400" aria-hidden="true" />
                       )}
                       <span className="flex-1 text-left">Theme</span>
                       <span className="status-badge">
@@ -411,9 +500,7 @@ export function DashboardShell({ children, title, description }: DashboardShellP
                       onClick={() => { setOpenMenu(null); signOut(); }}
                       className="flex w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-rose-600 transition hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-900/20"
                     >
-                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                      </svg>
+                      <LogOut className="h-4 w-4" aria-hidden="true" />
                       Logout
                     </button>
                   </div>
@@ -424,10 +511,45 @@ export function DashboardShell({ children, title, description }: DashboardShellP
         </header>
 
         {/* Content */}
-        <div className="animate-fade-in px-6 py-5 lg:px-8">
+        <div className="animate-fade-in px-4 py-5 pb-24 sm:px-6 lg:px-8 lg:pb-5">
           {children}
         </div>
       </main>
+
+      {!mobileSidebarOpen ? (
+        <nav
+          className="fixed inset-x-0 bottom-0 z-20 border-t border-slate-200 bg-white/95 shadow-[0_-8px_24px_rgba(15,23,42,0.06)] backdrop-blur lg:hidden dark:border-slate-800 dark:bg-slate-950/95"
+          aria-label="Primary navigation"
+          style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+        >
+          <div className="grid h-16 grid-cols-4 px-2">
+            {mainNavItems.map((item) => {
+              const isActive = item.match ? item.match(pathname) : pathname === item.href;
+              const ItemIcon = item.icon;
+              const accentStyle = navAccentStyles[item.accent];
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  aria-current={isActive ? "page" : undefined}
+                  className={`flex min-w-0 flex-col items-center justify-center gap-1 rounded-lg text-[11px] font-semibold transition-colors ${
+                    isActive
+                      ? accentStyle.mobile
+                      : "text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100"
+                  }`}
+                >
+                  <span className={`flex h-7 w-10 items-center justify-center rounded-lg transition-colors ${
+                    isActive ? accentStyle.pill : ""
+                  }`}>
+                    <ItemIcon className="h-5 w-5" aria-hidden="true" />
+                  </span>
+                  <span className="truncate">{item.label}</span>
+                </Link>
+              );
+            })}
+          </div>
+        </nav>
+      ) : null}
     </div>
   );
 }

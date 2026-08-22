@@ -91,7 +91,7 @@ function buildSelectQuery(options: ReembedOptions, embeddingModel: string) {
 
   if (options.userId) {
     params.push(options.userId);
-    conditions.push(`u.id = $${params.length}`);
+    conditions.push(`u.id = $${params.length}::text`);
   }
 
   const limitClause = options.limit ? `LIMIT ${options.limit}` : "";
@@ -205,7 +205,7 @@ async function main() {
                   true
                 ),
                 updated_at = now()
-              WHERE id = $4
+              WHERE id = $4::text
             `,
             toVectorLiteral(embedding),
             TUTURUUU_EMBEDDING_MODEL,

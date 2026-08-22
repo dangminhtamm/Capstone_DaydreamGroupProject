@@ -606,9 +606,9 @@ export class CalendarService {
                         true
                     ),
                     updated_at = now()
-                    WHERE user_id = ${userId}
+                    WHERE user_id = ${userId}::text
                       AND source_type = 'diary'
-                      AND source_id = ${diary.id}
+                      AND source_id = ${diary.id}::text
                 `;
 
                 await this.expireSearchCache(tx, userId);

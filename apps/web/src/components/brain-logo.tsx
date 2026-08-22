@@ -37,6 +37,7 @@ export function BrainLogo({
       viewBox="0 0 100 100"
       className="w-full h-full select-none"
       xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
     >
       <defs>
         <linearGradient id="comp-brain-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
@@ -165,7 +166,11 @@ export function BrainLogo({
 
   // If href is provided, wrap in Next Link, otherwise return static layout
   const renderedLogo = href ? (
-    <Link href={href} className="flex items-center gap-3 select-none outline-none">
+    <Link
+      href={href}
+      className="flex items-center gap-3 select-none outline-none"
+      aria-label={showText ? undefined : "DayDreamer"}
+    >
       {logoContent}
       {showText && (
         <div className="flex flex-col select-none">

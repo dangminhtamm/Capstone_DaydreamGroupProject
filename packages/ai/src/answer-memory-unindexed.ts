@@ -43,8 +43,8 @@ export async function retrieveUnindexedDiaryFallbackHits(
         LEFT JOIN indexing_outbox j
           ON j.job_type = 'index_memory'
          AND j.source_type = 'diary'
-         AND j.source_id = d.id
-        WHERE d.user_id = $1
+         AND j.source_id = d.id::text
+        WHERE d.user_id = $1::text
           AND (
             d.entry_date BETWEEN $2 AND $3
             OR (d.entry_date IS NULL AND d.created_at BETWEEN $2 AND $3)
@@ -102,7 +102,7 @@ export async function findDiariesCreatedInRangeWithDifferentEntryDate(
           d.entry_date,
           d.created_at
         FROM diary_entries d
-        WHERE d.user_id = $1
+        WHERE d.user_id = $1::text
           AND d.created_at BETWEEN $2 AND $3
           AND d.entry_date IS NOT NULL
           AND NOT (d.entry_date BETWEEN $2 AND $3)

@@ -1,12 +1,27 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { CalendarDays, ChevronLeft, ChevronRight, CircleAlert, Clock3 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
-import { getDiaryEntries, updateDiaryEntry, deleteDiaryEntry, type DiaryEntry, type UpdateDiaryPayload } from "@/lib/api-client";
+import { MOOD_META } from "@/lib/mood-meta";
+import {
+  deleteDiaryEntry,
+  getDiaryAttachmentContent,
+  getDiaryEntries,
+  updateDiaryEntry,
+  type DiaryEntry,
+  type UpdateDiaryPayload,
+} from "@/lib/api-client";
 import { TimelineList } from "./timeline-list";
-import { YearlyActivityView } from "./yearly-activity-view";
 
 type LoadState = "idle" | "loading" | "success" | "error";
+
+const MOOD_BAR_CLASS = {
+  great: "bg-cyan-500",
+  good: "bg-indigo-500",
+  neutral: "bg-slate-400",
+  bad: "bg-pink-500",
+} as const;
 
 function SkeletonCards() {
   return (
@@ -34,8 +49,8 @@ function SkeletonCards() {
 /* ─── Mini Calendar ─── */
 const WEEKDAYS = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
 
-function getEntryActivityDate(entry: DiaryEntry) {
-  return entry.entryDate ?? entry.createdAt;
+function getEntryActivityDate(entry: DiaryEntry, isAdmin: boolean) {
+  return isAdmin ? entry.entryDate ?? entry.createdAt : entry.createdAt;
 }
 
 function getLocalDateKey(value: string | Date) {
@@ -82,18 +97,18 @@ function MiniCalendar({
       {/* Header */}
       <div className="mb-3 flex items-center justify-between">
         <button type="button" onClick={prevMonth} className="cursor-pointer rounded-lg p-1 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-200">
-          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+          <ChevronLeft className="h-4 w-4" aria-hidden="true" />
         </button>
         <span className="text-sm font-semibold text-slate-800 dark:text-slate-200">{monthLabel}</span>
         <button type="button" onClick={nextMonth} className="cursor-pointer rounded-lg p-1 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-200">
-          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+          <ChevronRight className="h-4 w-4" aria-hidden="true" />
         </button>
       </div>
 
       {/* Weekday headers */}
       <div className="mb-1 grid grid-cols-7 text-center">
         {WEEKDAYS.map((d) => (
-          <span key={d} className="py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">{d}</span>
+          <span key={d} className="py-1 text-xs font-medium text-slate-400 dark:text-slate-500">{d}</span>
         ))}
       </div>
 
@@ -189,27 +204,32 @@ export function TimelineContainer() {
     setEntries((prev) => prev.filter((e) => e.id !== id));
   }, [getAccessToken]);
 
+  const handleLoadAttachmentAudio = useCallback(async (attachmentId: string) => {
+    return getDiaryAttachmentContent(attachmentId, getAccessToken());
+  }, [getAccessToken]);
+
   const sortedEntries = useMemo(() => {
     return [...entries].sort(
       (first, second) =>
-        new Date(getEntryActivityDate(second)).getTime() - new Date(getEntryActivityDate(first)).getTime(),
+        new Date(getEntryActivityDate(second, isAdmin)).getTime()
+        - new Date(getEntryActivityDate(first, isAdmin)).getTime(),
     );
-  }, [entries]);
+  }, [entries, isAdmin]);
 
   // Build set of date keys that have entries
   const entryDates = useMemo(() => {
     const set = new Set<string>();
     for (const e of entries) {
-      set.add(getLocalDateKey(getEntryActivityDate(e)));
+      set.add(getLocalDateKey(getEntryActivityDate(e, isAdmin)));
     }
     return set;
-  }, [entries]);
+  }, [entries, isAdmin]);
 
   // Filter entries by selected date
   const filteredEntries = useMemo(() => {
     if (!selectedDate) return sortedEntries;
-    return sortedEntries.filter((e) => getLocalDateKey(getEntryActivityDate(e)) === selectedDate);
-  }, [selectedDate, sortedEntries]);
+    return sortedEntries.filter((e) => getLocalDateKey(getEntryActivityDate(e, isAdmin)) === selectedDate);
+  }, [isAdmin, selectedDate, sortedEntries]);
 
   const moodStats = useMemo(() => {
     return entries.reduce<Record<string, number>>((counts, entry) => {
@@ -265,10 +285,8 @@ export function TimelineContainer() {
 
         {/* Overlay CTA */}
         <div className="-mt-32 relative z-10 enterprise-card p-8 text-center">
-          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-indigo-100 text-indigo-600 dark:bg-indigo-900/40 dark:text-indigo-400">
-            <svg className="h-7 w-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-lg bg-pink-100 text-pink-600 dark:bg-pink-950/40 dark:text-pink-300">
+            <Clock3 className="h-7 w-7" aria-hidden="true" />
           </div>
           <h3 className="mt-4 text-base font-bold text-slate-900 dark:text-slate-100">Your timeline will appear here</h3>
           <p className="mt-1.5 text-sm text-slate-500 dark:text-slate-400">Sign in to see your saved diary entries in a beautiful timeline.</p>
@@ -290,10 +308,8 @@ export function TimelineContainer() {
   if (state === "error") {
     return (
       <div className="rounded-lg border border-rose-200 bg-rose-50 p-8 text-center dark:border-rose-900/50 dark:bg-rose-950/20">
-        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-rose-100 text-rose-600 dark:bg-rose-900/40 dark:text-rose-400">
-          <svg className="h-7 w-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
+        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-lg bg-rose-100 text-rose-600 dark:bg-rose-900/40 dark:text-rose-400">
+          <CircleAlert className="h-7 w-7" aria-hidden="true" />
         </div>
         <h3 className="mt-4 text-base font-bold text-slate-900 dark:text-slate-100">Could not load entries</h3>
         <p className="mt-1.5 text-sm text-slate-500 dark:text-slate-400">{errorMessage}</p>
@@ -309,23 +325,25 @@ export function TimelineContainer() {
 
   return (
     <div className="space-y-6">
-      <YearlyActivityView
-        entries={entries}
-        selectedDate={selectedDate}
-        onSelectDate={setSelectedDate}
-      />
       <div className="grid gap-6 lg:grid-cols-[1fr_260px]">
         <div>
           {selectedDate && (
-            <div className="mb-4 flex items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50/50 px-4 py-2 dark:border-indigo-800 dark:bg-indigo-900/20">
-              <svg className="h-4 w-4 text-indigo-600 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-              <span className="text-sm font-medium text-indigo-700 dark:text-indigo-300">
+            <div className="mb-4 flex items-center gap-2 rounded-lg bg-pink-50/70 px-4 py-2 dark:bg-pink-950/25">
+              <CalendarDays className="h-4 w-4 text-pink-600 dark:text-pink-300" aria-hidden="true" />
+              <span className="text-sm font-medium text-pink-700 dark:text-pink-300">
                 Showing entries for {new Date(selectedDate + "T00:00:00").toLocaleDateString("default", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
               </span>
-              <span className="ml-1 text-xs text-indigo-500 dark:text-indigo-400">({filteredEntries.length})</span>
+              <span className="ml-1 text-xs text-pink-500 dark:text-pink-400">({filteredEntries.length})</span>
             </div>
           )}
-          <TimelineList key={selectedDate ?? "all"} entries={filteredEntries} onUpdate={handleUpdate} onDelete={handleDelete} isAdmin={isAdmin} />
+          <TimelineList
+            key={selectedDate ?? "all"}
+            entries={filteredEntries}
+            onUpdate={handleUpdate}
+            onDelete={handleDelete}
+            onLoadAttachmentAudio={handleLoadAttachmentAudio}
+            isAdmin={isAdmin}
+          />
         </div>
         <aside className="order-first lg:order-last">
           <div className="sticky top-28">
@@ -336,7 +354,7 @@ export function TimelineContainer() {
             />
             {/* Quick stats */}
             <div className="mt-3 enterprise-card p-4">
-              <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Writing snapshot</p>
+              <p className="text-[13px] font-semibold text-slate-500 dark:text-slate-400">Writing snapshot</p>
               <div className="mt-2 grid grid-cols-2 gap-3">
                 <div className="text-center">
                   <p className="text-xl font-bold text-slate-900 dark:text-slate-100">{entries.length}</p>
@@ -349,23 +367,27 @@ export function TimelineContainer() {
               </div>
             </div>
             <div className="mt-3 enterprise-card p-4">
-              <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Mood pattern</p>
+              <p className="text-[13px] font-semibold text-slate-500 dark:text-slate-400">Mood pattern</p>
               <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                {dominantMood ? `Most frequent: ${dominantMood.value[0].toUpperCase()}${dominantMood.value.slice(1)}` : "Add moods in Diary"}
+                {dominantMood ? `Most frequent: ${MOOD_META[dominantMood.value].label}` : "Add moods in Diary"}
               </p>
               <div className="mt-3 space-y-2">
                 {(["great", "good", "neutral", "bad"] as const).map((mood) => {
                   const count = moodStats[mood] ?? 0;
                   const width = entries.length ? Math.round((count / entries.length) * 100) : 0;
+                  const MoodIcon = MOOD_META[mood].icon;
                   return (
                     <div key={mood}>
                       <div className="mb-1 flex items-center justify-between text-xs">
-                        <span className="capitalize text-slate-600 dark:text-slate-300">{mood}</span>
+                        <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300">
+                          <MoodIcon className="h-3.5 w-3.5" aria-hidden="true" />
+                          {MOOD_META[mood].label}
+                        </span>
                         <span className="font-semibold text-slate-500 dark:text-slate-400">{count}</span>
                       </div>
                       <div className="h-1.5 rounded-full bg-slate-100 dark:bg-slate-700">
                         <div
-                          className="h-1.5 rounded-full bg-indigo-500 transition-all"
+                          className={`h-1.5 rounded-full transition-all ${MOOD_BAR_CLASS[mood]}`}
                           style={{ width: `${width}%` }}
                         />
                       </div>
@@ -376,7 +398,7 @@ export function TimelineContainer() {
             </div>
             {topTags.length > 0 && (
               <div className="mt-3 enterprise-card p-4">
-                <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Top tags</p>
+                <p className="text-[13px] font-semibold text-slate-500 dark:text-slate-400">Top tags</p>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {topTags.map(([tag, count]) => (
                     <span
