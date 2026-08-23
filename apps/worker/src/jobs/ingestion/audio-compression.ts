@@ -3,9 +3,9 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-// Base64 adds roughly 33% to the JSON request. Keeping raw chunks below 600 KB
-// leaves room for the prompt and request envelope under a 1 MB gateway limit.
-export const MAX_TRANSCRIPTION_CHUNK_BYTES = 600_000;
+// Base64 adds roughly 33% to the JSON request. This leaves generous room for
+// the prompt and provider envelope under a 1 MB gateway limit.
+export const MAX_TRANSCRIPTION_CHUNK_BYTES = 500_000;
 
 const TARGET_BITRATE = '48k';
 const TARGET_SAMPLE_RATE = 16_000;
@@ -19,13 +19,17 @@ export interface PreparedAudioChunk {
 
 /**
  * Make audio safe to embed in the transcription API's JSON request.
- * Small files pass through unchanged; larger files are re-encoded and split.
+ * Small MP3 files pass through unchanged. Other formats are normalized to MP3;
+ * larger files are also split so every JSON request stays within its budget.
  */
 export async function prepareAudioChunks(
   inputBuffer: Buffer,
   inputMimeType: string,
 ): Promise<PreparedAudioChunk[]> {
-  if (inputBuffer.length <= MAX_TRANSCRIPTION_CHUNK_BYTES) {
+  if (
+    inputBuffer.length <= MAX_TRANSCRIPTION_CHUNK_BYTES &&
+    isMp3MimeType(inputMimeType)
+  ) {
     return [{ buffer: inputBuffer, mimeType: inputMimeType }];
   }
 
@@ -139,4 +143,9 @@ function mimeTypeToExtension(mimeType: string): string {
     'audio/x-wav': '.wav',
   };
   return map[mimeType.toLowerCase()] ?? '.bin';
+}
+
+function isMp3MimeType(mimeType: string) {
+  const normalized = mimeType.toLowerCase();
+  return normalized === 'audio/mpeg' || normalized === 'audio/mp3';
 }

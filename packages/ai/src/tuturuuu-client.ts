@@ -51,7 +51,19 @@ export type TuturuuuResponseInput =
       content: Array<
         | { type: "input_text"; text: string }
         | { type: "input_image"; image_url: string }
-        | { type: "input_file"; filename: string; file_data: string }
+        | {
+            type: "input_audio";
+            input_audio: {
+              data: string;
+              format: "mp3" | "wav";
+            };
+          }
+        | {
+            type: "input_file";
+            filename: string;
+            file_data?: string;
+            file_url?: string;
+          }
       >;
     }>;
 
@@ -106,7 +118,10 @@ export function normalizeTuturuuuModelName(
 export async function generateTuturuuuText(
   options: TuturuuuGenerateTextOptions,
 ): Promise<TuturuuuGenerateTextResult> {
-  const model = normalizeTuturuuuModelName(options.model, DEFAULT_TUTURUUU_RESPONSE_MODEL);
+  const model = normalizeTuturuuuModelName(
+    options.model,
+    DEFAULT_TUTURUUU_RESPONSE_MODEL,
+  );
   const requestId = options.requestId ?? randomUUID();
   const payload = await requestTuturuuuJson("/responses", {
     method: "POST",
@@ -127,7 +142,9 @@ export async function generateTuturuuuText(
 
   return {
     output,
-    finishReason: readString(payload, "finish_reason") ?? readString(payload, "finishReason"),
+    finishReason:
+      readString(payload, "finish_reason") ??
+      readString(payload, "finishReason"),
     usage: normalizeUsage((payload as Record<string, unknown>).usage),
     model: readString(payload, "model") ?? model,
     requestId: payload.requestId,
@@ -136,14 +153,22 @@ export async function generateTuturuuuText(
 
 export async function generateTuturuuuVisionText(options: {
   prompt: string;
-  base64Data: string;
+  base64Data?: string;
+  imageUrl?: string;
   mimeType: string;
   model?: string;
   maxOutputTokens?: number;
   idempotencyKey?: string;
   requestId?: string;
 }): Promise<TuturuuuGenerateTextResult> {
-  const dataUrl = `data:${options.mimeType};base64,${options.base64Data}`;
+  const imageUrl =
+    options.imageUrl ??
+    (options.base64Data
+      ? `data:${options.mimeType};base64,${options.base64Data}`
+      : undefined);
+  if (!imageUrl) {
+    throw new Error("Vision input requires imageUrl or base64Data.");
+  }
 
   return generateTuturuuuText({
     model: options.model,
@@ -156,8 +181,51 @@ export async function generateTuturuuuVisionText(options: {
         role: "user",
         content: [
           { type: "input_text", text: options.prompt },
-          { type: "input_image", image_url: dataUrl },
+          { type: "input_image", image_url: imageUrl },
         ],
+      },
+    ],
+  });
+}
+
+export async function generateTuturuuuFileText(options: {
+  prompt: string;
+  fileName: string;
+  fileUrl?: string;
+  base64Data?: string;
+  mimeType: string;
+  model?: string;
+  maxOutputTokens?: number;
+  idempotencyKey?: string;
+  requestId?: string;
+}): Promise<TuturuuuGenerateTextResult> {
+  const fileInput = options.fileUrl
+    ? {
+        type: "input_file" as const,
+        filename: options.fileName,
+        file_url: options.fileUrl,
+      }
+    : options.base64Data
+      ? {
+          type: "input_file" as const,
+          filename: options.fileName,
+          file_data: `data:${options.mimeType};base64,${options.base64Data}`,
+        }
+      : null;
+  if (!fileInput) {
+    throw new Error("File input requires fileUrl or base64Data.");
+  }
+
+  return generateTuturuuuText({
+    model: options.model,
+    prompt: options.prompt,
+    maxOutputTokens: options.maxOutputTokens,
+    idempotencyKey: options.idempotencyKey,
+    requestId: options.requestId,
+    responseInput: [
+      {
+        role: "user",
+        content: [{ type: "input_text", text: options.prompt }, fileInput],
       },
     ],
   });
@@ -173,7 +241,7 @@ export async function generateTuturuuuAudioTranscript(options: {
   idempotencyKey?: string;
   requestId?: string;
 }): Promise<TuturuuuGenerateTextResult> {
-  const fileData = `data:${options.mimeType};base64,${options.base64Data}`;
+  const format = getAudioInputFormat(options.mimeType, options.fileName);
 
   return generateTuturuuuText({
     model: options.model,
@@ -187,9 +255,11 @@ export async function generateTuturuuuAudioTranscript(options: {
         content: [
           { type: "input_text", text: options.prompt },
           {
-            type: "input_file",
-            filename: options.fileName,
-            file_data: fileData,
+            type: "input_audio",
+            input_audio: {
+              data: options.base64Data,
+              format,
+            },
           },
         ],
       },
@@ -197,10 +267,39 @@ export async function generateTuturuuuAudioTranscript(options: {
   });
 }
 
+function getAudioInputFormat(
+  mimeType: string,
+  fileName: string,
+): "mp3" | "wav" {
+  const normalizedMimeType = mimeType.toLowerCase();
+  const normalizedFileName = fileName.toLowerCase();
+  if (
+    normalizedMimeType === "audio/wav" ||
+    normalizedMimeType === "audio/x-wav" ||
+    normalizedFileName.endsWith(".wav")
+  ) {
+    return "wav";
+  }
+  if (
+    normalizedMimeType === "audio/mpeg" ||
+    normalizedMimeType === "audio/mp3" ||
+    normalizedFileName.endsWith(".mp3")
+  ) {
+    return "mp3";
+  }
+
+  throw new Error(
+    `Audio input must be normalized to MP3 or WAV before transcription (received ${mimeType}).`,
+  );
+}
+
 export async function embedTuturuuu(
   options: TuturuuuEmbeddingOptions,
 ): Promise<TuturuuuEmbeddingResult> {
-  const model = normalizeTuturuuuModelName(options.model, DEFAULT_TUTURUUU_EMBEDDING_MODEL);
+  const model = normalizeTuturuuuModelName(
+    options.model,
+    DEFAULT_TUTURUUU_EMBEDDING_MODEL,
+  );
   const requestId = options.requestId ?? randomUUID();
   const payload = await requestTuturuuuJson("/embeddings", {
     method: "POST",
@@ -245,18 +344,27 @@ async function requestTuturuuuJson(
         ? { "Idempotency-Key": options.idempotencyKey }
         : {}),
     },
-    body: options.body ? JSON.stringify(stripUndefined(options.body)) : undefined,
+    body: options.body
+      ? JSON.stringify(stripUndefined(options.body))
+      : undefined,
   });
 
   const payload = await response.json().catch(() => null);
-  const responseRequestId = response.headers.get("x-request-id") ?? options.requestId;
+  const responseRequestId =
+    response.headers.get("x-request-id") ?? options.requestId;
   if (!response.ok) {
-    const error = buildTuturuuuError(payload, response.status, responseRequestId);
+    const error = buildTuturuuuError(
+      payload,
+      response.status,
+      responseRequestId,
+    );
     throw error;
   }
 
   if (!payload || typeof payload !== "object") {
-    throw new Error(`Tuturuuu AI API returned a non-JSON response (${responseRequestId}).`);
+    throw new Error(
+      `Tuturuuu AI API returned a non-JSON response (${responseRequestId}).`,
+    );
   }
 
   return {
@@ -270,13 +378,18 @@ function buildTuturuuuError(
   status: number,
   requestId: string,
 ): Error {
-  const record = payload && typeof payload === "object"
-    ? payload as Record<string, unknown>
-    : {};
-  const nested = record.error && typeof record.error === "object"
-    ? record.error as Record<string, unknown>
-    : {};
-  const code = readString(nested, "code") ?? readString(record, "code") ?? "request_failed";
+  const record =
+    payload && typeof payload === "object"
+      ? (payload as Record<string, unknown>)
+      : {};
+  const nested =
+    record.error && typeof record.error === "object"
+      ? (record.error as Record<string, unknown>)
+      : {};
+  const code =
+    readString(nested, "code") ??
+    readString(record, "code") ??
+    "request_failed";
   const message =
     readString(nested, "message") ??
     readString(record, "message") ??
@@ -288,7 +401,8 @@ function buildTuturuuuError(
 }
 
 function extractOutputText(payload: Record<string, unknown>): string {
-  const direct = readString(payload, "output_text") ?? readString(payload, "outputText");
+  const direct =
+    readString(payload, "output_text") ?? readString(payload, "outputText");
   if (direct) return direct;
 
   const output = payload.output;
@@ -303,7 +417,9 @@ function extractOutputText(payload: Record<string, unknown>): string {
       return content.map((part) => {
         if (!part || typeof part !== "object") return "";
         const record = part as Record<string, unknown>;
-        return readString(record, "text") ?? readString(record, "output_text") ?? "";
+        return (
+          readString(record, "text") ?? readString(record, "output_text") ?? ""
+        );
       });
     })
     .filter(Boolean)
@@ -333,7 +449,9 @@ function normalizeUsage(value: unknown): TuturuuuTokenUsage | undefined {
   return {
     inputTokens: readNumber(record.input_tokens ?? record.inputTokens),
     outputTokens: readNumber(record.output_tokens ?? record.outputTokens),
-    reasoningTokens: readNumber(record.reasoning_tokens ?? record.reasoningTokens),
+    reasoningTokens: readNumber(
+      record.reasoning_tokens ?? record.reasoningTokens,
+    ),
     totalTokens: readNumber(record.total_tokens ?? record.totalTokens),
   };
 }
@@ -345,10 +463,15 @@ function stripUndefined<T extends Record<string, unknown>>(value: T): T {
 }
 
 function coerceNumberArray(value: unknown[]): number[] {
-  return value.map((item) => Number(item)).filter((item) => Number.isFinite(item));
+  return value
+    .map((item) => Number(item))
+    .filter((item) => Number.isFinite(item));
 }
 
-function readString(record: Record<string, unknown>, key: string): string | undefined {
+function readString(
+  record: Record<string, unknown>,
+  key: string,
+): string | undefined {
   const value = record[key];
   return typeof value === "string" ? value : undefined;
 }

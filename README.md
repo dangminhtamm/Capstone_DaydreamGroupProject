@@ -159,6 +159,7 @@ Capstone_DaydreamGroupProject/
 
 - **Node.js** ≥ 20
 - **pnpm** ≥ 10
+- **ffmpeg** available on `PATH` for audio normalization and local transcription
 - **PostgreSQL** with the [`pgvector`](https://github.com/pgvector/pgvector) extension enabled
 - A [Supabase](https://supabase.com/) project (for Auth & hosted Postgres)
 - A [Google Cloud](https://console.cloud.google.com/) project with Calendar API enabled
@@ -199,8 +200,12 @@ TUTURUUU_AI_API_KEY="ttr_ai_your-one-time-secret"
 TUTURUUU_AI_BASE_URL="https://ai.tuturuuu.com/v1"      # optional, defaults to Tuturuuu production
 TUTURUUU_EMBEDDING_MODEL="google/gemini-embedding-2"   # optional; confirm allowed models with GET /v1/models
 TUTURUUU_ANSWER_MODEL="google/gemini-3.5-flash-lite"  # optional; recommended low-cost answer model
-TUTURUUU_TRANSCRIPTION_MODEL="google/gemini-3.5-flash-lite" # optional; audio transcription via Tuturuuu file input
-AUDIO_TRANSCRIPTION_MAX_OUTPUT_TOKENS=6000            # optional; 500-12000
+AUDIO_TRANSCRIPTION_PROVIDER="local"                  # local (default) uses Whisper; tuturuuu is opt-in
+WHISPER_MODEL="Xenova/whisper-tiny"                  # optional multilingual local ASR model
+WHISPER_CACHE_DIR="/tmp/second-brain-whisper-cache"  # optional; persist this directory in production
+AUDIO_TRANSCRIPTION_LANGUAGE=""                       # optional ISO language code; blank enables detection
+TUTURUUU_TRANSCRIPTION_MODEL="google/gemini-3.5-flash-lite" # only used when provider=tuturuuu
+AUDIO_TRANSCRIPTION_MAX_OUTPUT_TOKENS=6000            # only used when provider=tuturuuu; 500-12000
 INDEXING_JOB_DELAY_MS="15000"                          # optional, avoids rate limits during local drain
 INDEXING_WORKER_BATCH_SIZE="2"                         # optional; small claims keep leases fresh
 INDEXING_LEASE_TIMEOUT_MS="300000"                     # optional; stale processing lease timeout

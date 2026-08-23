@@ -7,6 +7,6 @@ export class CopilotDto {
 
   @IsString()
   @IsNotEmpty()
-  @IsIn(['continue', 'fix_grammar', 'expand', 'summarize'])
+  @IsIn(['continue', 'fix_grammar', 'expand', 'summarize', 'reflect'])
   action: string;
 }

@@ -131,6 +131,13 @@ function isAttachmentIntent(normalizedQuestion: string): boolean {
   return includesAny(normalizedQuestion, [
     "attachment",
     "attachments",
+    "attach",
+    "attached",
+    "audio",
+    "audio file",
+    "mp3",
+    "recording",
+    "transcript",
     "file",
     "pdf",
     "document",

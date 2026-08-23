@@ -1,4 +1,8 @@
-import { Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   DEFAULT_TUTURUUU_EMBEDDING_MODEL,
   TUTURUUU_EMBEDDING_MODEL,
@@ -27,7 +31,7 @@ import {
 } from '../auth/user-role';
 
 const DEFAULT_SEARCH_LIMIT = 8;
-const SEARCH_CACHE_PIPELINE_VERSION = 'ai-recall-v10-year-aware';
+const SEARCH_CACHE_PIPELINE_VERSION = 'ai-recall-v11-attachment-media';
 const DEFAULT_TUTURUUU_ANSWER_MODEL = 'google/gemini-3.5-flash-lite';
 
 type SearchAuthInput = string | AuthenticatedRequestUser;
@@ -53,7 +57,9 @@ export class SearchService {
     }
 
     const normalizedQuestion = queryDto.question.trim();
-    const lang = queryDto.responseLanguage ?? this.inferResponseLanguage(normalizedQuestion);
+    const lang =
+      queryDto.responseLanguage ??
+      this.inferResponseLanguage(normalizedQuestion);
     const timeZone = queryDto.timeZone?.trim() || undefined;
     const cacheVersion = this.getSearchCacheVersion();
 
@@ -95,7 +101,9 @@ export class SearchService {
         if (cached) {
           const cachedAnalytics = this.parseJsonObject(cached.analytics_json);
           if (!this.isCacheableStoredAnswer(cachedAnalytics, cached.answer)) {
-            console.warn('Skipping stale/unsafe search cache entry with fallback or model error.');
+            console.warn(
+              'Skipping stale/unsafe search cache entry with fallback or model error.',
+            );
           } else {
             return {
               answer: cached.answer,
@@ -116,26 +124,37 @@ export class SearchService {
       const filters: {
         chunkType?: string;
         sourceType?: string;
+        sourceId?: string;
         startDate?: Date;
         endDate?: Date;
       } = {};
       if (queryDto.chunkType) filters.chunkType = queryDto.chunkType;
       if (queryDto.sourceType) filters.sourceType = queryDto.sourceType;
+      if (queryDto.sourceId) filters.sourceId = queryDto.sourceId;
       if (queryDto.startDate) filters.startDate = new Date(queryDto.startDate);
       if (queryDto.endDate) filters.endDate = new Date(queryDto.endDate);
 
-      const result = await answerMemory(normalizedQuestion, user.id, this.prisma, {
-        limit: queryDto.limit ?? DEFAULT_SEARCH_LIMIT,
-        maxDistance: queryDto.maxDistance,
-        responseLanguage: lang,
-        answerStrategy: queryDto.answerStrategy ?? 'auto',
-        timeZone,
-        filters,
-        embeddingProvider: getQueryEmbeddingProvider(),
-      });
+      const result = await answerMemory(
+        normalizedQuestion,
+        user.id,
+        this.prisma,
+        {
+          limit: queryDto.limit ?? DEFAULT_SEARCH_LIMIT,
+          maxDistance: queryDto.maxDistance,
+          responseLanguage: lang,
+          answerStrategy: queryDto.answerStrategy ?? 'auto',
+          timeZone,
+          filters,
+          embeddingProvider: getQueryEmbeddingProvider(),
+        },
+      );
 
-      const answerMode = result.answerMode ?? result.analytics?.answerMode ?? 'tuturuuu';
-      const responseAnalytics = this.withCacheVersion(result.analytics ?? null, cacheVersion);
+      const answerMode =
+        result.answerMode ?? result.analytics?.answerMode ?? 'tuturuuu';
+      const responseAnalytics = this.withCacheVersion(
+        result.analytics ?? null,
+        cacheVersion,
+      );
       const response = {
         answer: result.answer,
         confidence: result.confidence,
@@ -183,8 +202,12 @@ export class SearchService {
         question: normalizedQuestion,
         answer: result.answer,
         confidence: result.confidence,
-        sourcesJson: result.citations?.length ? JSON.stringify(result.citations) : null,
-        analyticsJson: responseAnalytics ? JSON.stringify(responseAnalytics) : null,
+        sourcesJson: result.citations?.length
+          ? JSON.stringify(result.citations)
+          : null,
+        analyticsJson: responseAnalytics
+          ? JSON.stringify(responseAnalytics)
+          : null,
         responseLanguage: lang,
         tokenCount: responseAnalytics?.tokenUsage?.totalTokens ?? 0,
       }).catch((err) => {
@@ -194,7 +217,9 @@ export class SearchService {
       return response;
     } catch (error) {
       console.error('Failed to answer memory search question:', error);
-      throw new InternalServerErrorException('Failed to answer memory search question.');
+      throw new InternalServerErrorException(
+        'Failed to answer memory search question.',
+      );
     }
   }
 
@@ -241,6 +266,7 @@ export class SearchService {
     return !(
       queryDto.chunkType ||
       queryDto.sourceType ||
+      queryDto.sourceId ||
       queryDto.startDate ||
       queryDto.endDate ||
       queryDto.maxDistance ||
@@ -259,7 +285,9 @@ export class SearchService {
 
   private inferResponseLanguage(question: string): 'en' | 'vi' {
     const hasVietnameseDiacritics =
-      /[ăâđêôơưáàảãạấầẩẫậắằẳẵặéèẻẽẹếềểễệíìỉĩịóòỏõọốồổỗộớờởỡợúùủũụứừửữựýỳỷỹỵ]/iu.test(question);
+      /[ăâđêôơưáàảãạấầẩẫậắằẳẵặéèẻẽẹếềểễệíìỉĩịóòỏõọốồổỗộớờởỡợúùủũụứừửữựýỳỷỹỵ]/iu.test(
+        question,
+      );
     const hasVietnameseWords =
       /\b(làm gì|hôm nay|hôm qua|ngày|tháng|tuần|tôi|mình|nhật ký|tâm trạng|cảm xúc|dựa trên|phân tích)\b/iu.test(
         question.toLowerCase(),
@@ -299,18 +327,26 @@ export class SearchService {
     if (!this.hasCurrentCacheVersion(value.analytics)) return false;
 
     const analyticsAnswerMode = this.getAnalyticsAnswerMode(value.analytics);
-    const answerMode = value.answerMode === 'cache' ? analyticsAnswerMode : value.answerMode;
+    const answerMode =
+      value.answerMode === 'cache' ? analyticsAnswerMode : value.answerMode;
     return ['tuturuuu', 'fast_path'].includes(answerMode ?? '');
   }
 
-  private isCacheableStoredAnswer(analytics: Record<string, unknown> | null, answer?: string) {
+  private isCacheableStoredAnswer(
+    analytics: Record<string, unknown> | null,
+    answer?: string,
+  ) {
     if (this.isLikelyIncompleteAnswer(answer)) return false;
     if (!analytics) return false;
     if (!this.hasCurrentCacheVersion(analytics)) return false;
 
-    const status = typeof analytics.status === 'string' ? analytics.status : undefined;
+    const status =
+      typeof analytics.status === 'string' ? analytics.status : undefined;
     const answerMode = this.getAnalyticsAnswerMode(analytics);
-    return status === 'success' && ['tuturuuu', 'fast_path'].includes(answerMode ?? '');
+    return (
+      status === 'success' &&
+      ['tuturuuu', 'fast_path'].includes(answerMode ?? '')
+    );
   }
 
   private getAnalyticsAnswerMode(analytics: unknown) {
@@ -341,8 +377,12 @@ export class SearchService {
   private withCacheVersion<T extends Record<string, any> | null>(
     analytics: T,
     cacheVersion: string,
-  ): T & { cacheVersion: string } | null {
-    if (!analytics || typeof analytics !== 'object' || Array.isArray(analytics)) {
+  ): (T & { cacheVersion: string }) | null {
+    if (
+      !analytics ||
+      typeof analytics !== 'object' ||
+      Array.isArray(analytics)
+    ) {
       return null;
     }
 
@@ -353,7 +393,11 @@ export class SearchService {
   }
 
   private hasCurrentCacheVersion(analytics: unknown) {
-    if (!analytics || typeof analytics !== 'object' || Array.isArray(analytics)) {
+    if (
+      !analytics ||
+      typeof analytics !== 'object' ||
+      Array.isArray(analytics)
+    ) {
       return false;
     }
 
@@ -378,12 +422,16 @@ export class SearchService {
     if (!hasTerminalPunctuation && lastWord.length <= 1) return true;
     if (
       !hasTerminalPunctuation &&
-      /\b(?:to claim|claim|because|because of|due to|in order to|so that|such as|for example|including|include)$/iu.test(normalized)
+      /\b(?:to claim|claim|because|because of|due to|in order to|so that|such as|for example|including|include)$/iu.test(
+        normalized,
+      )
     ) {
       return true;
     }
 
-    return /\b(?:minh|ban|ve|vi|boi|any|about|because|the|a|an|is|are|was|were|to|for|of|and|or)$/iu.test(normalized);
+    return /\b(?:minh|ban|ve|vi|boi|any|about|because|the|a|an|is|are|was|were|to|for|of|and|or)$/iu.test(
+      normalized,
+    );
   }
 
   private debugTraceEnabled() {
@@ -437,10 +485,14 @@ export class SearchService {
   }
 }
 
-function normalizeTuturuuuModelForCache(value: string | undefined, fallback: string) {
+function normalizeTuturuuuModelForCache(
+  value: string | undefined,
+  fallback: string,
+) {
   const trimmed = value?.trim();
   if (!trimmed) return fallback;
-  if (trimmed === 'gemini-embedding-001') return DEFAULT_TUTURUUU_EMBEDDING_MODEL;
+  if (trimmed === 'gemini-embedding-001')
+    return DEFAULT_TUTURUUU_EMBEDDING_MODEL;
   if (trimmed === 'gemini-2.5-flash' || trimmed === 'gemini-2.5-flash-lite') {
     return DEFAULT_TUTURUUU_ANSWER_MODEL;
   }

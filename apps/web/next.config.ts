@@ -17,6 +17,13 @@ const connectSrc = [
   "https://*.supabase.co",
   "wss://*.supabase.co",
 ].filter((value): value is string => Boolean(value));
+const mediaSrc = [
+  "'self'",
+  "blob:",
+  apiOrigin,
+  supabaseOrigin,
+  "https://*.supabase.co",
+].filter((value): value is string => Boolean(value));
 
 const contentSecurityPolicy = [
   "default-src 'self'",
@@ -26,6 +33,7 @@ const contentSecurityPolicy = [
   "form-action 'self'",
   `connect-src ${uniqueValues(connectSrc).join(" ")}`,
   "img-src 'self' data: blob: https://lh3.googleusercontent.com https://*.googleusercontent.com https://drive.google.com",
+  `media-src ${uniqueValues(mediaSrc).join(" ")}`,
   "font-src 'self' data:",
   "style-src 'self' 'unsafe-inline'",
   `script-src 'self' 'unsafe-inline'${isProduction ? "" : " 'unsafe-eval'"}`,
@@ -63,7 +71,7 @@ const nextConfig: NextConfig = {
           },
           {
             key: "Permissions-Policy",
-            value: "camera=(), microphone=(), geolocation=()",
+            value: "camera=(), microphone=(self), geolocation=()",
           },
           {
             key: "Content-Security-Policy",

@@ -9,6 +9,9 @@ export interface RetrievalFilters {
   chunkTypes?: string[];
   sourceType?: string;
   sourceTypes?: string[];
+  sourceId?: string;
+  sourceIds?: string[];
+  fileTypePrefixes?: string[];
   preferredChunkTypes?: string[];
   preferredSourceTypes?: string[];
   startDate?: Date;
@@ -74,7 +77,12 @@ export async function retrieveMemoryLexicalOnly(
   const sourceTypeBoost = buildSourceTypeBoost(filters);
   const chunkTypeBoost = buildChunkTypeBoost(filters);
   const searchDocument = buildSearchDocument();
-  const entityRankingCte = buildEntityRankingCte(query, userId, filters, candidateLimit);
+  const entityRankingCte = buildEntityRankingCte(
+    query,
+    userId,
+    filters,
+    candidateLimit,
+  );
 
   let rawResults: MemorySearchHit[] = [];
   try {
@@ -165,7 +173,8 @@ export async function retrieveMemoryLexicalOnly(
     },
   );
 
-  if (!strictResults.length) return temporalResults.map(markEmbeddingErrorLexicalFallback);
+  if (!strictResults.length)
+    return temporalResults.map(markEmbeddingErrorLexicalFallback);
 
   return dedupeHits([
     ...strictResults,
@@ -197,7 +206,12 @@ export async function retrieveMemoryWithEmbedding(
   const sourceTypeBoost = buildSourceTypeBoost(filters);
   const chunkTypeBoost = buildChunkTypeBoost(filters);
   const searchDocument = buildSearchDocument();
-  const entityRankingCte = buildEntityRankingCte(query, userId, filters, candidateLimit);
+  const entityRankingCte = buildEntityRankingCte(
+    query,
+    userId,
+    filters,
+    candidateLimit,
+  );
 
   let rawResults: MemorySearchHit[] = [];
   try {
@@ -337,10 +351,16 @@ export async function retrieveMemoryWithEmbedding(
     return strictResults;
   }
 
-  const temporalResults = await retrieveTemporalFallback(dbClient, whereClause, vectorString, limit, {
-    sourceTypeBoost,
-    chunkTypeBoost,
-  });
+  const temporalResults = await retrieveTemporalFallback(
+    dbClient,
+    whereClause,
+    vectorString,
+    limit,
+    {
+      sourceTypeBoost,
+      chunkTypeBoost,
+    },
+  );
 
   if (!strictResults.length) return temporalResults;
 
@@ -498,14 +518,18 @@ function buildEntityRankingCte(
 ): PrismaSql {
   const terms = extractEntityQueryTerms(query);
   const normalizedQuery = normalizeEntityText(query);
-  const searchableTerms = terms.length ? terms : ["secondbrain-no-entity-match"];
+  const searchableTerms = terms.length
+    ? terms
+    : ["secondbrain-no-entity-match"];
   const entityValue = Prisma.sql`
     COALESCE(NULLIF(entity_mentions.entity_value_normalized, ''), lower(entity_mentions.entity_value))
   `;
   const exactMatch = Prisma.sql`${entityValue} IN (${Prisma.join(searchableTerms)})`;
   const fullValueMatch = Prisma.sql`POSITION(${entityValue} IN ${normalizedQuery}) > 0`;
   const partialMatch = Prisma.sql`(${Prisma.join(
-    searchableTerms.map((term) => Prisma.sql`${entityValue} LIKE ${`%${term}%`}`),
+    searchableTerms.map(
+      (term) => Prisma.sql`${entityValue} LIKE ${`%${term}%`}`,
+    ),
     " OR ",
   )})`;
   const entityWhereClause = buildEntityWhereClause(userId, filters);
@@ -583,9 +607,11 @@ export function extractEntityQueryTerms(query: string): string[] {
   ]);
 
   const terms = normalizeEntityText(query).match(/[\p{L}\p{N}_@.-]+/gu) ?? [];
-  return [...new Set(
-    terms.filter((term) => term.length >= 3 && !stopwords.has(term)),
-  )].slice(0, 10);
+  return [
+    ...new Set(
+      terms.filter((term) => term.length >= 3 && !stopwords.has(term)),
+    ),
+  ].slice(0, 10);
 }
 
 function normalizeEntityText(value: string) {
@@ -598,7 +624,10 @@ function normalizeEntityText(value: string) {
     .trim();
 }
 
-function buildWhereClause(userId: string, filters: RetrievalFilters): PrismaSql {
+function buildWhereClause(
+  userId: string,
+  filters: RetrievalFilters,
+): PrismaSql {
   const conditions: PrismaSql[] = [Prisma.sql`user_id = ${userId}::text`];
 
   if (filters.chunkType) {
@@ -606,7 +635,9 @@ function buildWhereClause(userId: string, filters: RetrievalFilters): PrismaSql 
   }
 
   if (filters.chunkTypes?.length) {
-    conditions.push(Prisma.sql`chunk_type IN (${Prisma.join(filters.chunkTypes)})`);
+    conditions.push(
+      Prisma.sql`chunk_type IN (${Prisma.join(filters.chunkTypes)})`,
+    );
   }
 
   if (filters.sourceType) {
@@ -614,7 +645,32 @@ function buildWhereClause(userId: string, filters: RetrievalFilters): PrismaSql 
   }
 
   if (filters.sourceTypes?.length) {
-    conditions.push(Prisma.sql`source_type IN (${Prisma.join(filters.sourceTypes)})`);
+    conditions.push(
+      Prisma.sql`source_type IN (${Prisma.join(filters.sourceTypes)})`,
+    );
+  }
+
+  if (filters.sourceId) {
+    conditions.push(Prisma.sql`source_id = ${filters.sourceId}::text`);
+  }
+
+  if (filters.sourceIds?.length) {
+    conditions.push(
+      Prisma.sql`source_id IN (${Prisma.join(filters.sourceIds)})`,
+    );
+  }
+
+  const fileTypePrefixes = normalizeStringList(filters.fileTypePrefixes);
+  if (fileTypePrefixes.length) {
+    conditions.push(
+      Prisma.sql`(${Prisma.join(
+        fileTypePrefixes.map(
+          (prefix) =>
+            Prisma.sql`coalesce(metadata->>'fileType', '') LIKE ${`${prefix}%`}`,
+        ),
+        " OR ",
+      )})`,
+    );
   }
 
   if (filters.startDate) {
@@ -628,13 +684,18 @@ function buildWhereClause(userId: string, filters: RetrievalFilters): PrismaSql 
   return Prisma.sql`WHERE ${Prisma.join(conditions, " AND ")}`;
 }
 
-function buildEntityWhereClause(userId: string, filters: RetrievalFilters): PrismaSql {
+function buildEntityWhereClause(
+  userId: string,
+  filters: RetrievalFilters,
+): PrismaSql {
   const conditions: PrismaSql[] = [
     Prisma.sql`entity_chunks.user_id = ${userId}::text`,
   ];
 
   if (filters.chunkType) {
-    conditions.push(Prisma.sql`entity_chunks.chunk_type = ${filters.chunkType}`);
+    conditions.push(
+      Prisma.sql`entity_chunks.chunk_type = ${filters.chunkType}`,
+    );
   }
   if (filters.chunkTypes?.length) {
     conditions.push(
@@ -642,25 +703,55 @@ function buildEntityWhereClause(userId: string, filters: RetrievalFilters): Pris
     );
   }
   if (filters.sourceType) {
-    conditions.push(Prisma.sql`entity_chunks.source_type = ${filters.sourceType}`);
+    conditions.push(
+      Prisma.sql`entity_chunks.source_type = ${filters.sourceType}`,
+    );
   }
   if (filters.sourceTypes?.length) {
     conditions.push(
       Prisma.sql`entity_chunks.source_type IN (${Prisma.join(filters.sourceTypes)})`,
     );
   }
+  if (filters.sourceId) {
+    conditions.push(
+      Prisma.sql`entity_chunks.source_id = ${filters.sourceId}::text`,
+    );
+  }
+  if (filters.sourceIds?.length) {
+    conditions.push(
+      Prisma.sql`entity_chunks.source_id IN (${Prisma.join(filters.sourceIds)})`,
+    );
+  }
+  const fileTypePrefixes = normalizeStringList(filters.fileTypePrefixes);
+  if (fileTypePrefixes.length) {
+    conditions.push(
+      Prisma.sql`(${Prisma.join(
+        fileTypePrefixes.map(
+          (prefix) =>
+            Prisma.sql`coalesce(entity_chunks.metadata->>'fileType', '') LIKE ${`${prefix}%`}`,
+        ),
+        " OR ",
+      )})`,
+    );
+  }
   if (filters.startDate) {
-    conditions.push(Prisma.sql`entity_chunks.occurred_at >= ${filters.startDate}`);
+    conditions.push(
+      Prisma.sql`entity_chunks.occurred_at >= ${filters.startDate}`,
+    );
   }
   if (filters.endDate) {
-    conditions.push(Prisma.sql`entity_chunks.occurred_at <= ${filters.endDate}`);
+    conditions.push(
+      Prisma.sql`entity_chunks.occurred_at <= ${filters.endDate}`,
+    );
   }
 
   return Prisma.sql`WHERE ${Prisma.join(conditions, " AND ")}`;
 }
 
 function buildSourceTypeBoost(filters: RetrievalFilters): PrismaSql {
-  const preferredSourceTypes = normalizeStringList(filters.preferredSourceTypes);
+  const preferredSourceTypes = normalizeStringList(
+    filters.preferredSourceTypes,
+  );
   return preferredSourceTypes.length
     ? Prisma.sql`
       CASE WHEN memory_chunks.source_type IN (${Prisma.join(preferredSourceTypes)})
@@ -688,10 +779,15 @@ function buildSearchDocument(): PrismaSql {
   `;
 }
 
-function markEmbeddingErrorLexicalFallback(hit: MemorySearchHit): MemorySearchHit {
-  const metadata = hit.metadata && typeof hit.metadata === "object" && !Array.isArray(hit.metadata)
-    ? { ...(hit.metadata as Record<string, unknown>) }
-    : {};
+function markEmbeddingErrorLexicalFallback(
+  hit: MemorySearchHit,
+): MemorySearchHit {
+  const metadata =
+    hit.metadata &&
+    typeof hit.metadata === "object" &&
+    !Array.isArray(hit.metadata)
+      ? { ...(hit.metadata as Record<string, unknown>) }
+      : {};
 
   return {
     ...hit,
@@ -732,9 +828,8 @@ function shouldMergeTemporalFallback(
 
   const spanMs = end - start;
   const monthOrShorterMs = 32 * 24 * 60 * 60 * 1000;
-  const targetEvidenceCount = spanMs <= monthOrShorterMs
-    ? Math.min(limit, 12)
-    : Math.min(limit, 4);
+  const targetEvidenceCount =
+    spanMs <= monthOrShorterMs ? Math.min(limit, 12) : Math.min(limit, 4);
 
   return strictResultCount < targetEvidenceCount;
 }
@@ -752,8 +847,10 @@ function dedupeHits(hits: MemorySearchHit[]): MemorySearchHit[] {
 }
 
 function compareHits(a: MemorySearchHit, b: MemorySearchHit): number {
-  return b.similarity - a.similarity ||
-    b.occurredAt.getTime() - a.occurredAt.getTime();
+  return (
+    b.similarity - a.similarity ||
+    b.occurredAt.getTime() - a.occurredAt.getTime()
+  );
 }
 
 function clampWeight(value: number): number {

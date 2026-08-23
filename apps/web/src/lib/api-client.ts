@@ -1,6 +1,6 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
-export type DiaryMood = 'great' | 'good' | 'neutral' | 'bad';
+export type DiaryMood = "great" | "good" | "neutral" | "bad";
 
 // Types - match backend DTO
 export type DiaryEntry = {
@@ -22,8 +22,17 @@ export type DiaryAttachment = {
   fileType: string;
   fileName: string;
   signedUrl?: string;
-  extractionStatus: 'extracted' | 'pending' | 'empty';
-  indexingStatus: 'pending' | 'retry' | 'processing' | 'succeeded' | 'dead_letter' | 'failed' | 'unknown';
+  extractionStatus: "extracted" | "pending" | "empty" | "failed";
+  extractedTextPreview?: string;
+  extractedCharacterCount?: number;
+  indexingStatus:
+    | "pending"
+    | "retry"
+    | "processing"
+    | "succeeded"
+    | "dead_letter"
+    | "failed"
+    | "unknown";
   indexingError?: string | null;
   retryCount?: number;
   createdAt: string;
@@ -56,11 +65,12 @@ export type ApiError = {
 async function authFetch(
   endpoint: string,
   options: RequestInit,
-  accessToken: string | null
+  accessToken: string | null,
 ): Promise<Response> {
-  const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
+  const isFormData =
+    typeof FormData !== "undefined" && options.body instanceof FormData;
   const headers: HeadersInit = {
-    ...(!isFormData && { 'Content-Type': 'application/json' }),
+    ...(!isFormData && { "Content-Type": "application/json" }),
     ...(accessToken && { Authorization: `Bearer ${accessToken}` }),
     ...options.headers,
   };
@@ -78,10 +88,10 @@ async function readApiError(response: Response, fallback: string) {
   const message = error?.message;
 
   if (Array.isArray(message)) {
-    return message.join(', ');
+    return message.join(", ");
   }
 
-  if (typeof message === 'string' && message.trim()) {
+  if (typeof message === "string" && message.trim()) {
     return message;
   }
 
@@ -93,15 +103,21 @@ export const YEARLY_DIARY_ENTRY_LIMIT = 500;
 
 export async function createDiaryEntry(
   payload: CreateDiaryPayload,
-  accessToken: string | null
+  accessToken: string | null,
 ): Promise<DiaryEntry> {
-  const response = await authFetch('/api/diary', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  }, accessToken);
+  const response = await authFetch(
+    "/api/diary",
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+    accessToken,
+  );
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Failed to create diary entry' }));
+    const error = await response
+      .json()
+      .catch(() => ({ message: "Failed to create diary entry" }));
     throw new Error(error.message || `HTTP ${response.status}`);
   }
 
@@ -113,12 +129,19 @@ export async function getDiaryEntries(
   limit = YEARLY_DIARY_ENTRY_LIMIT,
 ): Promise<DiaryEntry[]> {
   const query = new URLSearchParams({ limit: String(limit) });
-  const response = await authFetch(`/api/diary?${query}`, {
-    method: 'GET',
-  }, accessToken);
+  const response = await authFetch(
+    `/api/diary?${query}`,
+    {
+      method: "GET",
+      cache: "no-store",
+    },
+    accessToken,
+  );
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Failed to fetch diary entries' }));
+    const error = await response
+      .json()
+      .catch(() => ({ message: "Failed to fetch diary entries" }));
     throw new Error(error.message || `HTTP ${response.status}`);
   }
 
@@ -127,14 +150,20 @@ export async function getDiaryEntries(
 
 export async function getDiaryEntry(
   id: string,
-  accessToken: string | null
+  accessToken: string | null,
 ): Promise<DiaryEntry> {
-  const response = await authFetch(`/api/diary/${id}`, {
-    method: 'GET',
-  }, accessToken);
+  const response = await authFetch(
+    `/api/diary/${id}`,
+    {
+      method: "GET",
+    },
+    accessToken,
+  );
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Failed to fetch diary entry' }));
+    const error = await response
+      .json()
+      .catch(() => ({ message: "Failed to fetch diary entry" }));
     throw new Error(error.message || `HTTP ${response.status}`);
   }
 
@@ -145,12 +174,18 @@ export async function getDiaryAttachment(
   id: string,
   accessToken: string | null,
 ): Promise<{ signedUrl?: string }> {
-  const response = await authFetch(`/api/upload/attachment/${id}`, {
-    method: 'GET',
-  }, accessToken);
+  const response = await authFetch(
+    `/api/upload/attachment/${id}`,
+    {
+      method: "GET",
+    },
+    accessToken,
+  );
 
   if (!response.ok) {
-    throw new Error(await readApiError(response, 'Failed to refresh attachment URL'));
+    throw new Error(
+      await readApiError(response, "Failed to refresh attachment URL"),
+    );
   }
 
   return response.json();
@@ -160,20 +195,26 @@ export async function getDiaryAttachmentContent(
   id: string,
   accessToken: string | null,
 ): Promise<Blob> {
-  const response = await authFetch(`/api/upload/attachment/${id}/content`, {
-    method: 'GET',
-    headers: {
-      Accept: 'audio/*',
+  const response = await authFetch(
+    `/api/upload/attachment/${id}/content`,
+    {
+      method: "GET",
+      headers: {
+        Accept: "audio/*",
+      },
     },
-  }, accessToken);
+    accessToken,
+  );
 
   if (!response.ok) {
-    throw new Error(await readApiError(response, 'Failed to load attachment audio'));
+    throw new Error(
+      await readApiError(response, "Failed to load attachment audio"),
+    );
   }
 
   const content = await response.blob();
   if (!content.size) {
-    throw new Error('Attachment audio is empty.');
+    throw new Error("Attachment audio is empty.");
   }
 
   return content;
@@ -191,15 +232,21 @@ export type UpdateDiaryPayload = {
 export async function updateDiaryEntry(
   id: string,
   payload: UpdateDiaryPayload,
-  accessToken: string | null
+  accessToken: string | null,
 ): Promise<DiaryEntry> {
-  const response = await authFetch(`/api/diary/${id}`, {
-    method: 'PATCH',
-    body: JSON.stringify(payload),
-  }, accessToken);
+  const response = await authFetch(
+    `/api/diary/${id}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    },
+    accessToken,
+  );
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Failed to update diary entry' }));
+    const error = await response
+      .json()
+      .catch(() => ({ message: "Failed to update diary entry" }));
     throw new Error(error.message || `HTTP ${response.status}`);
   }
 
@@ -208,29 +255,41 @@ export async function updateDiaryEntry(
 
 export async function deleteDiaryEntry(
   id: string,
-  accessToken: string | null
+  accessToken: string | null,
 ): Promise<void> {
-  const response = await authFetch(`/api/diary/${id}`, {
-    method: 'DELETE',
-  }, accessToken);
+  const response = await authFetch(
+    `/api/diary/${id}`,
+    {
+      method: "DELETE",
+    },
+    accessToken,
+  );
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Failed to delete diary entry' }));
+    const error = await response
+      .json()
+      .catch(() => ({ message: "Failed to delete diary entry" }));
     throw new Error(error.message || `HTTP ${response.status}`);
   }
 }
 
 export async function copilotDiaryText(
   payload: { text: string; action: string },
-  accessToken: string | null
+  accessToken: string | null,
 ): Promise<{ result: string }> {
-  const response = await authFetch('/api/diary/copilot', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  }, accessToken);
+  const response = await authFetch(
+    "/api/diary/copilot",
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+    accessToken,
+  );
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Copilot request failed' }));
+    const error = await response
+      .json()
+      .catch(() => ({ message: "Copilot request failed" }));
     throw new Error(error.message || `HTTP ${response.status}`);
   }
 
@@ -239,16 +298,25 @@ export async function copilotDiaryText(
 
 export type AttachmentUploadResponse = {
   message: string;
-  extractionStatus: 'extracted' | 'pending' | 'empty';
+  extractionStatus: "extracted" | "pending" | "empty" | "failed";
   memoryIndexed: boolean;
-  memoryIndexingStatus?: 'queued' | 'pending' | 'processing' | 'succeeded' | 'failed' | 'dead_letter' | 'retry';
+  memoryIndexingStatus?:
+    | "queued"
+    | "pending"
+    | "processing"
+    | "succeeded"
+    | "failed"
+    | "dead_letter"
+    | "retry";
   memoryChunkCount: number;
   processingError?: string;
   attachment: {
     id: string;
     diaryEntryId: string;
     fileType: string;
-    extractionStatus?: 'extracted' | 'pending' | 'empty';
+    extractionStatus?: "extracted" | "pending" | "empty" | "failed";
+    extractedTextPreview?: string;
+    extractedCharacterCount?: number;
     signedUrl?: string;
     createdAt: string;
   };
@@ -260,16 +328,22 @@ export async function uploadDiaryAttachment(
   accessToken: string | null,
 ): Promise<AttachmentUploadResponse> {
   const formData = new FormData();
-  formData.set('diaryEntryId', diaryEntryId);
-  formData.set('file', file);
+  formData.set("diaryEntryId", diaryEntryId);
+  formData.set("file", file);
 
-  const response = await authFetch('/api/upload/attachment', {
-    method: 'POST',
-    body: formData,
-  }, accessToken);
+  const response = await authFetch(
+    "/api/upload/attachment",
+    {
+      method: "POST",
+      body: formData,
+    },
+    accessToken,
+  );
 
   if (!response.ok) {
-    throw new Error(await readApiError(response, 'Failed to upload attachment'));
+    throw new Error(
+      await readApiError(response, "Failed to upload attachment"),
+    );
   }
 
   return response.json();
@@ -279,12 +353,18 @@ export async function processDiaryAttachment(
   attachmentId: string,
   accessToken: string | null,
 ): Promise<AttachmentUploadResponse> {
-  const response = await authFetch(`/api/upload/attachment/${attachmentId}/process`, {
-    method: 'POST',
-  }, accessToken);
+  const response = await authFetch(
+    `/api/upload/attachment/${attachmentId}/process`,
+    {
+      method: "POST",
+    },
+    accessToken,
+  );
 
   if (!response.ok) {
-    throw new Error(await readApiError(response, 'Failed to process attachment'));
+    throw new Error(
+      await readApiError(response, "Failed to process attachment"),
+    );
   }
 
   return response.json();
@@ -302,22 +382,26 @@ type AskResponse = {
 
 export async function askSearch(
   payload: AskPayload,
-  accessToken: string | null
+  accessToken: string | null,
 ): Promise<AskResponse> {
-  const response = await authFetch('/api/search', {
-    method: "POST",
-    body: JSON.stringify(payload),
-  }, accessToken);
+  const response = await authFetch(
+    "/api/search",
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+    accessToken,
+  );
 
   if (!response.ok) {
-    throw new Error(await readApiError(response, 'Failed to fetch answer'));
+    throw new Error(await readApiError(response, "Failed to fetch answer"));
   }
 
   return response.json() as Promise<AskResponse>;
 }
 
 // Summary API functions
-export type SummaryType = 'daily' | 'weekly' | 'monthly' | 'yearly';
+export type SummaryType = "daily" | "weekly" | "monthly" | "yearly";
 
 export type SummaryRecord = {
   id: string;
@@ -337,7 +421,7 @@ export type GenerateSummaryPayload = {
 export type GenerateSummaryResponse = {
   generated: boolean;
   summary: SummaryRecord;
-  memoryIndexingStatus?: 'queued' | 'succeeded' | 'failed';
+  memoryIndexingStatus?: "queued" | "succeeded" | "failed";
 };
 
 export async function getSummaries(
@@ -345,20 +429,26 @@ export async function getSummaries(
   options: { type?: SummaryType; limit?: number } = {},
 ): Promise<SummaryRecord[]> {
   const params = new URLSearchParams();
-  if (options.type) params.set('type', options.type);
-  if (options.limit) params.set('limit', String(options.limit));
+  if (options.type) params.set("type", options.type);
+  if (options.limit) params.set("limit", String(options.limit));
 
-  const endpoint = `/api/summary${params.toString() ? `?${params}` : ''}`;
-  const response = await authFetch(endpoint, {
-    method: 'GET',
-  }, accessToken);
+  const endpoint = `/api/summary${params.toString() ? `?${params}` : ""}`;
+  const response = await authFetch(
+    endpoint,
+    {
+      method: "GET",
+    },
+    accessToken,
+  );
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Failed to fetch summaries' }));
+    const error = await response
+      .json()
+      .catch(() => ({ message: "Failed to fetch summaries" }));
     throw new Error(error.message || `HTTP ${response.status}`);
   }
 
-  const data = await response.json() as { summaries?: SummaryRecord[] };
+  const data = (await response.json()) as { summaries?: SummaryRecord[] };
   return data.summaries ?? [];
 }
 
@@ -366,13 +456,19 @@ export async function generateSummary(
   payload: GenerateSummaryPayload,
   accessToken: string | null,
 ): Promise<GenerateSummaryResponse> {
-  const response = await authFetch('/api/summary', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  }, accessToken);
+  const response = await authFetch(
+    "/api/summary",
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+    accessToken,
+  );
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Failed to generate summary' }));
+    const error = await response
+      .json()
+      .catch(() => ({ message: "Failed to generate summary" }));
     throw new Error(error.message || `HTTP ${response.status}`);
   }
 
@@ -401,18 +497,24 @@ export type CalendarSyncResponse = {
   queuedIndexingJobs?: number;
   linkedDiaryCount?: number;
   linkedEventCount?: number;
-  memoryIndexingStatus?: 'queued' | 'succeeded' | 'failed';
+  memoryIndexingStatus?: "queued" | "succeeded" | "failed";
 };
 
 export async function getCalendarStatus(
   accessToken: string | null,
 ): Promise<CalendarConnectionStatus> {
-  const response = await authFetch('/api/calendar/status', {
-    method: 'GET',
-  }, accessToken);
+  const response = await authFetch(
+    "/api/calendar/status",
+    {
+      method: "GET",
+    },
+    accessToken,
+  );
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Failed to fetch calendar status' }));
+    const error = await response
+      .json()
+      .catch(() => ({ message: "Failed to fetch calendar status" }));
     throw new Error(error.message || `HTTP ${response.status}`);
   }
 
@@ -422,16 +524,22 @@ export async function getCalendarStatus(
 export async function getCalendarEvents(
   accessToken: string | null,
 ): Promise<CalendarEventRecord[]> {
-  const response = await authFetch('/api/calendar/events', {
-    method: 'GET',
-  }, accessToken);
+  const response = await authFetch(
+    "/api/calendar/events",
+    {
+      method: "GET",
+    },
+    accessToken,
+  );
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Failed to fetch calendar events' }));
+    const error = await response
+      .json()
+      .catch(() => ({ message: "Failed to fetch calendar events" }));
     throw new Error(error.message || `HTTP ${response.status}`);
   }
 
-  const data = await response.json() as {
+  const data = (await response.json()) as {
     events?: Array<{
       id: string;
       title: string;
@@ -455,18 +563,24 @@ export async function getCalendarEvents(
 export async function getGoogleCalendarConnectUrl(
   accessToken: string | null,
 ): Promise<string> {
-  const response = await authFetch('/api/calendar/connect', {
-    method: 'GET',
-  }, accessToken);
+  const response = await authFetch(
+    "/api/calendar/connect",
+    {
+      method: "GET",
+    },
+    accessToken,
+  );
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Failed to start Google Calendar connection' }));
+    const error = await response
+      .json()
+      .catch(() => ({ message: "Failed to start Google Calendar connection" }));
     throw new Error(error.message || `HTTP ${response.status}`);
   }
 
-  const data = await response.json() as { url?: string };
+  const data = (await response.json()) as { url?: string };
   if (!data.url) {
-    throw new Error('Backend did not return a Google Calendar connect URL');
+    throw new Error("Backend did not return a Google Calendar connect URL");
   }
 
   return data.url;
@@ -476,13 +590,21 @@ export async function syncGoogleCalendar(
   accessToken: string | null,
   limit?: number,
 ): Promise<CalendarSyncResponse> {
-  const query = limit ? `?${new URLSearchParams({ limit: String(limit) })}` : '';
-  const response = await authFetch(`/api/calendar/sync${query}`, {
-    method: 'POST',
-  }, accessToken);
+  const query = limit
+    ? `?${new URLSearchParams({ limit: String(limit) })}`
+    : "";
+  const response = await authFetch(
+    `/api/calendar/sync${query}`,
+    {
+      method: "POST",
+    },
+    accessToken,
+  );
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Failed to sync Google Calendar' }));
+    const error = await response
+      .json()
+      .catch(() => ({ message: "Failed to sync Google Calendar" }));
     throw new Error(error.message || `HTTP ${response.status}`);
   }
 
@@ -491,7 +613,7 @@ export async function syncGoogleCalendar(
 
 // System health and indexing status
 export type AdminDiagnostics = {
-  status: 'ok' | 'degraded';
+  status: "ok" | "degraded";
   checkedAt: string;
   database: {
     ok: boolean;
@@ -549,7 +671,7 @@ export type AdminDiagnostics = {
   worker?: {
     available: boolean;
     ok: boolean;
-    status: 'healthy' | 'missing' | 'stale' | 'stopping' | 'unavailable';
+    status: "healthy" | "missing" | "stale" | "stopping" | "unavailable";
     id?: string;
     detail: string;
     lastHeartbeatAt: string | null;
@@ -558,7 +680,10 @@ export type AdminDiagnostics = {
   };
   schema: {
     tables: Record<string, { ok: boolean; required: boolean; detail?: string }>;
-    indexes: Record<string, { ok: boolean; required: boolean; detail?: string }>;
+    indexes: Record<
+      string,
+      { ok: boolean; required: boolean; detail?: string }
+    >;
   };
   indexingOutbox: {
     available: boolean;
@@ -677,13 +802,21 @@ export type DemoReadiness = {
   nextActions: string[];
 };
 
-export async function getAdminDiagnostics(accessToken: string | null): Promise<AdminDiagnostics> {
-  const response = await authFetch('/api/admin/diagnostics', {
-    method: 'GET',
-  }, accessToken);
+export async function getAdminDiagnostics(
+  accessToken: string | null,
+): Promise<AdminDiagnostics> {
+  const response = await authFetch(
+    "/api/admin/diagnostics",
+    {
+      method: "GET",
+    },
+    accessToken,
+  );
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Failed to fetch admin diagnostics' }));
+    const error = await response
+      .json()
+      .catch(() => ({ message: "Failed to fetch admin diagnostics" }));
     throw new Error(error.message || `HTTP ${response.status}`);
   }
 
@@ -693,12 +826,18 @@ export async function getAdminDiagnostics(accessToken: string | null): Promise<A
 export async function getIndexingStatus(
   accessToken: string | null,
 ): Promise<IndexingStatus> {
-  const response = await authFetch('/api/indexing/status', {
-    method: 'GET',
-  }, accessToken);
+  const response = await authFetch(
+    "/api/indexing/status",
+    {
+      method: "GET",
+    },
+    accessToken,
+  );
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Failed to fetch indexing status' }));
+    const error = await response
+      .json()
+      .catch(() => ({ message: "Failed to fetch indexing status" }));
     throw new Error(error.message || `HTTP ${response.status}`);
   }
 
@@ -708,12 +847,18 @@ export async function getIndexingStatus(
 export async function getDemoReadiness(
   accessToken: string | null,
 ): Promise<DemoReadiness> {
-  const response = await authFetch('/api/indexing/demo-readiness', {
-    method: 'GET',
-  }, accessToken);
+  const response = await authFetch(
+    "/api/indexing/demo-readiness",
+    {
+      method: "GET",
+    },
+    accessToken,
+  );
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Failed to fetch demo readiness' }));
+    const error = await response
+      .json()
+      .catch(() => ({ message: "Failed to fetch demo readiness" }));
     throw new Error(error.message || `HTTP ${response.status}`);
   }
 
@@ -724,12 +869,18 @@ export async function requeueIndexingJob(
   accessToken: string | null,
   jobId: string,
 ): Promise<RequeueIndexingJobResponse> {
-  const response = await authFetch(`/api/indexing/jobs/${jobId}/requeue`, {
-    method: 'POST',
-  }, accessToken);
+  const response = await authFetch(
+    `/api/indexing/jobs/${jobId}/requeue`,
+    {
+      method: "POST",
+    },
+    accessToken,
+  );
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Failed to requeue indexing job' }));
+    const error = await response
+      .json()
+      .catch(() => ({ message: "Failed to requeue indexing job" }));
     throw new Error(error.message || `HTTP ${response.status}`);
   }
 
@@ -739,12 +890,20 @@ export async function requeueIndexingJob(
 export async function requeueDeadLetterIndexingJobs(
   accessToken: string | null,
 ): Promise<RequeueDeadLetterResponse> {
-  const response = await authFetch('/api/indexing/jobs/requeue-dead-letter', {
-    method: 'POST',
-  }, accessToken);
+  const response = await authFetch(
+    "/api/indexing/jobs/requeue-dead-letter",
+    {
+      method: "POST",
+    },
+    accessToken,
+  );
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Failed to requeue dead-letter indexing jobs' }));
+    const error = await response
+      .json()
+      .catch(() => ({
+        message: "Failed to requeue dead-letter indexing jobs",
+      }));
     throw new Error(error.message || `HTTP ${response.status}`);
   }
 
@@ -757,7 +916,7 @@ export type SearchHistoryEntry = {
   id: string;
   question: string;
   answer: string;
-  confidence: 'high' | 'medium' | 'low';
+  confidence: "high" | "medium" | "low";
   response_language: string;
   token_count: number;
   created_at: string;
@@ -767,12 +926,16 @@ export type SearchHistoryEntry = {
 export async function getSearchHistory(
   accessToken: string | null,
 ): Promise<SearchHistoryEntry[]> {
-  const response = await authFetch('/api/search/history', {
-    method: 'GET',
-  }, accessToken);
+  const response = await authFetch(
+    "/api/search/history",
+    {
+      method: "GET",
+    },
+    accessToken,
+  );
 
   if (!response.ok) {
-    throw new Error('Failed to fetch search history');
+    throw new Error("Failed to fetch search history");
   }
 
   return response.json();
@@ -782,23 +945,31 @@ export async function deleteSearchHistoryItem(
   id: string,
   accessToken: string | null,
 ): Promise<void> {
-  const response = await authFetch(`/api/search/history/${id}`, {
-    method: 'DELETE',
-  }, accessToken);
+  const response = await authFetch(
+    `/api/search/history/${id}`,
+    {
+      method: "DELETE",
+    },
+    accessToken,
+  );
 
   if (!response.ok) {
-    throw new Error('Failed to delete search history item');
+    throw new Error("Failed to delete search history item");
   }
 }
 
 export async function clearSearchHistory(
   accessToken: string | null,
 ): Promise<void> {
-  const response = await authFetch('/api/search/history', {
-    method: 'DELETE',
-  }, accessToken);
+  const response = await authFetch(
+    "/api/search/history",
+    {
+      method: "DELETE",
+    },
+    accessToken,
+  );
 
   if (!response.ok) {
-    throw new Error('Failed to clear search history');
+    throw new Error("Failed to clear search history");
   }
 }

@@ -351,6 +351,7 @@ export const PEOPLE_RETRIEVAL_PROFILE: RetrievalProfile = {
 export const INTENT_PROFILES: Record<MemoryIntent, IntentProfile> = {
   attachment: {
     retrieval: {
+      sourceTypes: ["attachment"],
       preferredSourceTypes: ["attachment"],
       preferredChunkTypes: ["general_note", "general"],
       vectorWeight: 0.62,

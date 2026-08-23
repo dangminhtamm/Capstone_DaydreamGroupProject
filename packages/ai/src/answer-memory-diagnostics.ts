@@ -84,7 +84,10 @@ export function shouldAttachMemoryIndexDiagnostics(input: {
   );
 }
 
-function buildFilterConditions(userId: string, filters: RetrievalFilters): PrismaSql[] {
+function buildFilterConditions(
+  userId: string,
+  filters: RetrievalFilters,
+): PrismaSql[] {
   const conditions: PrismaSql[] = [Prisma.sql`user_id = ${userId}::text`];
 
   if (filters.chunkType) {
@@ -92,7 +95,9 @@ function buildFilterConditions(userId: string, filters: RetrievalFilters): Prism
   }
 
   if (filters.chunkTypes?.length) {
-    conditions.push(Prisma.sql`chunk_type IN (${Prisma.join(filters.chunkTypes)})`);
+    conditions.push(
+      Prisma.sql`chunk_type IN (${Prisma.join(filters.chunkTypes)})`,
+    );
   }
 
   if (filters.sourceType) {
@@ -100,7 +105,31 @@ function buildFilterConditions(userId: string, filters: RetrievalFilters): Prism
   }
 
   if (filters.sourceTypes?.length) {
-    conditions.push(Prisma.sql`source_type IN (${Prisma.join(filters.sourceTypes)})`);
+    conditions.push(
+      Prisma.sql`source_type IN (${Prisma.join(filters.sourceTypes)})`,
+    );
+  }
+
+  if (filters.sourceId) {
+    conditions.push(Prisma.sql`source_id = ${filters.sourceId}::text`);
+  }
+
+  if (filters.sourceIds?.length) {
+    conditions.push(
+      Prisma.sql`source_id IN (${Prisma.join(filters.sourceIds)})`,
+    );
+  }
+
+  if (filters.fileTypePrefixes?.length) {
+    conditions.push(
+      Prisma.sql`(${Prisma.join(
+        filters.fileTypePrefixes.map(
+          (prefix) =>
+            Prisma.sql`coalesce(metadata->>'fileType', '') LIKE ${`${prefix}%`}`,
+        ),
+        " OR ",
+      )})`,
+    );
   }
 
   if (filters.startDate) {
@@ -117,8 +146,8 @@ function buildFilterConditions(userId: string, filters: RetrievalFilters): Prism
 function isQueryableDbClient(value: unknown): value is QueryableDbClient {
   return Boolean(
     value &&
-      typeof value === "object" &&
-      typeof (value as QueryableDbClient).$queryRaw === "function",
+    typeof value === "object" &&
+    typeof (value as QueryableDbClient).$queryRaw === "function",
   );
 }
 
@@ -130,7 +159,10 @@ function classifyIndexIssue(input: {
 }): MemoryIndexDiagnostics["issue"] {
   if (input.totalChunks === 0) return "empty_index";
   if (input.embeddedChunks === 0) return "missing_embeddings";
-  if (input.currentEmbeddingModelChunks === 0 && input.staleEmbeddingModelChunks > 0) {
+  if (
+    input.currentEmbeddingModelChunks === 0 &&
+    input.staleEmbeddingModelChunks > 0
+  ) {
     return "stale_embeddings";
   }
   if (input.staleEmbeddingModelChunks > 0) return "mixed_embeddings";

@@ -52,7 +52,11 @@ export function inferRetrievalFilters(
   }
 
   if (isStandardPriorityRetrievalIntent(intent) && intentRetrievalProfile) {
-    return { ...temporalFilters, ...intentRetrievalProfile };
+    return {
+      ...temporalFilters,
+      ...intentRetrievalProfile,
+      ...inferAttachmentFileTypeFilters(normalized, intent),
+    };
   }
 
   if (includesAny(normalized, ["diary", "journal", "nhật ký", "nhat ky"])) {
@@ -86,6 +90,46 @@ export function inferRetrievalFilters(
   }
 
   return temporalFilters;
+}
+
+function inferAttachmentFileTypeFilters(
+  normalizedQuestion: string,
+  intent: MemoryIntent,
+): Pick<RetrievalFilters, "fileTypePrefixes"> {
+  if (intent !== "attachment") return {};
+
+  if (
+    includesAny(normalizedQuestion, [
+      "audio",
+      "audio file",
+      "mp3",
+      "recording",
+      "transcript",
+      "voice note",
+    ])
+  ) {
+    return { fileTypePrefixes: ["audio/"] };
+  }
+
+  if (
+    includesAny(normalizedQuestion, [
+      "image",
+      "photo",
+      "picture",
+      "screenshot",
+      "png",
+      "jpg",
+      "jpeg",
+    ])
+  ) {
+    return { fileTypePrefixes: ["image/"] };
+  }
+
+  if (includesAny(normalizedQuestion, ["pdf"])) {
+    return { fileTypePrefixes: ["application/pdf"] };
+  }
+
+  return {};
 }
 
 function isHighPriorityRetrievalIntent(intent: MemoryIntent): boolean {

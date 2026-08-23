@@ -74,7 +74,10 @@ describe('SearchService', () => {
       'What did I work on?',
       'user-1',
       prisma,
-      expect.objectContaining({ responseLanguage: 'en', answerStrategy: 'auto' }),
+      expect.objectContaining({
+        responseLanguage: 'en',
+        answerStrategy: 'auto',
+      }),
     );
     expect(result.confidence).toBe('high');
     expect(result.sources).toHaveLength(1);
@@ -125,7 +128,10 @@ describe('SearchService', () => {
       },
     );
 
-    expect(result.debugTrace).toMatchObject({ status: 'success', reason: 'admin trace' });
+    expect(result.debugTrace).toMatchObject({
+      status: 'success',
+      reason: 'admin trace',
+    });
     expect(result.cached).toBe(false);
   });
 
@@ -251,7 +257,9 @@ describe('SearchService', () => {
     (findCachedAnswer as jest.Mock).mockResolvedValue({
       answer: 'We separated search latency from answer generation to claim p',
       confidence: 'medium',
-      sources_json: JSON.stringify([{ marker: 'S1', quote: 'retrieval latency' }]),
+      sources_json: JSON.stringify([
+        { marker: 'S1', quote: 'retrieval latency' },
+      ]),
       analytics_json: JSON.stringify({
         tokenUsage: { totalTokens: 721 },
         status: 'success',
@@ -259,7 +267,8 @@ describe('SearchService', () => {
       }),
     });
     (answerMemory as jest.Mock).mockResolvedValue({
-      answer: 'Fresh answer: retrieval latency is measured separately from generation so the team can report p95 retrieval latency instead of average full answer latency.',
+      answer:
+        'Fresh answer: retrieval latency is measured separately from generation so the team can report p95 retrieval latency instead of average full answer latency.',
       confidence: 'high',
       citations: [{ marker: 'S1', quote: 'claim p95 retrieval latency' }],
       analytics: {
@@ -384,6 +393,36 @@ describe('SearchService', () => {
       answer: 'Fresh filtered answer',
       cached: false,
     });
+  });
+
+  it('scopes attachment questions to one exact source id', async () => {
+    prisma.user.findUnique.mockResolvedValue({ id: 'user-1' });
+    (answerMemory as jest.Mock).mockResolvedValue({
+      answer: 'This audio explains the sample file service.',
+      confidence: 'high',
+      citations: [],
+      analytics: { tokenUsage: { totalTokens: 7 } },
+    });
+
+    await service.answerQuestion('supabase-user-1', {
+      question: 'What is this audio about?',
+      responseLanguage: 'en',
+      sourceType: 'attachment',
+      sourceId: 'attachment-1',
+    });
+
+    expect(findCachedAnswer).not.toHaveBeenCalled();
+    expect(answerMemory).toHaveBeenCalledWith(
+      'What is this audio about?',
+      'user-1',
+      prisma,
+      expect.objectContaining({
+        filters: expect.objectContaining({
+          sourceType: 'attachment',
+          sourceId: 'attachment-1',
+        }),
+      }),
+    );
   });
 
   it('bypasses answer cache when a non-default limit is present', async () => {

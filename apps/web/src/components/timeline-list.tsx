@@ -1,8 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { formatDateTime } from "@second-brain/shared";
 import {
+  ArrowRight,
   CalendarDays,
   Check,
   Clock3,
@@ -11,14 +13,23 @@ import {
   Image as ImageIcon,
   Inbox,
   Music2,
+  MessageCircleQuestion,
   Paperclip,
   PencilLine,
+  RefreshCw,
+  ScanText,
   Trash2,
+  Waypoints,
   X,
 } from "lucide-react";
 import { EditDiaryModal } from "./edit-diary-modal";
 import { ConfirmDialog } from "./confirm-dialog";
-import type { DiaryAttachment, DiaryCalendarEvent, DiaryMood, UpdateDiaryPayload } from "@/lib/api-client";
+import type {
+  DiaryAttachment,
+  DiaryCalendarEvent,
+  DiaryMood,
+  UpdateDiaryPayload,
+} from "@/lib/api-client";
 import { MOOD_META } from "@/lib/mood-meta";
 
 type DiaryEntry = {
@@ -38,7 +49,8 @@ type TimelineListProps = {
   entries: DiaryEntry[];
   onUpdate?: (id: string, payload: UpdateDiaryPayload) => Promise<void>;
   onDelete?: (id: string) => Promise<void>;
-  onLoadAttachmentAudio?: (attachmentId: string) => Promise<Blob>;
+  onLoadAttachmentAudio?: (attachmentId: string) => Promise<string | Blob>;
+  onProcessAttachment?: (attachmentId: string) => Promise<void>;
   isAdmin?: boolean;
 };
 
@@ -50,9 +62,17 @@ type TimelineGroup = {
   items: Array<{ entry: DiaryEntry; index: number }>;
 };
 
+type RelatedMemory = {
+  entry: DiaryEntry;
+  reason: string;
+  score: number;
+};
+
 const PAGE_SIZE = 5;
 
-function isAttachmentObject(value: string | DiaryAttachment): value is DiaryAttachment {
+function isAttachmentObject(
+  value: string | DiaryAttachment,
+): value is DiaryAttachment {
   return typeof value === "object" && value !== null;
 }
 
@@ -60,7 +80,10 @@ function getAttachmentHref(attachment: string | DiaryAttachment) {
   return isAttachmentObject(attachment) ? attachment.signedUrl : attachment;
 }
 
-function getAttachmentLabel(attachment: string | DiaryAttachment, index: number) {
+function getAttachmentLabel(
+  attachment: string | DiaryAttachment,
+  index: number,
+) {
   if (!isAttachmentObject(attachment)) return `File ${index + 1}`;
   return attachment.fileName || `File ${index + 1}`;
 }
@@ -70,12 +93,20 @@ function getAttachmentStatus(attachment: string | DiaryAttachment) {
   if (attachment.indexingStatus === "succeeded") return "indexed";
   if (attachment.indexingStatus === "processing") return "processing";
   if (attachment.indexingStatus === "retry") return "retry";
-  if (attachment.indexingStatus === "dead_letter" || attachment.indexingStatus === "failed") return "failed";
+  if (
+    attachment.indexingStatus === "dead_letter" ||
+    attachment.indexingStatus === "failed"
+  )
+    return "failed";
   return attachment.extractionStatus === "extracted" ? "queued" : "extracting";
 }
 
-function isAudioAttachment(attachment: string | DiaryAttachment): attachment is DiaryAttachment {
-  return isAttachmentObject(attachment) && attachment.fileType.startsWith("audio/");
+function isAudioAttachment(
+  attachment: string | DiaryAttachment,
+): attachment is DiaryAttachment {
+  return (
+    isAttachmentObject(attachment) && attachment.fileType.startsWith("audio/")
+  );
 }
 
 function getStatusTextClass(status: string) {
@@ -104,6 +135,19 @@ function getIndexStatusLabel(status: string) {
   return "Linked";
 }
 
+function getMediaErrorMessage(error: MediaError | null) {
+  if (!error) return "The browser could not load this audio.";
+  if (error.code === MediaError.MEDIA_ERR_ABORTED)
+    return "Audio loading was interrupted.";
+  if (error.code === MediaError.MEDIA_ERR_NETWORK)
+    return "The audio download failed. Check the API and storage connection.";
+  if (error.code === MediaError.MEDIA_ERR_DECODE)
+    return "The browser could not decode this audio file.";
+  if (error.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED)
+    return "This audio source or format is not supported by the browser.";
+  return error.message || "The browser could not play this audio.";
+}
+
 function formatEventTime(event: DiaryCalendarEvent) {
   const start = new Date(event.startTime);
   const end = new Date(event.endTime);
@@ -111,7 +155,7 @@ function formatEventTime(event: DiaryCalendarEvent) {
 }
 
 function getEntryActivityDate(entry: DiaryEntry, isAdmin: boolean) {
-  return isAdmin ? entry.entryDate ?? entry.createdAt : entry.createdAt;
+  return isAdmin ? (entry.entryDate ?? entry.createdAt) : entry.createdAt;
 }
 
 function isDifferentTimestamp(first: Date | string, second: Date | string) {
@@ -139,37 +183,46 @@ function formatEntryTime(value: Date | string) {
 
 function getTimelineGroup(value: Date | string, now = new Date()) {
   const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return { key: "earlier", label: "Earlier" };
+  if (!Number.isFinite(date.getTime()))
+    return { key: "earlier", label: "Earlier" };
 
   const day = new Date(date.getFullYear(), date.getMonth(), date.getDate());
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const yesterday = new Date(today);
   yesterday.setDate(today.getDate() - 1);
 
-  if (day.getTime() === today.getTime()) return { key: "today", label: "Today" };
-  if (day.getTime() === yesterday.getTime()) return { key: "yesterday", label: "Yesterday" };
+  if (day.getTime() === today.getTime())
+    return { key: "today", label: "Today" };
+  if (day.getTime() === yesterday.getTime())
+    return { key: "yesterday", label: "Yesterday" };
 
   const weekStart = new Date(today);
   weekStart.setDate(today.getDate() - ((today.getDay() + 6) % 7));
   const nextWeekStart = new Date(weekStart);
   nextWeekStart.setDate(weekStart.getDate() + 7);
-  if (day >= weekStart && day < nextWeekStart) return { key: "this-week", label: "This week" };
+  if (day >= weekStart && day < nextWeekStart)
+    return { key: "this-week", label: "This week" };
 
   return {
     key: `${date.getFullYear()}-${date.getMonth()}`,
-    label: date.toLocaleDateString(undefined, { month: "long", year: "numeric" }),
+    label: date.toLocaleDateString(undefined, {
+      month: "long",
+      year: "numeric",
+    }),
   };
 }
 
 function formatFileSize(bytes?: number) {
   if (!bytes || bytes < 1) return undefined;
   if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)} KB`;
+  if (bytes < 1024 * 1024)
+    return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} MB`;
 }
 
 function formatDuration(seconds?: number) {
-  if (seconds == null || !Number.isFinite(seconds) || seconds < 0) return "0:00";
+  if (seconds == null || !Number.isFinite(seconds) || seconds < 0)
+    return "0:00";
   const wholeSeconds = Math.floor(seconds);
   const minutes = Math.floor(wholeSeconds / 60);
   return `${minutes}:${String(wholeSeconds % 60).padStart(2, "0")}`;
@@ -180,7 +233,11 @@ function getAttachmentKind(attachment: string | DiaryAttachment) {
   if (attachment.fileType.startsWith("audio/")) return "audio";
   if (attachment.fileType.startsWith("image/")) return "image";
   if (attachment.fileType === "application/pdf") return "pdf";
-  if (attachment.fileType.includes("word") || attachment.fileType.includes("document")) return "document";
+  if (
+    attachment.fileType.includes("word") ||
+    attachment.fileType.includes("document")
+  )
+    return "document";
   if (attachment.fileType.startsWith("text/")) return "text";
   return "file";
 }
@@ -188,12 +245,54 @@ function getAttachmentKind(attachment: string | DiaryAttachment) {
 function getAttachmentTypeLabel(attachment: string | DiaryAttachment) {
   if (!isAttachmentObject(attachment)) return "File";
   const extension = attachment.fileName.split(".").pop();
-  if (extension && extension !== attachment.fileName && extension.length <= 5) return extension.toUpperCase();
+  if (extension && extension !== attachment.fileName && extension.length <= 5)
+    return extension.toUpperCase();
   const subtype = attachment.fileType.split("/").pop();
-  return subtype ? subtype.replace("vnd.openxmlformats-officedocument.", "").toUpperCase() : "File";
+  return subtype
+    ? subtype.replace("vnd.openxmlformats-officedocument.", "").toUpperCase()
+    : "File";
 }
 
-function AttachmentTypeIcon({ kind }: { kind: ReturnType<typeof getAttachmentKind> }) {
+function getAskAboutAttachmentQuestion(attachment: DiaryAttachment) {
+  const kind = getAttachmentKind(attachment);
+  if (kind === "audio") return "What is this audio file about?";
+  if (kind === "image") return "What information is in this image?";
+  if (kind === "pdf") return "Summarize this PDF.";
+  return "What is this file about?";
+}
+
+function getAskAboutAttachmentHref(attachment: DiaryAttachment) {
+  const params = new URLSearchParams({
+    q: getAskAboutAttachmentQuestion(attachment),
+    sourceType: "attachment",
+    sourceId: attachment.id,
+    sourceTitle: attachment.fileName,
+    run: "1",
+  });
+  return `/search?${params.toString()}`;
+}
+
+function AskAboutAttachmentLink({
+  attachment,
+}: {
+  attachment: DiaryAttachment;
+}) {
+  return (
+    <Link
+      href={getAskAboutAttachmentHref(attachment)}
+      className="inline-flex min-h-9 cursor-pointer items-center gap-2 rounded-lg px-2 text-xs font-semibold text-indigo-600 transition hover:bg-indigo-50 hover:text-indigo-800 dark:text-indigo-300 dark:hover:bg-indigo-950/40 dark:hover:text-indigo-100"
+    >
+      <MessageCircleQuestion className="h-4 w-4" aria-hidden="true" />
+      Ask about this file
+    </Link>
+  );
+}
+
+function AttachmentTypeIcon({
+  kind,
+}: {
+  kind: ReturnType<typeof getAttachmentKind>;
+}) {
   const className = "h-5 w-5";
 
   if (kind === "audio") {
@@ -209,11 +308,129 @@ function AttachmentTypeIcon({ kind }: { kind: ReturnType<typeof getAttachmentKin
 }
 
 function getAttachmentIconClass(kind: ReturnType<typeof getAttachmentKind>) {
-  if (kind === "audio") return "bg-pink-50 text-pink-600 dark:bg-pink-950/40 dark:text-pink-300";
-  if (kind === "image") return "bg-cyan-50 text-cyan-700 dark:bg-cyan-950/40 dark:text-cyan-300";
-  if (kind === "pdf") return "bg-pink-50 text-pink-600 dark:bg-pink-950/40 dark:text-pink-300";
-  if (kind === "document") return "bg-indigo-50 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-300";
+  if (kind === "audio")
+    return "bg-pink-50 text-pink-600 dark:bg-pink-950/40 dark:text-pink-300";
+  if (kind === "image")
+    return "bg-cyan-50 text-cyan-700 dark:bg-cyan-950/40 dark:text-cyan-300";
+  if (kind === "pdf")
+    return "bg-pink-50 text-pink-600 dark:bg-pink-950/40 dark:text-pink-300";
+  if (kind === "document")
+    return "bg-indigo-50 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-300";
   return "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300";
+}
+
+const RELATED_MEMORY_STOP_WORDS = new Set([
+  "about",
+  "after",
+  "again",
+  "also",
+  "and",
+  "been",
+  "cua",
+  "cho",
+  "from",
+  "have",
+  "hom",
+  "mot",
+  "nhung",
+  "that",
+  "the",
+  "this",
+  "today",
+  "toi",
+  "trong",
+  "voi",
+  "was",
+  "were",
+  "with",
+  "your",
+]);
+
+function getRelatedMemoryWords(entry: DiaryEntry) {
+  const attachmentText = (entry.attachments ?? [])
+    .filter(isAttachmentObject)
+    .map((attachment) => attachment.extractedTextPreview ?? attachment.fileName)
+    .join(" ");
+  const calendarText = (entry.calendarEvents ?? [])
+    .map((event) => event.title)
+    .join(" ");
+
+  return new Set(
+    `${entry.title} ${entry.content} ${attachmentText} ${calendarText}`
+      .toLocaleLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .match(/[\p{L}\p{N}]+/gu)
+      ?.filter(
+        (word) => word.length > 3 && !RELATED_MEMORY_STOP_WORDS.has(word),
+      ) ?? [],
+  );
+}
+
+function buildRelatedMemoryMap(entries: DiaryEntry[]) {
+  const profiles = entries.map((entry) => ({
+    entry,
+    words: getRelatedMemoryWords(entry),
+    tags: new Set((entry.tags ?? []).map((tag) => tag.toLocaleLowerCase())),
+    timestamp: new Date(entry.createdAt).getTime(),
+  }));
+
+  return new Map(
+    profiles.map((profile) => {
+      const candidates = profiles
+        .filter((candidate) => candidate.entry.id !== profile.entry.id)
+        .map<RelatedMemory>((candidate) => {
+          const sharedTags = [...profile.tags].filter((tag) =>
+            candidate.tags.has(tag),
+          );
+          const sharedWords = [...profile.words].filter((word) =>
+            candidate.words.has(word),
+          );
+          const sameMood =
+            Boolean(profile.entry.mood) &&
+            profile.entry.mood === candidate.entry.mood;
+          const distanceDays =
+            Math.abs(profile.timestamp - candidate.timestamp) / 86_400_000;
+          const score =
+            sharedTags.length * 4 +
+            Math.min(sharedWords.length, 4) * 1.25 +
+            (sameMood ? 0.75 : 0) +
+            (distanceDays <= 14 ? 0.5 : 0);
+
+          let reason = "Nearby in your timeline";
+          if (sharedTags.length) {
+            reason = `Shared #${sharedTags[0]}`;
+          } else if (sharedWords.length) {
+            reason = `Similar theme: ${sharedWords.slice(0, 2).join(", ")}`;
+          } else if (sameMood && profile.entry.mood) {
+            reason = `Also felt ${MOOD_META[profile.entry.mood].label.toLocaleLowerCase()}`;
+          }
+
+          return { entry: candidate.entry, reason, score };
+        })
+        .sort((first, second) => {
+          if (second.score !== first.score) return second.score - first.score;
+          return (
+            Math.abs(
+              new Date(profile.entry.createdAt).getTime() -
+                new Date(first.entry.createdAt).getTime(),
+            ) -
+            Math.abs(
+              new Date(profile.entry.createdAt).getTime() -
+                new Date(second.entry.createdAt).getTime(),
+            )
+          );
+        });
+
+      const meaningful = candidates.filter(
+        (candidate) => candidate.score >= 1.5,
+      );
+      return [
+        profile.entry.id,
+        (meaningful.length ? meaningful : candidates).slice(0, 2),
+      ] as const;
+    }),
+  );
 }
 
 export function TimelineList({
@@ -221,20 +438,41 @@ export function TimelineList({
   onUpdate,
   onDelete,
   onLoadAttachmentAudio,
+  onProcessAttachment,
   isAdmin = false,
 }: TimelineListProps) {
   const [currentPage, setCurrentPage] = useState(1);
-  const [expandedEntryIds, setExpandedEntryIds] = useState<Set<string>>(() => new Set());
-  const [attachmentSizes, setAttachmentSizes] = useState<Record<string, number>>({});
-  const [audioPlaybackStates, setAudioPlaybackStates] = useState<Record<string, AudioPlaybackState>>({});
-  const [audioPlaybackUrls, setAudioPlaybackUrls] = useState<Record<string, string>>({});
-  const [audioDurations, setAudioDurations] = useState<Record<string, number>>({});
-  const [audioCurrentTimes, setAudioCurrentTimes] = useState<Record<string, number>>({});
+  const [expandedEntryIds, setExpandedEntryIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [attachmentSizes, setAttachmentSizes] = useState<
+    Record<string, number>
+  >({});
+  const [audioPlaybackStates, setAudioPlaybackStates] = useState<
+    Record<string, AudioPlaybackState>
+  >({});
+  const [audioPlaybackUrls, setAudioPlaybackUrls] = useState<
+    Record<string, string>
+  >({});
+  const [audioPlaybackErrors, setAudioPlaybackErrors] = useState<
+    Record<string, string>
+  >({});
+  const [audioDurations, setAudioDurations] = useState<Record<string, number>>(
+    {},
+  );
+  const [processingAttachmentIds, setProcessingAttachmentIds] = useState<
+    Set<string>
+  >(() => new Set());
   const loadingAudioIds = useRef(new Set<string>());
+  const audioFallbackAttemptedIds = useRef(new Set<string>());
   const audioObjectUrls = useRef<Record<string, string>>({});
   const requestedAttachmentSizeUrls = useRef(new Set<string>());
-  const audioElements = useRef<Record<string, HTMLAudioElement | null>>({});
+  const pendingScrollEntryId = useRef<string | null>(null);
   const totalPages = Math.max(1, Math.ceil(entries.length / PAGE_SIZE));
+  const relatedMemoriesByEntry = useMemo(
+    () => buildRelatedMemoryMap(entries),
+    [entries],
+  );
   const paginatedEntries = useMemo(() => {
     const start = (currentPage - 1) * PAGE_SIZE;
     return entries.slice(start, start + PAGE_SIZE);
@@ -257,38 +495,99 @@ export function TimelineList({
     return groups;
   }, [isAdmin, paginatedEntries]);
 
-  const loadAttachmentAudio = useCallback(async (
-    attachment: DiaryAttachment,
-    retrying = false,
-  ) => {
-    if (loadingAudioIds.current.has(attachment.id)) return;
-    if (!onLoadAttachmentAudio) {
-      setAudioPlaybackStates((current) => ({ ...current, [attachment.id]: "error" }));
-      return;
-    }
+  useEffect(() => {
+    const entryId = pendingScrollEntryId.current;
+    if (!entryId) return;
+    const target = document.getElementById(`entry-${entryId}`);
+    if (!target) return;
 
-    loadingAudioIds.current.add(attachment.id);
-    setAudioPlaybackStates((current) => ({
-      ...current,
-      [attachment.id]: retrying ? "retrying" : "loading",
-    }));
+    pendingScrollEntryId.current = null;
+    target.focus({ preventScroll: true });
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [paginatedEntries]);
 
-    try {
-      const content = await onLoadAttachmentAudio(attachment.id);
-      const objectUrl = URL.createObjectURL(content);
-      const previousUrl = audioObjectUrls.current[attachment.id];
-      audioObjectUrls.current[attachment.id] = objectUrl;
-      if (previousUrl) URL.revokeObjectURL(previousUrl);
+  const loadAttachmentAudio = useCallback(
+    async (attachment: DiaryAttachment, retrying = false) => {
+      if (loadingAudioIds.current.has(attachment.id)) return;
+      if (!retrying && attachment.signedUrl) {
+        setAudioPlaybackErrors((current) => {
+          const next = { ...current };
+          delete next[attachment.id];
+          return next;
+        });
+        setAudioPlaybackStates((current) => ({
+          ...current,
+          [attachment.id]: "loading",
+        }));
+        setAudioPlaybackUrls((current) => ({
+          ...current,
+          [attachment.id]: attachment.signedUrl as string,
+        }));
+        return;
+      }
+      if (!onLoadAttachmentAudio) {
+        setAudioPlaybackStates((current) => ({
+          ...current,
+          [attachment.id]: "error",
+        }));
+        return;
+      }
 
-      setAttachmentSizes((current) => ({ ...current, [attachment.id]: content.size }));
-      setAudioPlaybackUrls((current) => ({ ...current, [attachment.id]: objectUrl }));
-      setAudioPlaybackStates((current) => ({ ...current, [attachment.id]: "loading" }));
-    } catch {
-      setAudioPlaybackStates((current) => ({ ...current, [attachment.id]: "error" }));
-    } finally {
-      loadingAudioIds.current.delete(attachment.id);
-    }
-  }, [onLoadAttachmentAudio]);
+      loadingAudioIds.current.add(attachment.id);
+      setAudioPlaybackStates((current) => ({
+        ...current,
+        [attachment.id]: retrying ? "retrying" : "loading",
+      }));
+      setAudioPlaybackErrors((current) => {
+        const next = { ...current };
+        delete next[attachment.id];
+        return next;
+      });
+
+      try {
+        const content = await onLoadAttachmentAudio(attachment.id);
+        const nextUrl =
+          typeof content === "string" ? content : URL.createObjectURL(content);
+        const previousUrl = audioObjectUrls.current[attachment.id];
+        if (previousUrl) URL.revokeObjectURL(previousUrl);
+        if (typeof content === "string") {
+          delete audioObjectUrls.current[attachment.id];
+        } else {
+          audioObjectUrls.current[attachment.id] = nextUrl;
+        }
+
+        if (content instanceof Blob) {
+          setAttachmentSizes((current) => ({
+            ...current,
+            [attachment.id]: content.size,
+          }));
+        }
+        setAudioPlaybackUrls((current) => ({
+          ...current,
+          [attachment.id]: nextUrl,
+        }));
+        setAudioPlaybackStates((current) => ({
+          ...current,
+          [attachment.id]: "loading",
+        }));
+      } catch (error) {
+        setAudioPlaybackErrors((current) => ({
+          ...current,
+          [attachment.id]:
+            error instanceof Error
+              ? error.message
+              : "The audio source could not be loaded.",
+        }));
+        setAudioPlaybackStates((current) => ({
+          ...current,
+          [attachment.id]: "error",
+        }));
+      } finally {
+        loadingAudioIds.current.delete(attachment.id);
+      }
+    },
+    [onLoadAttachmentAudio],
+  );
 
   useEffect(() => {
     paginatedEntries.forEach((entry) => {
@@ -299,11 +598,21 @@ export function TimelineList({
         void loadAttachmentAudio(attachment);
       });
     });
-  }, [audioPlaybackStates, audioPlaybackUrls, loadAttachmentAudio, paginatedEntries]);
+  }, [
+    audioPlaybackStates,
+    audioPlaybackUrls,
+    loadAttachmentAudio,
+    paginatedEntries,
+  ]);
 
-  useEffect(() => () => {
-    Object.values(audioObjectUrls.current).forEach((url) => URL.revokeObjectURL(url));
-  }, []);
+  useEffect(
+    () => () => {
+      Object.values(audioObjectUrls.current).forEach((url) =>
+        URL.revokeObjectURL(url),
+      );
+    },
+    [],
+  );
 
   useEffect(() => {
     const controller = new AbortController();
@@ -322,7 +631,10 @@ export function TimelineList({
             if (!response.ok) return;
             const bytes = Number(response.headers.get("content-length"));
             if (!Number.isFinite(bytes) || bytes <= 0) return;
-            setAttachmentSizes((current) => ({ ...current, [attachment.id]: bytes }));
+            setAttachmentSizes((current) => ({
+              ...current,
+              [attachment.id]: bytes,
+            }));
           })
           .catch(() => undefined);
       });
@@ -340,14 +652,22 @@ export function TimelineList({
   const [isDeleting, setIsDeleting] = useState(false);
 
   // Toast feedback
-  const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [toast, setToast] = useState<{
+    type: "success" | "error";
+    message: string;
+  } | null>(null);
 
   const showToast = (type: "success" | "error", message: string) => {
     setToast({ type, message });
     setTimeout(() => setToast(null), 3000);
   };
 
-  const handleSaveEdit = async (data: { title: string; content: string; mood: DiaryMood; tags: string[] }) => {
+  const handleSaveEdit = async (data: {
+    title: string;
+    content: string;
+    mood: DiaryMood;
+    tags: string[];
+  }) => {
     if (!editingEntry || !onUpdate) return;
     setIsSaving(true);
     try {
@@ -355,7 +675,10 @@ export function TimelineList({
       showToast("success", "Entry updated successfully");
       setEditingEntry(null);
     } catch (error) {
-      showToast("error", error instanceof Error ? error.message : "Failed to update");
+      showToast(
+        "error",
+        error instanceof Error ? error.message : "Failed to update",
+      );
     } finally {
       setIsSaving(false);
     }
@@ -369,9 +692,42 @@ export function TimelineList({
       showToast("success", "Entry deleted successfully");
       setDeletingEntry(null);
     } catch (error) {
-      showToast("error", error instanceof Error ? error.message : "Failed to delete");
+      showToast(
+        "error",
+        error instanceof Error ? error.message : "Failed to delete",
+      );
     } finally {
       setIsDeleting(false);
+    }
+  };
+
+  const handleProcessAttachment = async (attachment: DiaryAttachment) => {
+    if (!onProcessAttachment || processingAttachmentIds.has(attachment.id))
+      return;
+    setProcessingAttachmentIds((current) =>
+      new Set(current).add(attachment.id),
+    );
+    try {
+      await onProcessAttachment(attachment.id);
+      showToast(
+        "success",
+        attachment.fileType.startsWith("audio/")
+          ? "Transcription queued"
+          : "AI scan queued",
+      );
+    } catch (error) {
+      showToast(
+        "error",
+        error instanceof Error
+          ? error.message
+          : "Could not retry attachment processing",
+      );
+    } finally {
+      setProcessingAttachmentIds((current) => {
+        const next = new Set(current);
+        next.delete(attachment.id);
+        return next;
+      });
     }
   };
 
@@ -391,15 +747,36 @@ export function TimelineList({
     });
   };
 
+  const openRelatedMemory = (id: string) => {
+    const entryIndex = entries.findIndex((entry) => entry.id === id);
+    if (entryIndex < 0) return;
+    const targetPage = Math.floor(entryIndex / PAGE_SIZE) + 1;
+    pendingScrollEntryId.current = id;
+
+    if (targetPage === currentPage) {
+      const target = document.getElementById(`entry-${id}`);
+      if (target) {
+        pendingScrollEntryId.current = null;
+        target.focus({ preventScroll: true });
+        target.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+      return;
+    }
+
+    setCurrentPage(targetPage);
+  };
+
   return (
     <div className="relative">
       {/* Toast notification */}
       {toast && (
-        <div className={`animate-fade-in fixed top-6 right-6 z-50 flex items-center gap-2 rounded-lg px-4 py-3 text-sm font-medium shadow-sm ${
-          toast.type === "success"
-            ? "bg-emerald-600 text-white"
-            : "bg-rose-600 text-white"
-        }`}>
+        <div
+          className={`animate-fade-in fixed top-6 right-6 z-50 flex items-center gap-2 rounded-lg px-4 py-3 text-sm font-medium shadow-sm ${
+            toast.type === "success"
+              ? "bg-emerald-600 text-white"
+              : "bg-rose-600 text-white"
+          }`}
+        >
           {toast.type === "success" ? (
             <Check className="h-4 w-4" aria-hidden="true" />
           ) : (
@@ -411,361 +788,654 @@ export function TimelineList({
 
       <div className="space-y-8">
         {groupedPaginatedEntries.map((group) => (
-          <section key={group.key} aria-labelledby={`timeline-group-${group.key}`}>
+          <section
+            key={group.key}
+            aria-labelledby={`timeline-group-${group.key}`}
+          >
             <div className="mb-3 flex items-center gap-3 pl-10">
-              <h2 id={`timeline-group-${group.key}`} className="shrink-0 text-base font-bold text-slate-950 dark:text-slate-100">
+              <h2
+                id={`timeline-group-${group.key}`}
+                className="shrink-0 text-base font-bold text-slate-950 dark:text-slate-100"
+              >
                 {group.label}
               </h2>
               <span className="shrink-0 text-xs font-medium text-slate-400 dark:text-slate-500">
-                {group.items.length} {group.items.length === 1 ? "memory" : "memories"}
+                {group.items.length}{" "}
+                {group.items.length === 1 ? "memory" : "memories"}
               </span>
-              <span className="h-px flex-1 bg-slate-200 dark:bg-slate-800" aria-hidden="true" />
+              <span
+                className="h-px flex-1 bg-slate-200 dark:bg-slate-800"
+                aria-hidden="true"
+              />
             </div>
             <div className="relative">
               {group.items.length > 1 ? (
-                <div className="absolute bottom-6 left-[14px] top-7 w-px bg-slate-200 dark:bg-slate-800" aria-hidden="true" />
+                <div
+                  className="absolute bottom-6 left-[14px] top-7 w-px bg-slate-200 dark:bg-slate-800"
+                  aria-hidden="true"
+                />
               ) : null}
               <ul className="space-y-4">
-        {group.items.map(({ entry, index }) => {
-          const activityDate = getEntryActivityDate(entry, isAdmin);
-          const showCreatedDate = isDifferentTimestamp(activityDate, entry.createdAt);
-          const isExpanded = expandedEntryIds.has(entry.id);
-          const shouldClamp = entry.content.trim().length > 360;
-          const MoodIcon = entry.mood ? MOOD_META[entry.mood].icon : null;
+                {group.items.map(({ entry, index }) => {
+                  const activityDate = getEntryActivityDate(entry, isAdmin);
+                  const showCreatedDate = isDifferentTimestamp(
+                    activityDate,
+                    entry.createdAt,
+                  );
+                  const isExpanded = expandedEntryIds.has(entry.id);
+                  const shouldClamp = entry.content.trim().length > 360;
+                  const moodMeta = entry.mood ? MOOD_META[entry.mood] : null;
+                  const MoodIcon = moodMeta?.icon;
+                  const relatedMemories =
+                    relatedMemoriesByEntry.get(entry.id) ?? [];
 
-          return (
-          <li key={entry.id} className="relative pl-10">
-            {/* Timeline dot */}
-            <div className="absolute left-0 top-5 z-10 flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-pink-600 text-white dark:border-slate-950 dark:bg-pink-500">
-              <PencilLine className="h-3.5 w-3.5" aria-hidden="true" />
-            </div>
-            
-            {/* Card */}
-            <div className="group relative enterprise-card p-4 transition hover:border-pink-200 dark:hover:border-pink-900/70">
-              {/* Entry number badge + action buttons */}
-              {isAdmin ? (
-              <div className="absolute -top-3 right-6 flex items-center gap-2">
-                <span className="status-badge">
-                  Entry #{entries.length - ((currentPage - 1) * PAGE_SIZE + index)}
-                </span>
-              </div>
-              ) : null}
-
-              {/* Header */}
-              <div className="mb-3 flex flex-col gap-2">
-                <div className="flex items-start justify-between gap-3">
-                  <h3 className="text-lg font-bold leading-7 text-slate-900 dark:text-slate-100">
-                    {entry.title}
-                  </h3>
-
-                  {/* Action buttons */}
-                  {(onUpdate || onDelete) && (
-                    <div className="flex shrink-0 items-center gap-1 opacity-100 transition-opacity lg:opacity-0 lg:group-hover:opacity-100 lg:group-focus-within:opacity-100">
-                      {onUpdate && (
-                        <button
-                          type="button"
-                          onClick={() => setEditingEntry(entry)}
-                          className="cursor-pointer rounded-lg p-1.5 text-slate-400 transition hover:bg-indigo-50 hover:text-indigo-600 dark:hover:bg-indigo-900/30 dark:hover:text-indigo-400"
-                          title="Edit entry"
-                          aria-label={`Edit ${entry.title}`}
-                        >
-                          <PencilLine className="h-4 w-4" aria-hidden="true" />
-                        </button>
-                      )}
-                      {onDelete && (
-                        <button
-                          type="button"
-                          onClick={() => setDeletingEntry(entry)}
-                          className="cursor-pointer rounded-lg p-1.5 text-slate-400 transition hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-900/30 dark:hover:text-rose-400"
-                          title="Delete entry"
-                          aria-label={`Delete ${entry.title}`}
-                        >
-                          <Trash2 className="h-4 w-4" aria-hidden="true" />
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-                <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
-                  <CalendarDays className="h-3.5 w-3.5" aria-hidden="true" />
-                  <span className="text-xs font-medium text-slate-400 dark:text-slate-500">
-                    {isAdmin ? "Memory time" : "Created time"}
-                  </span>
-                  <time className="font-medium">
-                    {formatDiaryDate(activityDate)} · {formatEntryTime(activityDate)}
-                  </time>
-                </div>
-                {(entry.mood || entry.tags?.length) && (
-                  <div className="flex flex-wrap items-center gap-2 pt-1">
-                    {entry.mood ? (
-                      <span className={`status-badge ${MOOD_META[entry.mood].className}`}>
-                        {MoodIcon ? <MoodIcon className="h-3.5 w-3.5" aria-hidden="true" /> : null}
-                        {MOOD_META[entry.mood].label}
-                      </span>
-                    ) : null}
-                    {entry.tags?.map((tag) => (
-                      <span
-                        key={tag}
-                        className="status-badge"
+                  return (
+                    <li key={entry.id} className="relative pl-10">
+                      {/* Timeline dot */}
+                      <div
+                        className={`absolute left-0 top-5 z-10 flex h-7 w-7 items-center justify-center rounded-full border-2 border-white dark:border-slate-950 ${moodMeta ? `${moodMeta.className} shadow-sm` : "bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-300"}`}
+                        title={moodMeta?.label ?? "Diary memory"}
                       >
-                        #{tag}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-              
-              {/* Content */}
-              <div className="relative">
-                <div className="absolute bottom-0 left-0 top-0 w-1 rounded-full bg-pink-500"></div>
-                <p className={`pl-4 text-sm leading-7 text-slate-700 dark:text-slate-300 ${shouldClamp && !isExpanded ? "line-clamp-4" : ""}`}>
-                  {entry.content}
-                </p>
-                {shouldClamp ? (
-                  <button
-                    type="button"
-                    onClick={() => toggleEntryExpanded(entry.id)}
-                    className="mt-2 cursor-pointer pl-4 text-xs font-semibold text-pink-600 transition hover:text-pink-700 dark:text-pink-300 dark:hover:text-pink-200"
-                  >
-                    {isExpanded ? "Show less" : "View more"}
-                  </button>
-                ) : null}
-              </div>
+                        {MoodIcon ? (
+                          <MoodIcon
+                            className="h-3.5 w-3.5"
+                            aria-hidden="true"
+                          />
+                        ) : (
+                          <PencilLine
+                            className="h-3.5 w-3.5"
+                            aria-hidden="true"
+                          />
+                        )}
+                      </div>
 
-              {/* Linked calendar events */}
-              {entry.calendarEvents && entry.calendarEvents.length > 0 && (
-                <div className="mt-4 border-t border-slate-100 pt-4 dark:border-slate-700">
-                  <p className="mb-2 text-[13px] font-semibold text-slate-600 dark:text-slate-300">
-                    Linked calendar events
-                  </p>
-                  <div className="grid gap-2">
-                    {entry.calendarEvents.map((event) => {
-                      const content = (
-                        <>
-                          <CalendarDays className="h-4 w-4 shrink-0 text-cyan-600 dark:text-cyan-300" aria-hidden="true" />
-                          <span className="min-w-0 flex-1 truncate font-medium">{event.title}</span>
-                          <span className="shrink-0 text-slate-500 dark:text-slate-400">{formatEventTime(event)}</span>
-                        </>
-                      );
-
-                      return event.htmlLink ? (
-                        <a
-                          key={event.id}
-                          href={event.htmlLink}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center gap-2 rounded-lg border border-sky-100 bg-sky-50 px-3 py-2 text-xs text-sky-800 transition hover:border-sky-200 hover:bg-sky-100 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-sky-200 dark:hover:bg-sky-900/40"
-                        >
-                          {content}
-                        </a>
-                      ) : (
-                        <div
-                          key={event.id}
-                          className="flex items-center gap-2 rounded-lg border border-sky-100 bg-sky-50 px-3 py-2 text-xs text-sky-800 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-sky-200"
-                        >
-                          {content}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {/* Attachments */}
-              {entry.attachments && entry.attachments.length > 0 && (
-                <div className="mt-4 border-t border-slate-100 pt-4 dark:border-slate-700">
-                  <p className="mb-2 text-[13px] font-semibold text-slate-600 dark:text-slate-300">
-                    Attachments
-                  </p>
-                  <div className="grid gap-2">
-                    {entry.attachments.map((attachment, i) => {
-                      const status = getAttachmentStatus(attachment);
-                      const href = getAttachmentHref(attachment);
-                      const label = getAttachmentLabel(attachment, i);
-                      const indexStatusLabel = getIndexStatusLabel(status);
-                      const attachmentKind = getAttachmentKind(attachment);
-                      const attachmentTypeLabel = getAttachmentTypeLabel(attachment);
-                      const attachmentId = isAttachmentObject(attachment) ? attachment.id : undefined;
-                      const fileSizeLabel = attachmentId ? formatFileSize(attachmentSizes[attachmentId]) : undefined;
-                      const duration = attachmentId ? audioDurations[attachmentId] : undefined;
-                      const durationLabel = attachmentKind === "audio" && duration ? formatDuration(duration) : undefined;
-                      const attachmentHeader = (
-                        <>
-                          <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${getAttachmentIconClass(attachmentKind)}`}>
-                            <AttachmentTypeIcon kind={attachmentKind} />
-                          </span>
-                          <span className="min-w-0 flex-1">
-                            <span className="block truncate text-sm font-semibold text-slate-800 dark:text-slate-200">{label}</span>
-                            <span className="mt-0.5 flex flex-wrap items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400">
-                              <span>{attachmentTypeLabel}</span>
-                              {fileSizeLabel ? <><span aria-hidden="true">·</span><span>{fileSizeLabel}</span></> : null}
-                              {durationLabel ? <><span aria-hidden="true">·</span><span>{durationLabel}</span></> : null}
-                              <span aria-hidden="true">·</span>
-                              <span
-                                className={`inline-flex items-center gap-1 font-medium ${getStatusTextClass(status)}`}
-                                aria-label={`Memory indexing status: ${indexStatusLabel}`}
-                              >
-                                <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true" />
-                                {indexStatusLabel}
-                              </span>
+                      {/* Card */}
+                      <div
+                        id={`entry-${entry.id}`}
+                        tabIndex={-1}
+                        className="group relative enterprise-card p-4 transition focus:outline-none focus:ring-2 focus:ring-indigo-200 hover:border-slate-300 dark:focus:ring-indigo-900 dark:hover:border-slate-700"
+                      >
+                        {/* Entry number badge + action buttons */}
+                        {isAdmin ? (
+                          <div className="absolute -top-3 right-6 flex items-center gap-2">
+                            <span className="status-badge">
+                              Entry #
+                              {entries.length -
+                                ((currentPage - 1) * PAGE_SIZE + index)}
                             </span>
-                          </span>
-                        </>
-                      );
+                          </div>
+                        ) : null}
 
-                      if (isAudioAttachment(attachment)) {
-                        const audioSource = audioPlaybackUrls[attachment.id];
-                        const playbackState = audioPlaybackStates[attachment.id] ?? "loading";
-                        const showPlayer = Boolean(audioSource)
-                          && playbackState !== "retrying"
-                          && playbackState !== "error";
+                        {/* Header */}
+                        <div className="mb-3 flex flex-col gap-2">
+                          <div className="flex items-start justify-between gap-3">
+                            <h3 className="text-lg font-bold leading-7 text-slate-900 dark:text-slate-100">
+                              {entry.title}
+                            </h3>
 
-                        return (
-                          <div
-                            key={attachment.id}
-                            className="w-full max-w-xl rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950"
-                          >
-                            <div className="mb-3 flex min-w-0 items-center gap-3">
-                              {attachmentHeader}
-                            </div>
-                            {audioSource ? (
-                              <audio
-                                key={audioSource}
-                                ref={(element) => {
-                                  audioElements.current[attachment.id] = element;
-                                }}
-                                controls
-                                preload="metadata"
-                                src={audioSource}
-                                onError={() => {
-                                  setAudioPlaybackStates((current) => ({
-                                    ...current,
-                                    [attachment.id]: "error",
-                                  }));
-                                }}
-                                onLoadedMetadata={(event) => {
-                                  const nextDuration = event.currentTarget.duration;
-                                  if (Number.isFinite(nextDuration)) {
-                                    setAudioDurations((current) => ({ ...current, [attachment.id]: nextDuration }));
-                                  }
-                                  setAudioPlaybackStates((current) => ({
-                                    ...current,
-                                    [attachment.id]: "ready",
-                                  }));
-                                }}
-                                onTimeUpdate={(event) => {
-                                  setAudioCurrentTimes((current) => ({
-                                    ...current,
-                                    [attachment.id]: event.currentTarget.currentTime,
-                                  }));
-                                }}
-                                aria-label={`Play ${label}`}
-                                className={showPlayer ? "h-9 w-full" : "hidden"}
-                              >
-                                Your browser does not support audio playback.
-                              </audio>
-                            ) : null}
-                            <div className={playbackState === "ready" ? "sr-only" : "mt-2"} aria-live="polite">
-                              {playbackState === "loading" ? (
-                                <p className="flex items-center gap-2 text-xs font-medium text-slate-500 dark:text-slate-400">
-                                  <span className="h-3 w-3 animate-spin rounded-full border-2 border-slate-300 border-t-indigo-500 dark:border-slate-600 dark:border-t-indigo-400" aria-hidden="true" />
-                                  Loading audio
-                                </p>
-                              ) : null}
-                              {playbackState === "retrying" ? (
-                                <p className="flex min-h-10 items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 text-xs font-medium text-sky-700 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-sky-300">
-                                  <span className="h-3 w-3 animate-spin rounded-full border-2 border-sky-300 border-t-sky-600 dark:border-sky-700 dark:border-t-sky-300" aria-hidden="true" />
-                                  Retrying audio
-                                </p>
-                              ) : null}
-                              {playbackState === "error" ? (
-                                <div className="flex min-h-11 flex-wrap items-center justify-between gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs dark:border-rose-900/60 dark:bg-rose-950/30">
-                                  <span className="font-medium text-rose-700 dark:text-rose-300">Playback unavailable</span>
+                            {/* Action buttons */}
+                            {(onUpdate || onDelete) && (
+                              <div className="flex shrink-0 items-center gap-1 opacity-100 transition-opacity lg:opacity-0 lg:group-hover:opacity-100 lg:group-focus-within:opacity-100">
+                                {onUpdate && (
                                   <button
                                     type="button"
-                                    onClick={() => void loadAttachmentAudio(attachment, true)}
-                                    className="inline-flex min-h-10 cursor-pointer items-center justify-center rounded-lg border border-rose-300 bg-white px-3 font-semibold text-rose-700 transition hover:bg-rose-100 dark:border-rose-800 dark:bg-rose-950/50 dark:text-rose-300 dark:hover:bg-rose-900/40"
+                                    onClick={() => setEditingEntry(entry)}
+                                    className="cursor-pointer rounded-lg p-1.5 text-slate-400 transition hover:bg-indigo-50 hover:text-indigo-600 dark:hover:bg-indigo-900/30 dark:hover:text-indigo-400"
+                                    title="Edit entry"
+                                    aria-label={`Edit ${entry.title}`}
                                   >
-                                    Retry
+                                    <PencilLine
+                                      className="h-4 w-4"
+                                      aria-hidden="true"
+                                    />
                                   </button>
-                                </div>
-                              ) : null}
-                              {playbackState === "ready" ? "Audio ready to play" : null}
-                            </div>
-                            {showPlayer && duration && duration > 0 ? (
-                              <div className="mt-2 flex items-center gap-2 text-[11px] font-medium text-slate-500 dark:text-slate-400">
-                                <span className="w-9 text-right tabular-nums">{formatDuration(audioCurrentTimes[attachment.id])}</span>
-                                <input
-                                  type="range"
-                                  min="0"
-                                  max={duration}
-                                  step="0.1"
-                                  value={Math.min(audioCurrentTimes[attachment.id] ?? 0, duration)}
-                                  onChange={(event) => {
-                                    const nextTime = Number(event.target.value);
-                                    const audio = audioElements.current[attachment.id];
-                                    if (audio) audio.currentTime = nextTime;
-                                    setAudioCurrentTimes((current) => ({ ...current, [attachment.id]: nextTime }));
-                                  }}
-                                  className="h-1.5 min-w-0 flex-1 cursor-pointer accent-indigo-600"
-                                  aria-label={`Seek ${label}`}
-                                />
-                                <span className="w-9 tabular-nums">{formatDuration(duration)}</span>
+                                )}
+                                {onDelete && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setDeletingEntry(entry)}
+                                    className="cursor-pointer rounded-lg p-1.5 text-slate-400 transition hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-900/30 dark:hover:text-rose-400"
+                                    title="Delete entry"
+                                    aria-label={`Delete ${entry.title}`}
+                                  >
+                                    <Trash2
+                                      className="h-4 w-4"
+                                      aria-hidden="true"
+                                    />
+                                  </button>
+                                )}
                               </div>
-                            ) : null}
+                            )}
                           </div>
-                        );
-                      }
-
-                      return href ? (
-                        <a
-                          key={isAttachmentObject(attachment) ? attachment.id : `${attachment}-${i}`}
-                          href={href}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex w-full max-w-xl items-center gap-3 rounded-lg border border-slate-200 bg-white p-3 transition-colors hover:border-indigo-200 hover:bg-indigo-50/30 dark:border-slate-800 dark:bg-slate-950 dark:hover:border-indigo-800 dark:hover:bg-indigo-950/20"
-                        >
-                          {attachmentHeader}
-                          <ExternalLink className="h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
-                        </a>
-                      ) : (
-                        <div
-                          key={isAttachmentObject(attachment) ? attachment.id : i}
-                          className="flex w-full max-w-xl items-center gap-3 rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950"
-                        >
-                          {attachmentHeader}
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
+                            <CalendarDays
+                              className="h-3.5 w-3.5"
+                              aria-hidden="true"
+                            />
+                            {isAdmin ? (
+                              <span className="font-medium text-slate-400 dark:text-slate-500">
+                                Memory time
+                              </span>
+                            ) : null}
+                            <time className="font-medium">
+                              {formatDiaryDate(activityDate)} ·{" "}
+                              {formatEntryTime(activityDate)}
+                            </time>
+                            {entry.mood ? (
+                              <>
+                                <span
+                                  className="text-slate-300 dark:text-slate-700"
+                                  aria-hidden="true"
+                                >
+                                  ·
+                                </span>
+                                <span
+                                  className={`inline-flex items-center gap-1.5 font-medium ${moodMeta?.iconClassName ?? "text-slate-600 dark:text-slate-300"}`}
+                                >
+                                  {MoodIcon ? (
+                                    <MoodIcon
+                                      className="h-3.5 w-3.5"
+                                      aria-hidden="true"
+                                    />
+                                  ) : null}
+                                  {moodMeta?.label}
+                                </span>
+                              </>
+                            ) : null}
+                            {entry.tags?.map((tag) => (
+                              <span
+                                key={tag}
+                                className="text-slate-400 dark:text-slate-500"
+                              >
+                                #{tag}
+                              </span>
+                            ))}
+                          </div>
                         </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-              
-              {/* Footer decoration */}
-              {isAdmin && showCreatedDate ? (
-                <div className="mt-4 flex items-center gap-2 border-t border-slate-100 pt-4 text-[11px] text-slate-400 dark:border-slate-700 dark:text-slate-500">
-                <Clock3 className="h-3.5 w-3.5" aria-hidden="true" />
-                <span>Created {formatDateTime(entry.createdAt)}</span>
-                </div>
-              ) : null}
-            </div>
-          </li>
-          );
-        })}
+
+                        {/* Content */}
+                        <div className="relative">
+                          <div
+                            className={`absolute bottom-0 left-0 top-0 w-1 rounded-full ${moodMeta?.railClassName ?? "bg-slate-300 dark:bg-slate-600"}`}
+                          />
+                          <p
+                            className={`pl-4 text-sm leading-7 text-slate-700 dark:text-slate-300 ${shouldClamp && !isExpanded ? "line-clamp-4" : ""}`}
+                          >
+                            {entry.content}
+                          </p>
+                          {shouldClamp ? (
+                            <button
+                              type="button"
+                              onClick={() => toggleEntryExpanded(entry.id)}
+                              className="mt-2 cursor-pointer pl-4 text-xs font-semibold text-indigo-600 transition hover:text-indigo-800 dark:text-indigo-300 dark:hover:text-indigo-100"
+                            >
+                              {isExpanded ? "Show less" : "View more"}
+                            </button>
+                          ) : null}
+                        </div>
+
+                        {/* Linked calendar events */}
+                        {entry.calendarEvents &&
+                          entry.calendarEvents.length > 0 && (
+                            <div className="mt-4 border-t border-slate-100 pt-4 dark:border-slate-700">
+                              <p className="mb-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400">
+                                Calendar
+                              </p>
+                              <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                                {entry.calendarEvents.map((event) => {
+                                  const content = (
+                                    <>
+                                      <CalendarDays
+                                        className="h-4 w-4 shrink-0 text-cyan-600 dark:text-cyan-300"
+                                        aria-hidden="true"
+                                      />
+                                      <span className="min-w-0 flex-1 truncate font-medium">
+                                        {event.title}
+                                      </span>
+                                      <span className="shrink-0 text-slate-500 dark:text-slate-400">
+                                        {formatEventTime(event)}
+                                      </span>
+                                    </>
+                                  );
+
+                                  return event.htmlLink ? (
+                                    <a
+                                      key={event.id}
+                                      href={event.htmlLink}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="flex items-center gap-2 border-l-2 border-cyan-300 px-3 py-2 text-xs text-slate-700 transition hover:bg-cyan-50/60 dark:border-cyan-800 dark:text-slate-300 dark:hover:bg-cyan-950/20"
+                                    >
+                                      {content}
+                                    </a>
+                                  ) : (
+                                    <div
+                                      key={event.id}
+                                      className="flex items-center gap-2 border-l-2 border-cyan-300 px-3 py-2 text-xs text-slate-700 dark:border-cyan-800 dark:text-slate-300"
+                                    >
+                                      {content}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+
+                        {/* Attachments */}
+                        {entry.attachments && entry.attachments.length > 0 && (
+                          <div className="mt-4 border-t border-slate-100 pt-4 dark:border-slate-700">
+                            <p className="mb-1 text-xs font-semibold text-slate-500 dark:text-slate-400">
+                              {entry.attachments.length}{" "}
+                              {entry.attachments.length === 1
+                                ? "attachment"
+                                : "attachments"}
+                            </p>
+                            <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                              {entry.attachments.map((attachment, i) => {
+                                const status = getAttachmentStatus(attachment);
+                                const href = getAttachmentHref(attachment);
+                                const label = getAttachmentLabel(attachment, i);
+                                const attachmentKind =
+                                  getAttachmentKind(attachment);
+                                const attachmentData = isAttachmentObject(
+                                  attachment,
+                                )
+                                  ? attachment
+                                  : undefined;
+                                const indexStatusLabel =
+                                  status === "failed"
+                                    ? attachmentKind === "audio"
+                                      ? "Transcription failed"
+                                      : "AI scan failed"
+                                    : getIndexStatusLabel(status);
+                                const attachmentTypeLabel =
+                                  getAttachmentTypeLabel(attachment);
+                                const attachmentId = attachmentData?.id;
+                                const fileSizeLabel = attachmentId
+                                  ? formatFileSize(
+                                      attachmentSizes[attachmentId],
+                                    )
+                                  : undefined;
+                                const duration = attachmentId
+                                  ? audioDurations[attachmentId]
+                                  : undefined;
+                                const durationLabel =
+                                  attachmentKind === "audio" && duration
+                                    ? formatDuration(duration)
+                                    : undefined;
+                                const isProcessingAttachment = attachmentId
+                                  ? processingAttachmentIds.has(attachmentId)
+                                  : false;
+                                const canRetryExtraction = Boolean(
+                                  attachmentData &&
+                                  status === "failed" &&
+                                  onProcessAttachment,
+                                );
+                                const extractionDetails =
+                                  attachmentData?.extractedTextPreview ? (
+                                    <details className="mt-3 border-t border-slate-100 pt-3 dark:border-slate-800">
+                                      <summary className="flex min-h-10 cursor-pointer list-none items-center gap-2 text-xs font-semibold text-indigo-700 marker:hidden dark:text-indigo-300">
+                                        <ScanText
+                                          className="h-4 w-4"
+                                          aria-hidden="true"
+                                        />
+                                        AI-read content
+                                        {attachmentData.extractedCharacterCount ? (
+                                          <span className="font-normal text-slate-400 dark:text-slate-500">
+                                            {attachmentData.extractedCharacterCount.toLocaleString()}{" "}
+                                            characters
+                                          </span>
+                                        ) : null}
+                                      </summary>
+                                      <p className="max-h-56 overflow-y-auto whitespace-pre-wrap border-l-2 border-indigo-200 px-3 text-xs leading-5 text-slate-600 dark:border-indigo-900 dark:text-slate-300">
+                                        {attachmentData.extractedTextPreview}
+                                      </p>
+                                    </details>
+                                  ) : null;
+                                const extractionRetryButton =
+                                  canRetryExtraction && attachmentData ? (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        void handleProcessAttachment(
+                                          attachmentData,
+                                        )
+                                      }
+                                      disabled={isProcessingAttachment}
+                                      className="mt-3 inline-flex min-h-10 cursor-pointer items-center justify-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 text-xs font-semibold text-rose-700 transition hover:bg-rose-100 disabled:cursor-wait disabled:opacity-70 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-300 dark:hover:bg-rose-900/40"
+                                    >
+                                      <RefreshCw
+                                        className={`h-4 w-4 ${isProcessingAttachment ? "animate-spin" : ""}`}
+                                        aria-hidden="true"
+                                      />
+                                      {isProcessingAttachment
+                                        ? "Queueing"
+                                        : attachmentKind === "audio"
+                                          ? "Retry transcription"
+                                          : "Retry AI scan"}
+                                    </button>
+                                  ) : null;
+                                const attachmentHeader = (
+                                  <>
+                                    <span
+                                      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${getAttachmentIconClass(attachmentKind)}`}
+                                    >
+                                      <AttachmentTypeIcon
+                                        kind={attachmentKind}
+                                      />
+                                    </span>
+                                    <span className="min-w-0 flex-1">
+                                      <span className="block truncate text-sm font-semibold text-slate-800 dark:text-slate-200">
+                                        {label}
+                                      </span>
+                                      <span className="mt-0.5 flex flex-wrap items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400">
+                                        <span>{attachmentTypeLabel}</span>
+                                        {fileSizeLabel ? (
+                                          <>
+                                            <span aria-hidden="true">·</span>
+                                            <span>{fileSizeLabel}</span>
+                                          </>
+                                        ) : null}
+                                        {durationLabel ? (
+                                          <>
+                                            <span aria-hidden="true">·</span>
+                                            <span>{durationLabel}</span>
+                                          </>
+                                        ) : null}
+                                        <span aria-hidden="true">·</span>
+                                        <span
+                                          className={`inline-flex items-center gap-1 font-medium ${getStatusTextClass(status)}`}
+                                          aria-label={`Memory indexing status: ${indexStatusLabel}`}
+                                        >
+                                          <span
+                                            className="h-1.5 w-1.5 rounded-full bg-current"
+                                            aria-hidden="true"
+                                          />
+                                          {indexStatusLabel}
+                                        </span>
+                                      </span>
+                                    </span>
+                                  </>
+                                );
+
+                                if (isAudioAttachment(attachment)) {
+                                  const audioSource =
+                                    audioPlaybackUrls[attachment.id];
+                                  const playbackState =
+                                    audioPlaybackStates[attachment.id] ??
+                                    "loading";
+                                  const showPlayer =
+                                    Boolean(audioSource) &&
+                                    playbackState !== "retrying" &&
+                                    playbackState !== "error";
+
+                                  return (
+                                    <div
+                                      key={attachment.id}
+                                      id={`attachment-${attachment.id}`}
+                                      className="w-full max-w-xl py-3"
+                                    >
+                                      <div className="mb-3 flex min-w-0 items-center gap-3">
+                                        {attachmentHeader}
+                                      </div>
+                                      {audioSource ? (
+                                        <audio
+                                          key={audioSource}
+                                          controls
+                                          preload="metadata"
+                                          src={audioSource}
+                                          onError={(event) => {
+                                            if (
+                                              !audioFallbackAttemptedIds.current.has(
+                                                attachment.id,
+                                              )
+                                            ) {
+                                              audioFallbackAttemptedIds.current.add(
+                                                attachment.id,
+                                              );
+                                              void loadAttachmentAudio(
+                                                attachment,
+                                                true,
+                                              );
+                                              return;
+                                            }
+                                            const mediaError =
+                                              event.currentTarget.error;
+                                            setAudioPlaybackErrors(
+                                              (current) => ({
+                                                ...current,
+                                                [attachment.id]:
+                                                  getMediaErrorMessage(
+                                                    mediaError,
+                                                  ),
+                                              }),
+                                            );
+                                            setAudioPlaybackStates(
+                                              (current) => ({
+                                                ...current,
+                                                [attachment.id]: "error",
+                                              }),
+                                            );
+                                          }}
+                                          onLoadedMetadata={(event) => {
+                                            const nextDuration =
+                                              event.currentTarget.duration;
+                                            if (Number.isFinite(nextDuration)) {
+                                              setAudioDurations((current) => ({
+                                                ...current,
+                                                [attachment.id]: nextDuration,
+                                              }));
+                                            }
+                                            setAudioPlaybackStates(
+                                              (current) => ({
+                                                ...current,
+                                                [attachment.id]: "ready",
+                                              }),
+                                            );
+                                          }}
+                                          aria-label={`Play ${label}`}
+                                          className={
+                                            showPlayer ? "h-9 w-full" : "hidden"
+                                          }
+                                        >
+                                          Your browser does not support audio
+                                          playback.
+                                        </audio>
+                                      ) : null}
+                                      <div
+                                        className={
+                                          playbackState === "ready"
+                                            ? "sr-only"
+                                            : "mt-2"
+                                        }
+                                        aria-live="polite"
+                                      >
+                                        {playbackState === "loading" ? (
+                                          <p className="flex items-center gap-2 text-xs font-medium text-slate-500 dark:text-slate-400">
+                                            <span
+                                              className="h-3 w-3 animate-spin rounded-full border-2 border-slate-300 border-t-indigo-500 dark:border-slate-600 dark:border-t-indigo-400"
+                                              aria-hidden="true"
+                                            />
+                                            Loading audio
+                                          </p>
+                                        ) : null}
+                                        {playbackState === "retrying" ? (
+                                          <p className="flex min-h-10 items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 text-xs font-medium text-sky-700 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-sky-300">
+                                            <span
+                                              className="h-3 w-3 animate-spin rounded-full border-2 border-sky-300 border-t-sky-600 dark:border-sky-700 dark:border-t-sky-300"
+                                              aria-hidden="true"
+                                            />
+                                            Retrying audio
+                                          </p>
+                                        ) : null}
+                                        {playbackState === "error" ? (
+                                          <div className="flex min-h-11 flex-wrap items-center justify-between gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs dark:border-rose-900/60 dark:bg-rose-950/30">
+                                            <span className="font-medium text-rose-700 dark:text-rose-300">
+                                              Playback unavailable
+                                              {audioPlaybackErrors[
+                                                attachment.id
+                                              ] ? (
+                                                <span className="mt-0.5 block font-normal">
+                                                  {
+                                                    audioPlaybackErrors[
+                                                      attachment.id
+                                                    ]
+                                                  }
+                                                </span>
+                                              ) : null}
+                                            </span>
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                audioFallbackAttemptedIds.current.delete(
+                                                  attachment.id,
+                                                );
+                                                void loadAttachmentAudio(
+                                                  attachment,
+                                                  true,
+                                                );
+                                              }}
+                                              className="inline-flex min-h-10 cursor-pointer items-center justify-center rounded-lg border border-rose-300 bg-white px-3 font-semibold text-rose-700 transition hover:bg-rose-100 dark:border-rose-800 dark:bg-rose-950/50 dark:text-rose-300 dark:hover:bg-rose-900/40"
+                                            >
+                                              Retry
+                                            </button>
+                                          </div>
+                                        ) : null}
+                                        {playbackState === "ready"
+                                          ? "Audio ready to play"
+                                          : null}
+                                      </div>
+                                      {extractionDetails}
+                                      {extractionRetryButton}
+                                      <div className="mt-2">
+                                        <AskAboutAttachmentLink
+                                          attachment={attachment}
+                                        />
+                                      </div>
+                                    </div>
+                                  );
+                                }
+
+                                return (
+                                  <div
+                                    key={
+                                      attachmentData
+                                        ? attachmentData.id
+                                        : `${attachment}-${i}`
+                                    }
+                                    id={
+                                      attachmentData
+                                        ? `attachment-${attachmentData.id}`
+                                        : undefined
+                                    }
+                                    className="w-full max-w-xl py-3"
+                                  >
+                                    <div className="flex items-center gap-3">
+                                      {attachmentHeader}
+                                      {href ? (
+                                        <a
+                                          href={href}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-indigo-50 hover:text-indigo-600 dark:hover:bg-indigo-950/40 dark:hover:text-indigo-300"
+                                          aria-label={`Open ${label}`}
+                                          title={`Open ${label}`}
+                                        >
+                                          <ExternalLink
+                                            className="h-4 w-4"
+                                            aria-hidden="true"
+                                          />
+                                        </a>
+                                      ) : null}
+                                    </div>
+                                    {extractionDetails}
+                                    {extractionRetryButton}
+                                    {attachmentData ? (
+                                      <div className="mt-2">
+                                        <AskAboutAttachmentLink
+                                          attachment={attachmentData}
+                                        />
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        {relatedMemories.length ? (
+                          <div className="mt-4 border-t border-slate-100 pt-4 dark:border-slate-700">
+                            <p className="mb-1.5 flex items-center gap-2 text-xs font-semibold text-slate-500 dark:text-slate-400">
+                              <Waypoints
+                                className="h-4 w-4 text-indigo-500 dark:text-indigo-300"
+                                aria-hidden="true"
+                              />
+                              Related memories
+                            </p>
+                            <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                              {relatedMemories.map((related) => (
+                                <button
+                                  key={related.entry.id}
+                                  type="button"
+                                  onClick={() =>
+                                    openRelatedMemory(related.entry.id)
+                                  }
+                                  className="group/related flex min-h-11 w-full cursor-pointer items-center gap-3 py-2 text-left"
+                                >
+                                  <span className="min-w-0 flex-1">
+                                    <span className="block truncate text-sm font-semibold text-slate-700 transition group-hover/related:text-indigo-700 dark:text-slate-200 dark:group-hover/related:text-indigo-200">
+                                      {related.entry.title}
+                                    </span>
+                                    <span className="mt-0.5 block truncate text-xs text-slate-400 dark:text-slate-500">
+                                      {related.reason} ·{" "}
+                                      {formatDiaryDate(related.entry.createdAt)}
+                                    </span>
+                                  </span>
+                                  <ArrowRight
+                                    className="h-4 w-4 shrink-0 text-slate-300 transition group-hover/related:translate-x-0.5 group-hover/related:text-indigo-500 dark:text-slate-600"
+                                    aria-hidden="true"
+                                  />
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {/* Footer decoration */}
+                        {isAdmin && showCreatedDate ? (
+                          <div className="mt-4 flex items-center gap-2 border-t border-slate-100 pt-4 text-[11px] text-slate-400 dark:border-slate-700 dark:text-slate-500">
+                            <Clock3
+                              className="h-3.5 w-3.5"
+                              aria-hidden="true"
+                            />
+                            <span>
+                              Created {formatDateTime(entry.createdAt)}
+                            </span>
+                          </div>
+                        ) : null}
+                      </div>
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           </section>
         ))}
       </div>
-      
+
       {/* Empty state */}
       {entries.length === 0 && (
         <div className="text-center py-12">
           <div className="mb-4 inline-flex h-14 w-14 items-center justify-center rounded-lg bg-cyan-50 text-cyan-600 dark:bg-cyan-950/40 dark:text-cyan-300">
             <Inbox className="h-7 w-7" aria-hidden="true" />
           </div>
-          <h3 className="text-lg font-semibold text-slate-900 mb-2 dark:text-slate-100">No entries yet</h3>
-          <p className="text-slate-500 dark:text-slate-400">Start by creating your first diary entry</p>
+          <h3 className="text-lg font-semibold text-slate-900 mb-2 dark:text-slate-100">
+            No entries yet
+          </h3>
+          <p className="text-slate-500 dark:text-slate-400">
+            Start by creating your first diary entry
+          </p>
         </div>
       )}
 
@@ -773,7 +1443,8 @@ export function TimelineList({
         <div className="mt-8 flex flex-col items-center justify-between gap-4 enterprise-card p-4 sm:flex-row">
           <p className="text-sm text-slate-500 dark:text-slate-400">
             Showing {(currentPage - 1) * PAGE_SIZE + 1}-
-            {Math.min(currentPage * PAGE_SIZE, entries.length)} of {entries.length} entries
+            {Math.min(currentPage * PAGE_SIZE, entries.length)} of{" "}
+            {entries.length} entries
           </p>
           <div className="flex items-center gap-2">
             <button

@@ -26,6 +26,11 @@ export class SearchQueryDto {
   sourceType?: string;
 
   @IsOptional()
+  @IsString()
+  @MaxLength(160)
+  sourceId?: string;
+
+  @IsOptional()
   @IsDateString()
   startDate?: string;
 

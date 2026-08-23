@@ -5,7 +5,11 @@ import {
 } from '@nestjs/common';
 import { AUDIO_ATTACHMENT_MAX_BYTES } from './attachment-upload-policy';
 import { indexMemoryFromAttachment } from '@second-brain/ai';
-import { insertMemoryChunks, pruneMemoryChunksForSource } from '@second-brain/db';
+import {
+  deleteMemoryChunksForSource,
+  insertMemoryChunks,
+  pruneMemoryChunksForSource,
+} from '@second-brain/db';
 import { UploadController } from './upload.controller';
 
 jest.mock('@second-brain/ai', () => ({
@@ -13,6 +17,7 @@ jest.mock('@second-brain/ai', () => ({
 }));
 
 jest.mock('@second-brain/db', () => ({
+  deleteMemoryChunksForSource: jest.fn(),
   insertMemoryChunks: jest.fn(),
   pruneMemoryChunksForSource: jest.fn(),
 }));
@@ -47,28 +52,35 @@ describe('UploadController', () => {
     jest.clearAllMocks();
     process.env.TUTURUUU_AI_API_KEY = 'test-tuturuuu-key';
     controller = new UploadController(storageService as any, prisma as any);
-    (indexMemoryFromAttachment as jest.Mock).mockImplementation(async (input) => {
-      await input.insertChunks([
-        {
-          userId: input.userId,
-          sourceType: 'attachment',
-          sourceId: input.attachmentId,
-          chunkIndex: 0,
-          chunkType: 'general_note',
-          text: input.extractedText,
-          evidence: input.extractedText.slice(0, 500),
-          metadata: {
+    (indexMemoryFromAttachment as jest.Mock).mockImplementation(
+      async (input) => {
+        await input.insertChunks([
+          {
+            userId: input.userId,
             sourceType: 'attachment',
             sourceId: input.attachmentId,
-            diaryEntryId: input.diaryEntryId,
-            fileType: input.fileType,
+            chunkIndex: 0,
+            chunkType: 'general_note',
+            text: input.extractedText,
+            evidence: input.extractedText.slice(0, 500),
+            metadata: {
+              sourceType: 'attachment',
+              sourceId: input.attachmentId,
+              diaryEntryId: input.diaryEntryId,
+              fileType: input.fileType,
+            },
+            occurredAt: new Date(input.occurredAt),
+            embedding: [0.1, 0.2, 0.3],
           },
-          occurredAt: new Date(input.occurredAt),
-          embedding: [0.1, 0.2, 0.3],
-        },
-      ]);
-      return { sourceType: 'attachment', sourceId: input.attachmentId, chunkCount: 1, chunks: [] };
-    });
+        ]);
+        return {
+          sourceType: 'attachment',
+          sourceId: input.attachmentId,
+          chunkCount: 1,
+          chunks: [],
+        };
+      },
+    );
   });
 
   it('requires the target diary entry to belong to the authenticated user', async () => {
@@ -288,11 +300,13 @@ describe('UploadController', () => {
     const file = fileFixture('long-recording.mp3', 'audio/mpeg', 'audio');
     file.size = AUDIO_ATTACHMENT_MAX_BYTES + 1;
 
-    await expect(controller.uploadAttachment(
-      { user: { userId: 'supabase-user-1' } },
-      'diary-1',
-      file,
-    )).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      controller.uploadAttachment(
+        { user: { userId: 'supabase-user-1' } },
+        'diary-1',
+        file,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
 
     expect(storageService.uploadFile).not.toHaveBeenCalled();
   });
@@ -403,13 +417,61 @@ describe('UploadController', () => {
     expect(result.attachment).not.toHaveProperty('storagePath');
     expect(result.attachment).not.toHaveProperty('extractedText');
   });
+
+  it('clears a legacy metadata fallback before retrying the real AI scan', async () => {
+    const entryDate = new Date('2026-05-18T09:00:00.000Z');
+    prisma.user.findUnique.mockResolvedValue({ id: 'user-1' });
+    prisma.attachment.findFirst.mockResolvedValue({
+      id: 'attachment-fallback',
+      diary_entry_id: 'diary-1',
+      storage_path: 'attachments/receipt.png',
+      file_type: 'image/png',
+      extracted_text: [
+        'Attachment "receipt.png" was uploaded for a diary entry.',
+        'Full text extraction was unavailable during indexing: Request body exceeds limit.',
+      ].join('\n'),
+      created_at: entryDate,
+      diary_entry: {
+        id: 'diary-1',
+        entry_date: entryDate,
+      },
+    });
+
+    const result = await controller.processAttachmentNow(
+      { user: { userId: 'supabase-user-1' } },
+      'attachment-fallback',
+    );
+
+    expect(prisma.attachment.update).toHaveBeenCalledWith({
+      where: { id: 'attachment-fallback' },
+      data: { extracted_text: null },
+    });
+    expect(deleteMemoryChunksForSource).toHaveBeenCalledWith(prisma, {
+      userId: 'user-1',
+      sourceType: 'attachment',
+      sourceId: 'attachment-fallback',
+    });
+    expect(prisma.indexingOutbox.upsert).toHaveBeenCalled();
+    expect(result).toMatchObject({
+      extractionStatus: 'pending',
+      memoryIndexingStatus: 'queued',
+      attachment: {
+        id: 'attachment-fallback',
+        extractionStatus: 'pending',
+      },
+    });
+  });
 });
 
 function textFile(originalname: string, content: string): Express.Multer.File {
   return fileFixture(originalname, 'text/plain', content);
 }
 
-function fileFixture(originalname: string, mimetype: string, content: string): Express.Multer.File {
+function fileFixture(
+  originalname: string,
+  mimetype: string,
+  content: string,
+): Express.Multer.File {
   return {
     fieldname: 'file',
     originalname,

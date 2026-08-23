@@ -1,6 +1,7 @@
 import {
   AUDIO_ATTACHMENT_MAX_BYTES,
   getAttachmentMaxBytes,
+  isAttachmentExtractionFallback,
   isAudioAttachmentMimeType,
   STANDARD_ATTACHMENT_MAX_BYTES,
   SUPPORTED_ATTACHMENT_MIME_TYPES,
@@ -9,19 +10,24 @@ import {
 export {
   AUDIO_ATTACHMENT_MAX_BYTES,
   getAttachmentMaxBytes,
+  isAttachmentExtractionFallback,
   isAudioAttachmentMimeType,
   STANDARD_ATTACHMENT_MAX_BYTES,
 };
 
-const supportedAttachmentMimeTypeSet = new Set<string>(SUPPORTED_ATTACHMENT_MIME_TYPES);
-
-export const SUPPORTED_ATTACHMENT_MIME_PATTERN = new RegExp(
-  `^(?:${SUPPORTED_ATTACHMENT_MIME_TYPES
-    .map((mimeType) => mimeType.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-    .join('|')})$`,
+const supportedAttachmentMimeTypeSet = new Set<string>(
+  SUPPORTED_ATTACHMENT_MIME_TYPES,
 );
 
-export function getAttachmentValidationError(file: Pick<Express.Multer.File, 'mimetype' | 'size'>) {
+export const SUPPORTED_ATTACHMENT_MIME_PATTERN = new RegExp(
+  `^(?:${SUPPORTED_ATTACHMENT_MIME_TYPES.map((mimeType) =>
+    mimeType.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+  ).join('|')})$`,
+);
+
+export function getAttachmentValidationError(
+  file: Pick<Express.Multer.File, 'mimetype' | 'size'>,
+) {
   const mimeType = file.mimetype.toLowerCase();
   if (!supportedAttachmentMimeTypeSet.has(mimeType)) {
     return 'Unsupported attachment type. Upload PDF, Word, text, PNG, JPEG, MP3, M4A, WAV, OGG, WebM, AAC, or FLAC.';

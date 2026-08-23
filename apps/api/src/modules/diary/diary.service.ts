@@ -4,13 +4,9 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
-import {
-  generateAiText,
-  getTuturuuuAnswerModel,
-} from '@second-brain/ai';
-import {
-  deleteMemoryChunksForSource,
-} from '@second-brain/db';
+import { generateAiText, getTuturuuuAnswerModel } from '@second-brain/ai';
+import { deleteMemoryChunksForSource } from '@second-brain/db';
+import { isAttachmentExtractionFallback } from '@second-brain/shared';
 import { invalidateUserSearchCache } from '../../common/cache/search-answer-cache';
 import { PrismaService } from '../../prisma/prisma.service'; // Adjust path based on your setup
 import { StorageService } from '../../storage/storage.service';
@@ -146,7 +142,8 @@ export class DiaryService {
     const rawText = this.buildRawText(title, content);
     const entryDate = dto.entryDate ? new Date(dto.entryDate) : undefined;
     const mood = this.normalizeMood(dto.mood);
-    const tags = dto.tags === undefined ? undefined : this.normalizeTags(dto.tags);
+    const tags =
+      dto.tags === undefined ? undefined : this.normalizeTags(dto.tags);
 
     const entry = await this.prisma.$transaction(async (tx) => {
       const updated = await tx.diaryEntry.update({
@@ -333,7 +330,7 @@ export class DiaryService {
     }[];
   }) {
     const trimmedText = entry.raw_text.trim();
-    
+
     let title = 'Untitled';
     let content = '';
 
@@ -413,6 +410,9 @@ export class DiaryService {
 
     return Promise.all(
       attachments.map(async (attachment) => {
+        const extractedText = attachment.extracted_text?.trim() ?? '';
+        const extractionFailed = isAttachmentExtractionFallback(extractedText);
+        const usableExtractedText = extractionFailed ? '' : extractedText;
         const signedUrl = await this.storageService
           .createSignedUrl('attachments-bucket', attachment.storage_path)
           .catch(() => undefined);
@@ -423,9 +423,21 @@ export class DiaryService {
           fileType: attachment.file_type,
           fileName: this.getStoredFileName(attachment.storage_path),
           signedUrl,
-          extractionStatus: attachment.extracted_text ? 'extracted' : 'pending',
-          indexingStatus: job?.status ?? 'unknown',
-          indexingError: job?.error ?? null,
+          extractionStatus: extractionFailed
+            ? 'failed'
+            : usableExtractedText
+              ? 'extracted'
+              : 'pending',
+          extractedTextPreview: usableExtractedText
+            ? usableExtractedText.slice(0, 800)
+            : undefined,
+          extractedCharacterCount: usableExtractedText.length,
+          indexingStatus: extractionFailed
+            ? 'failed'
+            : (job?.status ?? 'unknown'),
+          indexingError: extractionFailed
+            ? 'AI could not read this file. Retry the scan to extract its real content.'
+            : (job?.error ?? null),
           retryCount: job?.retry_count ?? 0,
           updatedAt: (job?.updated_at ?? attachment.created_at).toISOString(),
           createdAt: attachment.created_at.toISOString(),
@@ -489,6 +501,15 @@ export class DiaryService {
         ].join('\n');
         break;
 
+      case 'reflect':
+        taskInstruction = [
+          'Write one thoughtful, open-ended question that helps the author reflect more deeply on this specific diary entry.',
+          'Ground the question in a concrete emotion, event, tension, or detail from the entry.',
+          'Keep the same language as the original.',
+          'Use one sentence and return ONLY the question.',
+        ].join('\n');
+        break;
+
       default:
         throw new BadRequestException(`Invalid copilot action: "${action}"`);
     }
@@ -503,8 +524,13 @@ export class DiaryService {
       });
       return { result: generatedText };
     } catch (error) {
-      console.error(`Copilot AI Error [action=${action}, model=${modelName}]:`, error);
-      throw new InternalServerErrorException('AI writing assistant is temporarily unavailable. Please try again.');
+      console.error(
+        `Copilot AI Error [action=${action}, model=${modelName}]:`,
+        error,
+      );
+      throw new InternalServerErrorException(
+        'AI writing assistant is temporarily unavailable. Please try again.',
+      );
     }
   }
 }

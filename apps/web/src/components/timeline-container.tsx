@@ -1,13 +1,20 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CalendarDays, ChevronLeft, ChevronRight, CircleAlert, Clock3 } from "lucide-react";
+import {
+  CalendarDays,
+  ChevronLeft,
+  ChevronRight,
+  CircleAlert,
+  Clock3,
+} from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { MOOD_META } from "@/lib/mood-meta";
 import {
   deleteDiaryEntry,
   getDiaryAttachmentContent,
   getDiaryEntries,
+  processDiaryAttachment,
   updateDiaryEntry,
   type DiaryEntry,
   type UpdateDiaryPayload,
@@ -50,7 +57,7 @@ function SkeletonCards() {
 const WEEKDAYS = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
 
 function getEntryActivityDate(entry: DiaryEntry, isAdmin: boolean) {
-  return isAdmin ? entry.entryDate ?? entry.createdAt : entry.createdAt;
+  return isAdmin ? (entry.entryDate ?? entry.createdAt) : entry.createdAt;
 }
 
 function getLocalDateKey(value: string | Date) {
@@ -77,7 +84,10 @@ function MiniCalendar({
 
   const year = viewMonth.getFullYear();
   const month = viewMonth.getMonth();
-  const monthLabel = viewMonth.toLocaleString("default", { month: "long", year: "numeric" });
+  const monthLabel = viewMonth.toLocaleString("default", {
+    month: "long",
+    year: "numeric",
+  });
 
   const firstDay = new Date(year, month, 1).getDay();
   const offset = firstDay === 0 ? 6 : firstDay - 1;
@@ -96,11 +106,21 @@ function MiniCalendar({
     <div className="enterprise-card p-4">
       {/* Header */}
       <div className="mb-3 flex items-center justify-between">
-        <button type="button" onClick={prevMonth} className="cursor-pointer rounded-lg p-1 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-200">
+        <button
+          type="button"
+          onClick={prevMonth}
+          className="cursor-pointer rounded-lg p-1 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-200"
+        >
           <ChevronLeft className="h-4 w-4" aria-hidden="true" />
         </button>
-        <span className="text-sm font-semibold text-slate-800 dark:text-slate-200">{monthLabel}</span>
-        <button type="button" onClick={nextMonth} className="cursor-pointer rounded-lg p-1 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-200">
+        <span className="text-sm font-semibold text-slate-800 dark:text-slate-200">
+          {monthLabel}
+        </span>
+        <button
+          type="button"
+          onClick={nextMonth}
+          className="cursor-pointer rounded-lg p-1 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-200"
+        >
           <ChevronRight className="h-4 w-4" aria-hidden="true" />
         </button>
       </div>
@@ -108,7 +128,12 @@ function MiniCalendar({
       {/* Weekday headers */}
       <div className="mb-1 grid grid-cols-7 text-center">
         {WEEKDAYS.map((d) => (
-          <span key={d} className="py-1 text-xs font-medium text-slate-400 dark:text-slate-500">{d}</span>
+          <span
+            key={d}
+            className="py-1 text-xs font-medium text-slate-400 dark:text-slate-500"
+          >
+            {d}
+          </span>
         ))}
       </div>
 
@@ -126,14 +151,17 @@ function MiniCalendar({
             <button
               key={dateKey}
               type="button"
-              onClick={() => onSelect(isSelected ? null : (hasEntry ? dateKey : null))}
+              onClick={() =>
+                onSelect(isSelected ? null : hasEntry ? dateKey : null)
+              }
               disabled={!hasEntry}
               className={`relative mx-auto flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-xs font-medium transition
-                ${isSelected
-                  ? "bg-indigo-600 text-white shadow-sm"
-                  : hasEntry
-                    ? "bg-indigo-50 text-indigo-800 hover:bg-indigo-100 hover:text-indigo-900 dark:bg-indigo-950/30 dark:text-indigo-200 dark:hover:bg-indigo-900/40 dark:hover:text-indigo-100"
-                    : "cursor-default text-slate-300 dark:text-slate-600"
+                ${
+                  isSelected
+                    ? "bg-indigo-600 text-white shadow-sm"
+                    : hasEntry
+                      ? "bg-indigo-50 text-indigo-800 hover:bg-indigo-100 hover:text-indigo-900 dark:bg-indigo-950/30 dark:text-indigo-200 dark:hover:bg-indigo-900/40 dark:hover:text-indigo-100"
+                      : "cursor-default text-slate-300 dark:text-slate-600"
                 }
                 ${isToday && !isSelected ? "ring-1 ring-indigo-400 dark:ring-indigo-500" : ""}
               `}
@@ -162,25 +190,39 @@ function MiniCalendar({
 }
 
 export function TimelineContainer() {
-  const { getAccessToken, isAuthenticated, isLoading: authLoading, isAdmin } = useAuth();
+  const {
+    getAccessToken,
+    isAuthenticated,
+    isLoading: authLoading,
+    isAdmin,
+  } = useAuth();
   const [entries, setEntries] = useState<DiaryEntry[]>([]);
   const [state, setState] = useState<LoadState>("idle");
   const [errorMessage, setErrorMessage] = useState<string>("");
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
-  const fetchEntries = useCallback(async () => {
-    setState("loading");
-    setErrorMessage("");
-    try {
-      const accessToken = getAccessToken();
-      const data = await getDiaryEntries(accessToken);
-      setEntries(data);
-      setState("success");
-    } catch (error) {
-      setState("error");
-      setErrorMessage(error instanceof Error ? error.message : "Failed to load entries");
-    }
-  }, [getAccessToken]);
+  const fetchEntries = useCallback(
+    async (silent = false) => {
+      if (!silent) {
+        setState("loading");
+        setErrorMessage("");
+      }
+      try {
+        const accessToken = getAccessToken();
+        const data = await getDiaryEntries(accessToken);
+        setEntries(data);
+        setState("success");
+      } catch (error) {
+        if (!silent) {
+          setState("error");
+          setErrorMessage(
+            error instanceof Error ? error.message : "Failed to load entries",
+          );
+        }
+      }
+    },
+    [getAccessToken],
+  );
 
   useEffect(() => {
     if (authLoading) return;
@@ -192,27 +234,66 @@ export function TimelineContainer() {
     fetchEntries();
   }, [isAuthenticated, authLoading, fetchEntries]);
 
-  const handleUpdate = useCallback(async (id: string, payload: UpdateDiaryPayload) => {
-    const accessToken = getAccessToken();
-    const updated = await updateDiaryEntry(id, payload, accessToken);
-    setEntries((prev) => prev.map((e) => (e.id === id ? { ...e, ...updated } : e)));
-  }, [getAccessToken]);
+  const handleUpdate = useCallback(
+    async (id: string, payload: UpdateDiaryPayload) => {
+      const accessToken = getAccessToken();
+      const updated = await updateDiaryEntry(id, payload, accessToken);
+      setEntries((prev) =>
+        prev.map((e) => (e.id === id ? { ...e, ...updated } : e)),
+      );
+    },
+    [getAccessToken],
+  );
 
-  const handleDelete = useCallback(async (id: string) => {
-    const accessToken = getAccessToken();
-    await deleteDiaryEntry(id, accessToken);
-    setEntries((prev) => prev.filter((e) => e.id !== id));
-  }, [getAccessToken]);
+  const handleDelete = useCallback(
+    async (id: string) => {
+      const accessToken = getAccessToken();
+      await deleteDiaryEntry(id, accessToken);
+      setEntries((prev) => prev.filter((e) => e.id !== id));
+    },
+    [getAccessToken],
+  );
 
-  const handleLoadAttachmentAudio = useCallback(async (attachmentId: string) => {
-    return getDiaryAttachmentContent(attachmentId, getAccessToken());
-  }, [getAccessToken]);
+  const handleLoadAttachmentAudio = useCallback(
+    async (attachmentId: string) => {
+      return getDiaryAttachmentContent(attachmentId, getAccessToken());
+    },
+    [getAccessToken],
+  );
+
+  const handleProcessAttachment = useCallback(
+    async (attachmentId: string) => {
+      await processDiaryAttachment(attachmentId, getAccessToken());
+      await fetchEntries(true);
+    },
+    [fetchEntries, getAccessToken],
+  );
+
+  const hasActiveAttachmentJobs = useMemo(
+    () =>
+      entries.some((entry) =>
+        entry.attachments?.some(
+          (attachment) =>
+            typeof attachment === "object" &&
+            ["pending", "retry", "processing"].includes(
+              attachment.indexingStatus,
+            ),
+        ),
+      ),
+    [entries],
+  );
+
+  useEffect(() => {
+    if (!isAuthenticated || !hasActiveAttachmentJobs) return;
+    const interval = window.setInterval(() => void fetchEntries(true), 5000);
+    return () => window.clearInterval(interval);
+  }, [fetchEntries, hasActiveAttachmentJobs, isAuthenticated]);
 
   const sortedEntries = useMemo(() => {
     return [...entries].sort(
       (first, second) =>
-        new Date(getEntryActivityDate(second, isAdmin)).getTime()
-        - new Date(getEntryActivityDate(first, isAdmin)).getTime(),
+        new Date(getEntryActivityDate(second, isAdmin)).getTime() -
+        new Date(getEntryActivityDate(first, isAdmin)).getTime(),
     );
   }, [entries, isAdmin]);
 
@@ -228,7 +309,9 @@ export function TimelineContainer() {
   // Filter entries by selected date
   const filteredEntries = useMemo(() => {
     if (!selectedDate) return sortedEntries;
-    return sortedEntries.filter((e) => getLocalDateKey(getEntryActivityDate(e, isAdmin)) === selectedDate);
+    return sortedEntries.filter(
+      (e) => getLocalDateKey(getEntryActivityDate(e, isAdmin)) === selectedDate,
+    );
   }, [isAdmin, selectedDate, sortedEntries]);
 
   const moodStats = useMemo(() => {
@@ -288,12 +371,13 @@ export function TimelineContainer() {
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-lg bg-pink-100 text-pink-600 dark:bg-pink-950/40 dark:text-pink-300">
             <Clock3 className="h-7 w-7" aria-hidden="true" />
           </div>
-          <h3 className="mt-4 text-base font-bold text-slate-900 dark:text-slate-100">Your timeline will appear here</h3>
-          <p className="mt-1.5 text-sm text-slate-500 dark:text-slate-400">Sign in to see your saved diary entries in a beautiful timeline.</p>
-          <a
-            href="/login"
-            className="action-primary mt-5"
-          >
+          <h3 className="mt-4 text-base font-bold text-slate-900 dark:text-slate-100">
+            Your timeline will appear here
+          </h3>
+          <p className="mt-1.5 text-sm text-slate-500 dark:text-slate-400">
+            Sign in to see your saved diary entries in a beautiful timeline.
+          </p>
+          <a href="/login" className="action-primary mt-5">
             Sign in to get started
           </a>
         </div>
@@ -311,12 +395,13 @@ export function TimelineContainer() {
         <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-lg bg-rose-100 text-rose-600 dark:bg-rose-900/40 dark:text-rose-400">
           <CircleAlert className="h-7 w-7" aria-hidden="true" />
         </div>
-        <h3 className="mt-4 text-base font-bold text-slate-900 dark:text-slate-100">Could not load entries</h3>
-        <p className="mt-1.5 text-sm text-slate-500 dark:text-slate-400">{errorMessage}</p>
-        <button
-          onClick={() => fetchEntries()}
-          className="action-primary mt-5"
-        >
+        <h3 className="mt-4 text-base font-bold text-slate-900 dark:text-slate-100">
+          Could not load entries
+        </h3>
+        <p className="mt-1.5 text-sm text-slate-500 dark:text-slate-400">
+          {errorMessage}
+        </p>
+        <button onClick={() => fetchEntries()} className="action-primary mt-5">
           Try again
         </button>
       </div>
@@ -329,11 +414,25 @@ export function TimelineContainer() {
         <div>
           {selectedDate && (
             <div className="mb-4 flex items-center gap-2 rounded-lg bg-pink-50/70 px-4 py-2 dark:bg-pink-950/25">
-              <CalendarDays className="h-4 w-4 text-pink-600 dark:text-pink-300" aria-hidden="true" />
+              <CalendarDays
+                className="h-4 w-4 text-pink-600 dark:text-pink-300"
+                aria-hidden="true"
+              />
               <span className="text-sm font-medium text-pink-700 dark:text-pink-300">
-                Showing entries for {new Date(selectedDate + "T00:00:00").toLocaleDateString("default", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
+                Showing entries for{" "}
+                {new Date(selectedDate + "T00:00:00").toLocaleDateString(
+                  "default",
+                  {
+                    weekday: "long",
+                    year: "numeric",
+                    month: "long",
+                    day: "numeric",
+                  },
+                )}
               </span>
-              <span className="ml-1 text-xs text-pink-500 dark:text-pink-400">({filteredEntries.length})</span>
+              <span className="ml-1 text-xs text-pink-500 dark:text-pink-400">
+                ({filteredEntries.length})
+              </span>
             </div>
           )}
           <TimelineList
@@ -342,6 +441,7 @@ export function TimelineContainer() {
             onUpdate={handleUpdate}
             onDelete={handleDelete}
             onLoadAttachmentAudio={handleLoadAttachmentAudio}
+            onProcessAttachment={handleProcessAttachment}
             isAdmin={isAdmin}
           />
         </div>
@@ -354,36 +454,57 @@ export function TimelineContainer() {
             />
             {/* Quick stats */}
             <div className="mt-3 enterprise-card p-4">
-              <p className="text-[13px] font-semibold text-slate-500 dark:text-slate-400">Writing snapshot</p>
+              <p className="text-[13px] font-semibold text-slate-500 dark:text-slate-400">
+                Writing snapshot
+              </p>
               <div className="mt-2 grid grid-cols-2 gap-3">
                 <div className="text-center">
-                  <p className="text-xl font-bold text-slate-900 dark:text-slate-100">{entries.length}</p>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400">Entries</p>
+                  <p className="text-xl font-bold text-slate-900 dark:text-slate-100">
+                    {entries.length}
+                  </p>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Entries
+                  </p>
                 </div>
                 <div className="text-center">
-                  <p className="text-xl font-bold text-slate-900 dark:text-slate-100">{entryDates.size}</p>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400">Active days</p>
+                  <p className="text-xl font-bold text-slate-900 dark:text-slate-100">
+                    {entryDates.size}
+                  </p>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Active days
+                  </p>
                 </div>
               </div>
             </div>
             <div className="mt-3 enterprise-card p-4">
-              <p className="text-[13px] font-semibold text-slate-500 dark:text-slate-400">Mood pattern</p>
+              <p className="text-[13px] font-semibold text-slate-500 dark:text-slate-400">
+                Mood pattern
+              </p>
               <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                {dominantMood ? `Most frequent: ${MOOD_META[dominantMood.value].label}` : "Add moods in Diary"}
+                {dominantMood
+                  ? `Most frequent: ${MOOD_META[dominantMood.value].label}`
+                  : "Add moods in Diary"}
               </p>
               <div className="mt-3 space-y-2">
                 {(["great", "good", "neutral", "bad"] as const).map((mood) => {
                   const count = moodStats[mood] ?? 0;
-                  const width = entries.length ? Math.round((count / entries.length) * 100) : 0;
+                  const width = entries.length
+                    ? Math.round((count / entries.length) * 100)
+                    : 0;
                   const MoodIcon = MOOD_META[mood].icon;
                   return (
                     <div key={mood}>
                       <div className="mb-1 flex items-center justify-between text-xs">
                         <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300">
-                          <MoodIcon className="h-3.5 w-3.5" aria-hidden="true" />
+                          <MoodIcon
+                            className="h-3.5 w-3.5"
+                            aria-hidden="true"
+                          />
                           {MOOD_META[mood].label}
                         </span>
-                        <span className="font-semibold text-slate-500 dark:text-slate-400">{count}</span>
+                        <span className="font-semibold text-slate-500 dark:text-slate-400">
+                          {count}
+                        </span>
                       </div>
                       <div className="h-1.5 rounded-full bg-slate-100 dark:bg-slate-700">
                         <div
@@ -398,15 +519,16 @@ export function TimelineContainer() {
             </div>
             {topTags.length > 0 && (
               <div className="mt-3 enterprise-card p-4">
-                <p className="text-[13px] font-semibold text-slate-500 dark:text-slate-400">Top tags</p>
+                <p className="text-[13px] font-semibold text-slate-500 dark:text-slate-400">
+                  Top tags
+                </p>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {topTags.map(([tag, count]) => (
-                    <span
-                      key={tag}
-                      className="status-badge"
-                    >
+                    <span key={tag} className="status-badge">
                       #{tag}
-                      <span className="text-indigo-400 dark:text-indigo-500">{count}</span>
+                      <span className="text-indigo-400 dark:text-indigo-500">
+                        {count}
+                      </span>
                     </span>
                   ))}
                 </div>

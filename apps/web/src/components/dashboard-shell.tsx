@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import Image from "next/image";
 import { ReactNode, useEffect, useRef, useState } from "react";
 import {
+  CalendarDays,
   ChartNoAxesColumnIncreasing,
   ChevronLeft,
   ChevronRight,
@@ -74,6 +75,16 @@ const mainNavItems: SidebarItem[] = [
   },
 ];
 
+const sidebarMainNavItems: SidebarItem[] = [
+  {
+    href: "/",
+    label: "Today",
+    icon: CalendarDays,
+    accent: "indigo",
+  },
+  ...mainNavItems,
+];
+
 const navAccentStyles = {
   cyan: {
     active: "bg-cyan-50 text-cyan-800 ring-cyan-100 dark:bg-cyan-950/40 dark:text-cyan-200 dark:ring-cyan-900/60",
@@ -101,7 +112,7 @@ const navAccentStyles = {
 const sidebarSections: SidebarSection[] = [
   {
     label: "Main",
-    items: mainNavItems,
+    items: sidebarMainNavItems,
   },
   {
     label: "System",
@@ -169,8 +180,7 @@ export function DashboardShell({ children, title, description }: DashboardShellP
     if (isDesktopViewport) {
       wasMobileSidebarOpen.current = false;
       return;
-    }
-
+}
     if (!mobileSidebarOpen) {
       if (wasMobileSidebarOpen.current) mobileSidebarToggleRef.current?.focus();
       wasMobileSidebarOpen.current = false;
@@ -407,9 +417,9 @@ export function DashboardShell({ children, title, description }: DashboardShellP
       {/* Main Content */}
       <main className="flex-1 overflow-y-auto">
         {/* Header */}
-        <header className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 px-6 py-4 dark:border-slate-800 dark:bg-slate-950/95">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
+        <header className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 px-4 py-4 dark:border-slate-800 dark:bg-slate-950/95 sm:px-6">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex min-w-0 flex-1 items-center gap-3">
               {/* Hamburger - mobile only */}
               <button
                 ref={mobileSidebarToggleRef}
@@ -422,13 +432,13 @@ export function DashboardShell({ children, title, description }: DashboardShellP
               >
                 <Menu className="h-5 w-5" aria-hidden="true" />
               </button>
-              <div>
-                <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">{title}</h2>
-                <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">{description}</p>
+              <div className="min-w-0">
+                <h2 className="truncate text-xl font-semibold text-slate-900 dark:text-slate-100">{title}</h2>
+                <p className="mt-0.5 truncate text-sm text-slate-500 dark:text-slate-400">{description}</p>
               </div>
             </div>
 
-            <div className="relative flex items-center gap-1">
+            <div className="relative flex shrink-0 items-center gap-1">
               {/* Settings button */}
               <button
                 type="button"

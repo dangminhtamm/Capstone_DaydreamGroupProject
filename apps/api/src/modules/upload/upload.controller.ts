@@ -18,6 +18,7 @@ import {
   StreamableFile,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { deleteMemoryChunksForSource } from '@second-brain/db';
 import type { Response } from 'express';
 import { StorageService } from '../../storage/storage.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -26,6 +27,7 @@ import { invalidateUserSearchCache } from '../../common/cache/search-answer-cach
 import {
   AUDIO_ATTACHMENT_MAX_BYTES,
   getAttachmentValidationError,
+  isAttachmentExtractionFallback,
   SUPPORTED_ATTACHMENT_MIME_PATTERN,
 } from './attachment-upload-policy';
 
@@ -141,9 +143,11 @@ export class UploadController {
   }
 
   @Post('attachment')
-  @UseInterceptors(FileInterceptor('file', {
-    limits: { fileSize: AUDIO_ATTACHMENT_MAX_BYTES },
-  }))
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: AUDIO_ATTACHMENT_MAX_BYTES },
+    }),
+  )
   async uploadAttachment(
     @Request() req: { user: { userId: string } },
     @Body('diaryEntryId') diaryEntryId: string,
@@ -154,7 +158,8 @@ export class UploadController {
           new FileTypeValidator({
             fileType: SUPPORTED_ATTACHMENT_MIME_PATTERN,
             fallbackToMimetype: true,
-            errorMessage: 'Unsupported attachment content. Upload a supported document, image, or audio file.',
+            errorMessage:
+              'Unsupported attachment content. Upload a supported document, image, or audio file.',
           }),
         ],
       }),
@@ -216,7 +221,10 @@ export class UploadController {
       await this.storageService
         .deleteFile('attachments-bucket', uploadedFile.path)
         .catch((deleteError) => {
-          console.error('Failed to remove orphaned uploaded file:', deleteError);
+          console.error(
+            'Failed to remove orphaned uploaded file:',
+            deleteError,
+          );
         });
       throw error;
     }
@@ -259,6 +267,23 @@ export class UploadController {
       throw new NotFoundException('Attachment not found.');
     }
 
+    const requiresFreshExtraction = isAttachmentExtractionFallback(
+      attachment.extracted_text,
+    );
+    if (requiresFreshExtraction) {
+      await Promise.all([
+        this.prisma.attachment.update({
+          where: { id: attachment.id },
+          data: { extracted_text: null },
+        }),
+        deleteMemoryChunksForSource(this.prisma as any, {
+          userId: user.id,
+          sourceType: 'attachment',
+          sourceId: attachment.id,
+        }),
+      ]);
+    }
+
     await this.enqueueAttachmentIndexingJob(this.prisma, {
       userId: user.id,
       attachmentId: attachment.id,
@@ -267,11 +292,19 @@ export class UploadController {
 
     return {
       message: 'Attachment processing queued',
-      extractionStatus: attachment.extracted_text ? 'extracted' : 'pending',
+      extractionStatus:
+        attachment.extracted_text && !requiresFreshExtraction
+          ? 'extracted'
+          : 'pending',
       memoryIndexed: false,
       memoryIndexingStatus: 'queued',
       memoryChunkCount: 0,
-      attachment: await this.toClientAttachment(attachment),
+      attachment: await this.toClientAttachment({
+        ...attachment,
+        extracted_text: requiresFreshExtraction
+          ? null
+          : attachment.extracted_text,
+      }),
     };
   }
 
@@ -287,9 +320,9 @@ export class UploadController {
   private async enqueueAttachmentIndexingJob(
     tx: any,
     input: {
-    userId: string;
-    attachmentId: string;
-    sourceTitle: string;
+      userId: string;
+      attachmentId: string;
+      sourceTitle: string;
     },
   ) {
     const job = await tx.indexingOutbox.upsert({
@@ -362,6 +395,9 @@ export class UploadController {
       entry_date: Date;
     };
   }) {
+    const extractedText = attachment.extracted_text?.trim() ?? '';
+    const extractionFailed = isAttachmentExtractionFallback(extractedText);
+    const usableExtractedText = extractionFailed ? '' : extractedText;
     const signedUrl =
       typeof this.storageService.createSignedUrl === 'function'
         ? await this.storageService
@@ -373,7 +409,15 @@ export class UploadController {
       id: attachment.id,
       diaryEntryId: attachment.diary_entry_id,
       fileType: attachment.file_type,
-      extractionStatus: attachment.extracted_text ? 'extracted' : 'pending',
+      extractionStatus: extractionFailed
+        ? 'failed'
+        : usableExtractedText
+          ? 'extracted'
+          : 'pending',
+      extractedTextPreview: usableExtractedText
+        ? usableExtractedText.slice(0, 800)
+        : undefined,
+      extractedCharacterCount: usableExtractedText.length,
       signedUrl,
       createdAt: attachment.created_at.toISOString(),
       entryDate: attachment.diary_entry?.entry_date.toISOString(),

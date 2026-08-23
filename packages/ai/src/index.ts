@@ -110,6 +110,7 @@ export {
   canUseTuturuuuApi,
   embedTuturuuu,
   generateTuturuuuAudioTranscript,
+  generateTuturuuuFileText,
   generateTuturuuuText,
   generateTuturuuuVisionText,
   getTuturuuuApiBaseUrl,

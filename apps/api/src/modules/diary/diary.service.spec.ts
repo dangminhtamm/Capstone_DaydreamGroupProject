@@ -1,9 +1,14 @@
 import { NotFoundException } from '@nestjs/common';
+import { generateAiText } from '@second-brain/ai';
 import { DiaryService } from './diary.service';
 
 // Mock the external AI/DB functions so tests don't call real APIs
 jest.mock('@second-brain/ai', () => ({
   indexMemoryFromDiary: jest.fn().mockResolvedValue({ chunkCount: 2 }),
+  generateAiText: jest
+    .fn()
+    .mockResolvedValue('What part of this moment do you want to remember?'),
+  getTuturuuuAnswerModel: jest.fn().mockReturnValue('test-answer-model'),
 }));
 jest.mock('@second-brain/db', () => ({
   insertMemoryChunks: jest.fn(),
@@ -43,6 +48,26 @@ describe('DiaryService', () => {
     );
     prisma.indexingOutbox.findMany.mockResolvedValue([]);
     service = new DiaryService(prisma as any, storageService as any);
+  });
+
+  it('creates one grounded reflection question for a saved entry', async () => {
+    const result = await service.copilot(
+      'supabase-user-1',
+      'Finished the presentation and felt relieved.',
+      'reflect',
+    );
+
+    expect(result).toEqual({
+      result: 'What part of this moment do you want to remember?',
+    });
+    expect(generateAiText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: 'test-answer-model',
+        prompt: expect.stringContaining(
+          'Write one thoughtful, open-ended question',
+        ),
+      }),
+    );
   });
 
   it('creates a diary for the authenticated user and queues memory indexing', async () => {
@@ -281,7 +306,8 @@ describe('DiaryService', () => {
         attachments: [
           {
             id: 'attachment-1',
-            storage_path: 'attachments/user-1/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa-file.pdf',
+            storage_path:
+              'attachments/user-1/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa-file.pdf',
             file_type: 'application/pdf',
             extracted_text: 'Extracted text',
             created_at: createdAt,
@@ -309,8 +335,11 @@ describe('DiaryService', () => {
       expect.objectContaining({
         id: 'attachment-1',
         fileName: 'file.pdf',
-        signedUrl: 'https://storage.local/attachments/user-1/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa-file.pdf',
+        signedUrl:
+          'https://storage.local/attachments/user-1/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa-file.pdf',
         extractionStatus: 'extracted',
+        extractedTextPreview: 'Extracted text',
+        extractedCharacterCount: 14,
         indexingStatus: 'succeeded',
       }),
     ]);
@@ -323,7 +352,8 @@ describe('DiaryService', () => {
       prisma.diaryEntry.findMany.mockResolvedValue([
         {
           id: 'diary-1',
-          raw_text: 'A Beautiful Day\n\nI went to the park and had a great time.',
+          raw_text:
+            'A Beautiful Day\n\nI went to the park and had a great time.',
           status: 'published',
           created_at: entryDate,
           updated_at: entryDate,
@@ -342,7 +372,8 @@ describe('DiaryService', () => {
       prisma.diaryEntry.findMany.mockResolvedValue([
         {
           id: 'diary-2',
-          raw_text: 'Single Newline Title\nThis is content on a single newline.',
+          raw_text:
+            'Single Newline Title\nThis is content on a single newline.',
           status: 'published',
           created_at: entryDate,
           updated_at: entryDate,
@@ -380,15 +411,20 @@ describe('DiaryService', () => {
       prisma.diaryEntry.findMany.mockResolvedValue([
         {
           id: 'diary-4',
-          raw_text: 'This is a very long diary entry without any newline characters because the user typed a long single line stream of conscious thoughts containing a lot of details.',
+          raw_text:
+            'This is a very long diary entry without any newline characters because the user typed a long single line stream of conscious thoughts containing a lot of details.',
           status: 'published',
           created_at: entryDate,
           updated_at: entryDate,
         },
       ]);
       const result = await service.findAll('supabase-user-1');
-      expect(result[0].title).toBe('This is a very long diary entry without any newline chara...');
-      expect(result[0].content).toBe('This is a very long diary entry without any newline characters because the user typed a long single line stream of conscious thoughts containing a lot of details.');
+      expect(result[0].title).toBe(
+        'This is a very long diary entry without any newline chara...',
+      );
+      expect(result[0].content).toBe(
+        'This is a very long diary entry without any newline characters because the user typed a long single line stream of conscious thoughts containing a lot of details.',
+      );
     });
   });
 });

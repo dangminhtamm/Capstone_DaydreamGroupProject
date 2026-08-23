@@ -151,8 +151,22 @@ test("auto routing uses Deep for broad recent work synthesis but Fast for exact 
 test("inferRetrievalFilters prefers attachment sources for document questions", () => {
   const filters = inferRetrievalFilters("What does my uploaded PDF say about the assignment?");
 
+  assert.deepEqual(filters.sourceTypes, ["attachment"]);
   assert.deepEqual(filters.preferredSourceTypes, ["attachment"]);
   assert.ok(filters.preferredChunkTypes?.includes("general_note"));
+});
+
+test("audio attachment questions retrieve today's transcript instead of diary titles", () => {
+  const now = new Date("2026-08-23T12:16:00.000Z");
+  const question = "what is the content of audio attach today about";
+  const filters = inferRetrievalFilters(question, now, "Asia/Ho_Chi_Minh");
+
+  assert.equal(detectMemoryIntent(question), "attachment");
+  assert.deepEqual(filters.sourceTypes, ["attachment"]);
+  assert.deepEqual(filters.preferredSourceTypes, ["attachment"]);
+  assert.deepEqual(filters.fileTypePrefixes, ["audio/"]);
+  assert.equal(filters.startDate?.toISOString(), "2026-08-22T17:00:00.000Z");
+  assert.equal(filters.endDate?.toISOString(), "2026-08-23T16:59:59.999Z");
 });
 
 test("inferRetrievalFilters prefers reflection chunks for mood questions", () => {
